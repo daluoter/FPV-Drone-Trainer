@@ -32,6 +32,21 @@ function runAtRenderRate(renderHz: number, input: { roll: number; pitch: number;
   return runtime
 }
 
+function mixerSaturationControllerConfig() {
+  const base = createDefaultFlightControllerConfig()
+  const axis = { centerRateDegPerSec: 30, maxRateDegPerSec: 30, expo: 0 }
+  return {
+    ...base,
+    rates: { axes: { roll: axis, pitch: axis, yaw: axis } },
+    rateLimitsDegPerSec: { roll: 30, pitch: 30, yaw: 30 },
+    pid: {
+      roll: { kp: 0.1, ki: 0.1, kd: 0, integralLimit: 0.5, outputLimitNm: 0.2 },
+      pitch: { kp: 0, ki: 0, kd: 0, integralLimit: 0.5, outputLimitNm: 0.2 },
+      yaw: { kp: 0, ki: 0, kd: 0, integralLimit: 0.5, outputLimitNm: 0.2 },
+    },
+  }
+}
+
 describe('flight simulation integration', () => {
   it('holds hover and is equivalent across render rates', () => {
     const input = { roll: 0, pitch: 0, yaw: 0, throttle: hoverThrottle() }
@@ -71,6 +86,41 @@ describe('flight simulation integration', () => {
     const released = runtime.getState()
     expect(Math.abs(released.angularVelocityBodyRadPerSec.z)).toBeLessThan(0.2)
     expect(quaternionNearlyEqual(released.orientation, steppedOrientation, 0.05)).toBe(true)
+  })
+
+  it('holds a bounded integral through sustained mixer saturation and unwinds after authority returns', () => {
+    const runtime = new FlightSimulation({ controller: mixerSaturationControllerConfig(), armed: true })
+    const saturatedInput = { roll: 1, pitch: 0, yaw: 0, throttle: 1 }
+
+    for (let index = 0; index < 240; index += 1) {
+      const result = runtime.advance(1 / 240, saturatedInput)
+      expect(result.steps).toBe(1)
+      expect(result.telemetry.mixerSaturated).toBe(true)
+      expect(Math.abs(result.telemetry.pidIntegral.roll)).toBeLessThanOrEqual(0.5)
+    }
+
+    const heldIntegral = runtime.getTelemetry().pidIntegral.roll
+    expect(heldIntegral).not.toBe(0)
+    for (let index = 0; index < 240; index += 1) {
+      const result = runtime.advance(1 / 240, saturatedInput)
+      expect(result.telemetry.mixerSaturated).toBe(true)
+      expect(result.telemetry.pidIntegral.roll).toBeCloseTo(heldIntegral, 12)
+      expect(Math.abs(result.telemetry.pidIntegral.roll)).toBeLessThanOrEqual(0.5)
+    }
+
+    const authorityReturnedInput = { roll: 0, pitch: 0, yaw: 0, throttle: 0.5 }
+    let sawUnsaturatedAllocation = false
+    for (let index = 0; index < 480; index += 1) {
+      const result = runtime.advance(1 / 240, authorityReturnedInput)
+      sawUnsaturatedAllocation ||= !result.telemetry.mixerSaturated
+      expect(Math.abs(result.telemetry.pidIntegral.roll)).toBeLessThanOrEqual(0.5)
+    }
+
+    const recovered = runtime.getTelemetry()
+    expect(sawUnsaturatedAllocation).toBe(true)
+    expect(recovered.mixerSaturated).toBe(false)
+    expect(Math.abs(recovered.pidIntegral.roll)).toBeLessThan(Math.abs(heldIntegral))
+    expect(recovered.warnings.filter((warning) => /non-finite|invalid/i.test(warning))).toHaveLength(0)
   })
 
   it('processes calibrated offset/noisy neutral through RC to body for a long run without rotational growth', () => {
