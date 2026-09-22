@@ -177,6 +177,30 @@ export function createOrbitTeleportFixture(): readonly TrainingSample[] {
   ]
 }
 
+/** A bounded 7.8 m / 0.2 s jump whose reported speed falsely says 7.8 m/s. */
+export function createOrbitVelocityMismatchFixture(): readonly TrainingSample[] {
+  const firstAngle = 0
+  const secondAngle = 0.8
+  const firstTangent = { x: -Math.sin(firstAngle), y: 0, z: Math.cos(firstAngle) }
+  const secondTangent = { x: -Math.sin(secondAngle), y: 0, z: Math.cos(secondAngle) }
+  return [
+    sample(
+      0.1,
+      1,
+      { x: 14, y: 2.5, z: 4 },
+      { x: firstTangent.x * 7.8, y: 0, z: firstTangent.z * 7.8 },
+      orientationForForward(firstTangent),
+    ),
+    sample(
+      0.3,
+      2,
+      { x: 4 + 10 * Math.cos(secondAngle), y: 2.5, z: 4 + 10 * Math.sin(secondAngle) },
+      { x: secondTangent.x * 7.8, y: 0, z: secondTangent.z * 7.8 },
+      orientationForForward(secondTangent),
+    ),
+  ]
+}
+
 export function createOrbitOscillatoryFixture(): readonly TrainingSample[] {
   return [0, 0.4, 0, 0.4, 0, 0.4].map((angle, index) => {
     const tangent = { x: -Math.sin(angle), y: 0, z: Math.cos(angle) }

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { createInitialDroneState, DEFAULT_DRONE_CONFIG } from '../drone'
 import type { NormalizedRcInput } from '../flight-controller'
 import { createTrainingMachineState, reduceTrainingState, TrainingSession } from './machine'
+import { TRAINING_TRAJECTORY_MAX_POINTS } from './trajectory'
 import type { LessonDefinition, TrainingSample, TrainingSceneReference } from './types'
 
 const input: NormalizedRcInput = { roll: 0, pitch: 0, yaw: 0, throttle: 0.4 }
@@ -41,6 +42,15 @@ function sample(timestampSeconds: number): TrainingSample {
     timestampSeconds,
     state: createInitialDroneState(DEFAULT_DRONE_CONFIG),
     normalizedInput: input,
+  }
+}
+
+function indexedSample(timestampSeconds: number, stepIndex: number): TrainingSample {
+  const base = sample(timestampSeconds)
+  return {
+    ...base,
+    state: { ...base.state, stepIndex },
+    armed: true,
   }
 }
 
@@ -130,6 +140,57 @@ describe('training state machine', () => {
     expect(active.lastEvaluation?.metrics).toEqual({ referenceCount: 1 })
     expect(session.setSceneReferences([])).toBe(active)
     expect(session.getState().sceneReferences).toEqual([sceneReference])
+  })
+
+  it('keeps long-run evaluator work and UI path snapshots bounded', () => {
+    const previousSteps: Array<number | undefined> = []
+    const trajectorySnapshots = new Set<readonly TrainingSample[]>()
+    const longLesson: LessonDefinition = {
+      ...testLesson,
+      evaluator: {
+        evaluate: (_sample, context) => {
+          previousSteps.push(context.previousSample?.state.stepIndex)
+          trajectorySnapshots.add(context.trajectory)
+          return {
+            status: 'continue',
+            metrics: { acceptedSamples: context.sampleCount ?? 0 },
+          }
+        },
+      },
+    }
+    const session = new TrainingSession({
+      lessons: [longLesson],
+      initialLessonId: longLesson.id,
+      countdownDurationSeconds: 0,
+    })
+    session.start(0)
+    session.tick(0)
+    const totalSamples = 6_000
+    for (let index = 1; index <= totalSamples; index += 1) {
+      session.consumeSample(indexedSample(index / 240, index))
+    }
+
+    const state = session.getState()
+    expect(state.phase).toBe('ACTIVE')
+    expect(state.sampleCount).toBe(totalSamples)
+    expect(state.trajectory.length).toBeLessThanOrEqual(TRAINING_TRAJECTORY_MAX_POINTS)
+    expect(Object.isFrozen(state.trajectory)).toBe(true)
+    expect(trajectorySnapshots.size).toBeLessThan(400)
+    expect(previousSteps.slice(0, 3)).toEqual([undefined, 1, 2])
+    expect(state.previousSample?.state.stepIndex).toBe(totalSamples)
+    expect(state.lastEvaluation?.metrics).toEqual({ acceptedSamples: totalSamples })
+
+    const retried = session.retry()
+    expect(retried.phase).toBe('READY')
+    expect(retried.sampleCount).toBe(0)
+    expect(retried.previousSample).toBeNull()
+    expect(retried.trajectory).toHaveLength(0)
+    session.start(30)
+    session.tick(30)
+    const repeated = session.consumeSample(indexedSample(30.1, 1))
+    expect(repeated.sampleCount).toBe(1)
+    expect(repeated.previousSample?.state.stepIndex).toBe(1)
+    expect(repeated.lastEvaluation?.metrics).toEqual({ acceptedSamples: 1 })
   })
 
   it('cannot start an unavailable lesson and never fabricates a result', () => {

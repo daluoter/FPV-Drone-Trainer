@@ -15,7 +15,7 @@ flight-worthiness validation.
 FlightRuntime fixed step
   -> timestamp + DroneState + normalized RC input + armed telemetry
   -> TrainingSession / pure evaluator contract
-  -> checkpoints + immutable trajectory + incremental evaluator metrics
+  -> checkpoints + bounded decimated path snapshots + incremental evaluator metrics
   -> results/progress store
   -> React menu, live metrics, result card, and field path
 ```
@@ -61,9 +61,13 @@ READY -> COUNTDOWN -> ACTIVE -> SUCCESS/FAILED -> RESULT
 The evaluator metrics are carried forward from the preceding evaluation. This
 lets dwell timers, route phases, unwrapped orbit angle, direction reversals,
 path length, and diagnostics update incrementally without rescanning the full
-240 Hz trajectory on every sample. Trajectory data remains immutable for
-results and diagnostics; the rendered path is bounded to a practical number of
-points.
+240 Hz trajectory on every sample. The session keeps the most recent accepted
+sample separately for exact previous-sample semantics, while a fixed-capacity
+ring retains a decimated path. The public trajectory is an immutable snapshot
+published at low frequency (and on terminal transitions), so React/rendering
+never receives an ever-growing array or a per-step full-array copy. `sampleCount`
+remains the total accepted sample count and is independent of the bounded path
+length.
 
 ## Lesson and evaluator API
 
@@ -81,12 +85,13 @@ interface LessonEvaluatorContract {
 }
 ```
 
-`TrainingEvaluationContext` includes the current immutable trajectory for
-inspection plus `previousSample` and `previousEvaluation` for bounded
-incremental calculations. `TrainingSample.armed` is supplied by the runtime
-integration for Phase 7 evaluators; the machine waits for the first true arm
-sample and rejects a later false sample. Legacy custom tests may omit it, but
-the shipped four evaluators never pass without `armed === true`.
+`TrainingEvaluationContext` includes a bounded immutable path snapshot for
+optional inspection, the total `sampleCount`, and `previousSample` /
+`previousEvaluation` for O(1) incremental calculations. `TrainingSample.armed`
+is supplied by the runtime integration for Phase 7 evaluators; the machine
+waits for the first true arm sample and rejects a later false sample. Legacy
+custom tests may omit it, but the shipped four evaluators never pass without
+`armed === true`.
 
 ## Geometric lessons
 
@@ -126,9 +131,13 @@ real horizontal motion in the radius/height/speed envelope and tangent camera
 heading. It unwraps directed POI angle incrementally and requires a full
 `2π` geometric lap followed by a valid exit sample. It rejects yaw-in-place,
 teleport/path gaps, sustained invalid envelope, and oscillatory direction
-reversals. Metrics include radius, altitude, speed, radial rate, tangent/camera
-heading error, direction, unwrapped progress, reverse radians, path length, and
-reversal count.
+reversals. Each orbit displacement is also checked against the average reported
+velocity over its sample interval. A deliberately generous 65 m/s² `dt²`
+integration allowance covers accelerated/coarsely sampled flight while a 7.8 m
+jump in 0.2 s reporting 7.8 m/s remains inconsistent and fails. Metrics include
+radius, altitude, speed, radial rate, tangent/camera heading error, direction,
+unwrapped progress, reverse radians, path length, displacement speed, and
+velocity-consistency error.
 
 ## Scene references and visualization
 

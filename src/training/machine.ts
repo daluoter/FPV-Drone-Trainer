@@ -1,6 +1,10 @@
 import { isFiniteDroneState, type DroneState } from '../drone'
 import { isFiniteNormalizedRcInput } from '../flight-controller'
 import { DEFAULT_LESSONS } from './lessons'
+import {
+  appendBoundedTrajectorySnapshot,
+  TrainingTrajectoryBuffer,
+} from './trajectory'
 import type {
   LessonDefinition,
   LessonEvaluator,
@@ -21,6 +25,7 @@ import type {
 export const DEFAULT_COUNTDOWN_DURATION_SECONDS = 3
 
 const DEFAULT_MAX_SCORE = 100
+const EMPTY_TRAJECTORY: readonly TrainingSample[] = Object.freeze([])
 
 function isFiniteNonNegative(value: number): boolean {
   return Number.isFinite(value) && value >= 0
@@ -47,24 +52,25 @@ function copyInput(input: TrainingSample['normalizedInput']): TrainingSample['no
 }
 
 function copyState(state: DroneState): DroneState {
-  return {
+  return Object.freeze({
     ...state,
-    positionM: { ...state.positionM },
-    velocityMps: { ...state.velocityMps },
-    orientation: { ...state.orientation },
-    angularVelocityBodyRadPerSec: { ...state.angularVelocityBodyRadPerSec },
-    motors: state.motors.map((motor) => ({ ...motor })) as unknown as DroneState['motors'],
-    warnings: [...state.warnings],
-  }
+    positionM: Object.freeze({ ...state.positionM }),
+    velocityMps: Object.freeze({ ...state.velocityMps }),
+    orientation: Object.freeze({ ...state.orientation }),
+    angularVelocityBodyRadPerSec: Object.freeze({ ...state.angularVelocityBodyRadPerSec }),
+    motors: Object.freeze(state.motors.map((motor) => Object.freeze({ ...motor }))) as unknown as DroneState['motors'],
+    warnings: Object.freeze([...state.warnings]),
+  })
 }
 
 function copySample(sample: TrainingSample): TrainingSample {
-  return {
+  const normalizedInput = copyInput(sample.normalizedInput)
+  return Object.freeze({
     timestampSeconds: sample.timestampSeconds,
     state: copyState(sample.state),
-    normalizedInput: copyInput(sample.normalizedInput),
+    normalizedInput: normalizedInput ? Object.freeze(normalizedInput) : null,
     ...(sample.armed === undefined ? {} : { armed: sample.armed }),
-  }
+  })
 }
 
 function finiteMetrics(metrics: Readonly<Record<string, number>> | undefined): Readonly<Record<string, number>> {
@@ -111,12 +117,13 @@ function clearSession(
     lastTimestampSeconds: null,
     lastSampleTimestampSeconds: null,
     sampleCount: 0,
-    trajectory: [],
+    trajectory: EMPTY_TRAJECTORY,
     checkpoints: {},
     lastEvaluation: null,
     result: null,
     setupRequest: null,
     armedAtLeastOnce: false,
+    previousSample: null,
     lastError: null,
   }
 }
@@ -222,11 +229,21 @@ function createResult(
   }
 }
 
+function publishTrajectorySnapshot(
+  state: TrainingMachineState,
+  trajectoryBuffer: TrainingTrajectoryBuffer | undefined,
+  timestampSeconds?: number,
+): TrainingMachineState {
+  if (!trajectoryBuffer) return state
+  return { ...state, trajectory: trajectoryBuffer.snapshot(timestampSeconds) }
+}
+
 function abortSession(
   state: TrainingMachineState,
   lessons: readonly LessonDefinition[],
   timestampSeconds: number,
   reason = 'The flight was disarmed, reset, or focus was lost; the attempt was stopped safely.',
+  trajectoryBuffer?: TrainingTrajectoryBuffer,
 ): TrainingMachineState {
   if (state.phase !== 'ACTIVE') return stateError(state, 'Only an ACTIVE lesson can be stopped by runtime safety telemetry.')
   const lesson = state.lessonId ? lessons.find((candidate) => candidate.id === state.lessonId) ?? null : null
@@ -239,11 +256,12 @@ function abortSession(
     message: reason,
     hint: 'Retry to apply the lesson setup while disarmed, then arm explicitly after the countdown.',
   }
+  const terminalState = publishTrajectorySnapshot(state, trajectoryBuffer, safeTimestamp)
   return {
-    ...state,
+    ...terminalState,
     phase: 'FAILED',
     lastEvaluation: failure,
-    result: createResult(state, lesson, 'FAILED', safeTimestamp, failure, state.checkpoints),
+    result: createResult(terminalState, lesson, 'FAILED', safeTimestamp, failure, state.checkpoints),
     setupRequest: null,
     lastError: reason,
   }
@@ -270,8 +288,9 @@ function startSession(state: TrainingMachineState, lesson: LessonDefinition, tim
     lastTimestampSeconds: timestampSeconds,
     lastSampleTimestampSeconds: null,
     armedAtLeastOnce: false,
+    previousSample: null,
     sampleCount: 0,
-    trajectory: [],
+    trajectory: EMPTY_TRAJECTORY,
     checkpoints: initialCheckpoints(lesson),
     lastEvaluation: null,
     result: null,
@@ -309,6 +328,7 @@ function sampleActiveState(
   state: TrainingMachineState,
   lesson: LessonDefinition,
   sample: TrainingSample,
+  trajectoryBuffer?: TrainingTrajectoryBuffer,
 ): TrainingMachineState {
   if (!validSample(sample)) return stateError(state, 'Training sample is invalid or contains non-finite values.')
   if (state.activeStartedAtSeconds === null || sample.timestampSeconds < state.activeStartedAtSeconds) {
@@ -327,9 +347,10 @@ function sampleActiveState(
       [lesson],
       sample.timestampSeconds,
       'Attempt stopped: the flight was disarmed or focus was lost.',
+      trajectoryBuffer,
     )
   }
-  const previousSample = state.trajectory[state.trajectory.length - 1]
+  const previousSample = state.previousSample
   if (
     previousSample && sample.state.stepIndex < previousSample.state.stepIndex
   ) {
@@ -338,9 +359,10 @@ function sampleActiveState(
       message: 'The flight runtime reset or rewound during the attempt; the lesson was stopped safely.',
       hint: 'Retry to apply the lesson setup while disarmed, then arm explicitly after the countdown.',
     }
-    const result = createResult(state, lesson, 'FAILED', sample.timestampSeconds, failure, state.checkpoints)
+    const terminalState = publishTrajectorySnapshot(state, trajectoryBuffer, sample.timestampSeconds)
+    const result = createResult(terminalState, lesson, 'FAILED', sample.timestampSeconds, failure, state.checkpoints)
     return {
-      ...state,
+      ...terminalState,
       phase: 'FAILED',
       lastEvaluation: failure,
       result,
@@ -356,13 +378,19 @@ function sampleActiveState(
   }
 
   const storedSample = copySample(sample)
-  const trajectory = [...state.trajectory, storedSample]
   const sampleCount = state.sampleCount + 1
+  trajectoryBuffer?.append(storedSample, sampleCount)
+  const trajectory = trajectoryBuffer
+    ? trajectoryBuffer.shouldPublish(sampleCount, sample.timestampSeconds)
+      ? trajectoryBuffer.snapshot(sample.timestampSeconds)
+      : state.trajectory
+    : appendBoundedTrajectorySnapshot(state.trajectory, storedSample, sampleCount)
   const baseState: TrainingMachineState = {
     ...state,
     lastTimestampSeconds: sample.timestampSeconds,
     lastSampleTimestampSeconds: sample.timestampSeconds,
     armedAtLeastOnce: state.armedAtLeastOnce === true || sample.armed === true,
+    previousSample: storedSample,
     sampleCount,
     trajectory,
     lastError: null,
@@ -374,6 +402,7 @@ function sampleActiveState(
   const context: TrainingEvaluationContext = {
     lesson,
     elapsedSeconds,
+    sampleCount,
     trajectory,
     checkpoints: state.checkpoints,
     sceneReferences: state.sceneReferences,
@@ -390,9 +419,10 @@ function sampleActiveState(
       status: 'failure',
       message: 'The lesson evaluator failed safely; this attempt was not passed.',
     }
-    const result = createResult(baseState, lesson, 'FAILED', sample.timestampSeconds, failure, state.checkpoints)
+    const terminalState = publishTrajectorySnapshot(baseState, trajectoryBuffer, sample.timestampSeconds)
+    const result = createResult(terminalState, lesson, 'FAILED', sample.timestampSeconds, failure, state.checkpoints)
     return {
-      ...baseState,
+      ...terminalState,
       phase: 'FAILED',
       lastEvaluation: failure,
       result,
@@ -403,10 +433,11 @@ function sampleActiveState(
   const checkpoints = updateCheckpoints(baseState, lesson, evaluation, sample.timestampSeconds)
   const checkpointState = { ...baseState, checkpoints, lastEvaluation: evaluation }
   if (evaluation.status === 'failure') {
+    const terminalState = publishTrajectorySnapshot(checkpointState, trajectoryBuffer, sample.timestampSeconds)
     return {
-      ...checkpointState,
+      ...terminalState,
       phase: 'FAILED',
-      result: createResult(checkpointState, lesson, 'FAILED', sample.timestampSeconds, evaluation, checkpoints),
+      result: createResult(terminalState, lesson, 'FAILED', sample.timestampSeconds, evaluation, checkpoints),
       setupRequest: null,
     }
   }
@@ -426,10 +457,11 @@ function sampleActiveState(
       ? Math.max(0, Math.min(100, lesson.scoring.minimumPassingScore))
       : 0
     const outcome: TrainingOutcome = score >= minimumPassingScore ? 'SUCCESS' : 'FAILED'
+    const terminalState = publishTrajectorySnapshot(checkpointState, trajectoryBuffer, sample.timestampSeconds)
     return {
-      ...checkpointState,
+      ...terminalState,
       phase: outcome,
-      result: createResult(checkpointState, lesson, outcome, sample.timestampSeconds, evaluation, checkpoints),
+      result: createResult(terminalState, lesson, outcome, sample.timestampSeconds, evaluation, checkpoints),
       setupRequest: null,
     }
   }
@@ -458,22 +490,24 @@ export function createTrainingMachineState(
     lastTimestampSeconds: null,
     lastSampleTimestampSeconds: null,
     sampleCount: 0,
-    trajectory: [],
+    trajectory: EMPTY_TRAJECTORY,
     checkpoints: {},
     lastEvaluation: null,
     result: null,
     setupRequest: null,
     sceneReferences: copySceneReferences(options.sceneReferences ?? []),
     armedAtLeastOnce: false,
+    previousSample: null,
     lastError: null,
   }
 }
 
 /** Pure reducer for the READY -> COUNTDOWN -> ACTIVE -> result machine. */
-export function reduceTrainingState(
+function reduceTrainingStateInternal(
   state: TrainingMachineState,
   action: TrainingAction,
-  lessons: readonly LessonDefinition[] = DEFAULT_LESSONS,
+  lessons: readonly LessonDefinition[],
+  trajectoryBuffer?: TrainingTrajectoryBuffer,
 ): TrainingMachineState {
   const byId = lessonMap(lessons)
   switch (action.type) {
@@ -527,7 +561,7 @@ export function reduceTrainingState(
       if (!state.lessonId) return stateError(state, 'The active training session has no lesson.')
       const lesson = byId.get(state.lessonId)
       if (!lesson) return stateError(state, 'The active lesson is no longer registered.')
-      return sampleActiveState(state, lesson, action.sample)
+      return sampleActiveState(state, lesson, action.sample, trajectoryBuffer)
     }
     case 'SHOW_RESULT':
       if (state.phase !== 'SUCCESS' && state.phase !== 'FAILED') {
@@ -550,9 +584,18 @@ export function reduceTrainingState(
   }
 }
 
+export function reduceTrainingState(
+  state: TrainingMachineState,
+  action: TrainingAction,
+  lessons: readonly LessonDefinition[] = DEFAULT_LESSONS,
+): TrainingMachineState {
+  return reduceTrainingStateInternal(state, action, lessons)
+}
+
 /** Stateful adapter for UI/runtime integration; all transitions remain pure. */
 export class TrainingSession {
   private readonly lessons: readonly LessonDefinition[]
+  private readonly trajectoryBuffer = new TrainingTrajectoryBuffer()
   private state: TrainingMachineState
 
   public constructor(options: TrainingSessionOptions = {}) {
@@ -573,7 +616,19 @@ export class TrainingSession {
   }
 
   public dispatch(action: TrainingAction): TrainingMachineState {
-    this.state = reduceTrainingState(this.state, action, this.lessons)
+    const previous = this.state
+    const reduced = reduceTrainingStateInternal(previous, action, this.lessons, this.trajectoryBuffer)
+    const next = action.type === 'ABORT' && reduced.phase === 'FAILED'
+      ? publishTrajectorySnapshot(reduced, this.trajectoryBuffer)
+      : reduced
+    if (
+      (action.type === 'SELECT_LESSON' || action.type === 'START' || action.type === 'RETRY' || action.type === 'RESET')
+      && next !== previous
+      && next.trajectory.length === 0
+    ) {
+      this.trajectoryBuffer.clear()
+    }
+    this.state = next
     return this.state
   }
 

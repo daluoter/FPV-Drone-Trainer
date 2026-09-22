@@ -82,11 +82,14 @@ export interface LessonScoringDefinition {
 export interface TrainingEvaluationContext {
   readonly lesson: LessonDefinition
   readonly elapsedSeconds: number
+  /** Total accepted fixed-step samples; independent of the bounded path length. */
+  readonly sampleCount?: number
+  /** Bounded decimated immutable path snapshot, not the full 240 Hz history. */
   readonly trajectory: readonly TrainingSample[]
   readonly checkpoints: Readonly<Record<string, TrainingCheckpointState>>
   readonly sceneReferences: readonly TrainingSceneReference[]
   /** O(1) incremental seam for evaluators; avoids rescanning the full 240 Hz trajectory. */
-  readonly previousSample?: TrainingSample
+  readonly previousSample?: TrainingSample | null
   readonly previousEvaluation?: TrainingEvaluation | null
 }
 
@@ -167,6 +170,9 @@ export interface TrainingMachineState {
   /** True once the pilot has supplied an armed fixed-step sample in this attempt. */
   readonly armedAtLeastOnce?: boolean
   readonly sampleCount: number
+  /** Most recent accepted sample; kept separately because trajectory is decimated. */
+  readonly previousSample?: TrainingSample | null
+  /** Bounded immutable UI/evaluator path snapshot. */
   readonly trajectory: readonly TrainingSample[]
   readonly checkpoints: Readonly<Record<string, TrainingCheckpointState>>
   readonly lastEvaluation: TrainingEvaluation | null

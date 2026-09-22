@@ -10,6 +10,7 @@ import {
   createOrbitOscillatoryFixture,
   createOrbitSuccessFixture,
   createOrbitTeleportFixture,
+  createOrbitVelocityMismatchFixture,
   createOrbitYawInPlaceFixture,
   createSplitSSuccessFixture,
   createSplitSUprightUTurnFixture,
@@ -68,6 +69,13 @@ describe('Phase 7 geometric lesson evaluators', () => {
     const teleport = run('orbit', createOrbitTeleportFixture())
     expect(teleport.phase).toBe('FAILED')
     expect(teleport.result?.message).toMatch(/gap|teleport/i)
+
+    const velocityMismatch = run('orbit', createOrbitVelocityMismatchFixture())
+    expect(velocityMismatch.phase).toBe('FAILED')
+    expect(velocityMismatch.result?.message).toMatch(/gap|teleport/i)
+    expect(velocityMismatch.result?.metrics.velocityConsistencyErrorM).toBeGreaterThan(
+      velocityMismatch.result?.metrics.integrationToleranceM ?? Number.POSITIVE_INFINITY,
+    )
 
     const oscillatory = run('orbit', createOrbitOscillatoryFixture())
     expect(oscillatory.phase).toBe('FAILED')

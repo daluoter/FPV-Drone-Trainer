@@ -136,12 +136,79 @@ function guardSample(sample: TrainingSample, context: TrainingEvaluationContext,
   return null
 }
 
+const POSITION_VELOCITY_BASE_TOLERANCE_M = 0.15
+/**
+ * Deliberately generous fixed-step/downsample allowance. The simplified quad
+ * can produce roughly 31 m/s² before gravity/attitude effects; 65 m/s² and a
+ * full dt² budget (also covering coarse fixture sampling) avoid rejecting
+ * accelerated flight while still rejecting a multi-metre displacement whose
+ * reported velocity is only 7.8 m/s.
+ */
+const POSITION_VELOCITY_ACCELERATION_TOLERANCE_MPS2 = 65
+
+interface DisplacementVelocityConsistency {
+  readonly displacementSpeedMps: number
+  readonly velocityConsistencyErrorM: number
+  readonly integrationToleranceM: number
+  readonly consistent: boolean
+}
+
+function displacementVelocityConsistency(
+  context: TrainingEvaluationContext,
+  sample: TrainingSample,
+): DisplacementVelocityConsistency {
+  const previous = context.previousSample
+  if (!previous) {
+    return {
+      displacementSpeedMps: 0,
+      velocityConsistencyErrorM: 0,
+      integrationToleranceM: 0,
+      consistent: true,
+    }
+  }
+  const delta = sample.timestampSeconds - previous.timestampSeconds
+  if (!Number.isFinite(delta) || delta <= 0) {
+    return {
+      displacementSpeedMps: Number.POSITIVE_INFINITY,
+      velocityConsistencyErrorM: Number.POSITIVE_INFINITY,
+      integrationToleranceM: 0,
+      consistent: false,
+    }
+  }
+  const displacement = {
+    x: sample.state.positionM.x - previous.state.positionM.x,
+    y: sample.state.positionM.y - previous.state.positionM.y,
+    z: sample.state.positionM.z - previous.state.positionM.z,
+  }
+  const averageVelocity = {
+    x: (sample.state.velocityMps.x + previous.state.velocityMps.x) * 0.5,
+    y: (sample.state.velocityMps.y + previous.state.velocityMps.y) * 0.5,
+    z: (sample.state.velocityMps.z + previous.state.velocityMps.z) * 0.5,
+  }
+  const residual = {
+    x: displacement.x - averageVelocity.x * delta,
+    y: displacement.y - averageVelocity.y * delta,
+    z: displacement.z - averageVelocity.z * delta,
+  }
+  const error = Math.hypot(residual.x, residual.y, residual.z)
+  const distance = Math.hypot(displacement.x, displacement.y, displacement.z)
+  const tolerance = POSITION_VELOCITY_BASE_TOLERANCE_M
+    + POSITION_VELOCITY_ACCELERATION_TOLERANCE_MPS2 * delta * delta
+  return {
+    displacementSpeedMps: distance / delta,
+    velocityConsistencyErrorM: error,
+    integrationToleranceM: tolerance,
+    consistent: Number.isFinite(error) && error <= tolerance,
+  }
+}
+
 function pathGap(
   context: TrainingEvaluationContext,
   sample: TrainingSample,
   maximumSeconds = 0.35,
   maximumDistanceM = 8,
   maximumSpeedMps = 45,
+  checkVelocityConsistency = false,
 ): boolean {
   const previous = context.previousSample
   if (!previous) return false
@@ -149,7 +216,8 @@ function pathGap(
   const distance = distance3d(sample.state.positionM, previous.state.positionM)
   if (!Number.isFinite(delta) || delta <= 0 || delta > maximumSeconds) return true
   if (!Number.isFinite(distance) || distance > maximumDistanceM) return true
-  return distance / delta > maximumSpeedMps
+  if (distance / delta > maximumSpeedMps) return true
+  return checkVelocityConsistency && !displacementVelocityConsistency(context, sample).consistent
 }
 
 function stickDiagnostics(context: TrainingEvaluationContext, sample: TrainingSample): {
@@ -569,6 +637,7 @@ function evaluateOrbit(sample: TrainingSample, context: TrainingEvaluationContex
     : 0
   const pathLength = metric(context, 'pathLengthM', 0)
     + (context.previousSample ? distance3d(current, context.previousSample.state.positionM) : 0)
+  const displacementConsistency = displacementVelocityConsistency(context, sample)
   const checkpointIds = [
     ...(validEnvelope ? ['orbit-entry'] : []),
     ...(validEnvelope && orbitProgress >= TWO_PI ? ['orbit-lap'] : []),
@@ -576,6 +645,8 @@ function evaluateOrbit(sample: TrainingSample, context: TrainingEvaluationContex
       ? ['orbit-exit']
       : []),
   ] as const
+  const geometricPathGap = pathGap(context, sample, 0.3, 8, 40)
+  const velocityPathGap = pathGap(context, sample, 0.3, 8, 40, true)
   const metrics = {
     radialErrorM: radiusError,
     altitudeErrorM: altitudeError,
@@ -594,19 +665,22 @@ function evaluateOrbit(sample: TrainingSample, context: TrainingEvaluationContex
     orbitValid: validEnvelope ? 1 : 0,
     pathLengthM: finite(pathLength),
     lastAngleRad: finite(currentAngle),
-  }
-  if (pathGap(context, sample, 0.3, 8, 40)) {
-    return safeEvaluation('failure', metrics, {
-      checkpointIds,
-      message: 'Orbit telemetry contained a path gap or teleport; geometric lap progress was discarded.',
-      hint: 'Keep fixed-step samples continuous and fly the radius instead of jumping between points.',
-    })
+    displacementSpeedMps: finite(displacementConsistency.displacementSpeedMps),
+    velocityConsistencyErrorM: finite(displacementConsistency.velocityConsistencyErrorM),
+    integrationToleranceM: finite(displacementConsistency.integrationToleranceM),
   }
   if (directionReversals >= 3 || reverseRadians > 0.55) {
     return safeEvaluation('failure', metrics, {
       checkpointIds,
       message: 'The orbit direction oscillated instead of completing one directed geometric lap.',
       hint: 'Choose one direction around the tower and keep the tangent line smooth.',
+    })
+  }
+  if (geometricPathGap || (!reversal && velocityPathGap)) {
+    return safeEvaluation('failure', metrics, {
+      checkpointIds,
+      message: 'Orbit telemetry contained a path gap or teleport; geometric lap progress was discarded.',
+      hint: 'Keep fixed-step samples continuous and fly the radius instead of jumping between points.',
     })
   }
   if (!context.checkpoints['orbit-entry']?.completed && stationarySeconds > 3) {
