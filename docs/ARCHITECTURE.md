@@ -2,7 +2,7 @@
 
 ## Current scope
 
-Phase 1 implements the controller boundary and Controller Lab on top of the Phase 0 foundation. The React shell remains intentionally non-flight: browser Gamepad polling, calibration, profile compatibility, signal diagnostics, disconnect handling and neutral safety evaluation exist, but no Three.js scene, rates, physics, flight controller or lesson logic is enabled. Keeping flight absent is preferable to presenting an untrusted input path as flight-ready.
+Phase 2 implements the controller boundary and deterministic simulation core on top of the Phase 0 foundation. The React shell remains intentionally non-flight: browser Gamepad polling, calibration, profile compatibility, signal diagnostics, disconnect handling and neutral safety evaluation exist, while the pure simulation domain now provides validated 5-inch configuration, Quad-X motors, forces, torques, quaternion rigid-body integration and fixed-step timing. There is still no rates module, flight controller, Three.js scene or lesson logic. Keeping flight integration absent is preferable to presenting an untrusted controller-to-flight path as complete.
 
 The phase contract is tracked in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Each later phase must preserve the boundaries below and pass the phase gate before the next seam is started.
 
@@ -32,7 +32,7 @@ Config domain persists versioned settings and controller profiles locally.
 - **React/UI** owns presentation and low-frequency application state. It must not contain flight physics or direct controller-to-object rotation.
 - **Controller** owns fresh Gamepad snapshots, device selection, calibration, normalization, inversion, deadband, filtering, profile compatibility, disconnect handling and safety status. `GamepadPoller` runs outside React; the Controller Lab subscribes only to a throttled presentation view. It must not know about Three.js.
 - **Rates and flight controller** convert normalized channels into desired angular rates and motor corrections. Acro mode never self-levels when the roll or pitch stick is released.
-- **Simulation** owns the authoritative SI-unit state: position, velocity, quaternion orientation, angular velocity, mass, inertia, forces, torques, motor response, and fixed-step integration.
+- **Simulation** owns the authoritative SI-unit state: position, velocity, quaternion orientation, angular velocity, mass, inertia, forces, torques, motor response, ground contact and fixed-step integration. Phase 2 has no React or renderer dependency and reports dropped steps and safe-reset warnings.
 - **Renderer** consumes simulation snapshots and owns Three.js objects, cameras, and visual environment. It does not perform calibration or flight dynamics.
 - **Training** evaluates state, geometry, trajectory, and timing windows. A stick sequence alone cannot pass a lesson.
 - **Replay** stores compact immutable samples and can later drive a ghost or analysis view without mutating the player simulation.
@@ -80,4 +80,4 @@ The Controller Lab evaluates this boundary, displays each failure reason and del
 
 ## Testing strategy
 
-Pure controller transforms, calibration statistics, profile compatibility, poller disconnect behavior and the safety gate are tested with deterministic inputs. Later phases will add rates, mixer, quaternion, fixed-step and lesson tests. UI tests cover application state and accessibility-facing behavior. Browser smoke tests and real transmitter checks remain separate evidence; passing unit tests never claims hardware validation.
+Pure controller transforms, calibration statistics, profile compatibility, poller disconnect behavior and the safety gate are tested with deterministic inputs. Phase 2 adds coordinate/quaternion, configuration validation, motor lag, mixer signs and saturation, `r × F` moments, gravity, hover sanity, attitude-transformed thrust, safety reset and fixed-step render-rate equivalence tests. UI tests cover application state and accessibility-facing behavior. Browser smoke tests and real transmitter checks remain separate evidence; passing unit tests never claims hardware validation or aerodynamic realism.

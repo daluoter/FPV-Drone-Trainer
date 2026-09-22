@@ -2,7 +2,7 @@
 
 A browser-based FPV flight school and freestyle trick trainer focused on trustworthy transmitter input, believable Acro / Rate flight, and measurable feedback.
 
-> **Status: Phase 1 — Controller Lab implemented.** The current build discovers Gamepad devices, calibrates channels, exposes the complete signal pipeline, persists compatible profiles locally, and enforces a neutral-stability safety gate. It does not run flight physics or enable Free Flight yet.
+> **Status: Phase 2 — deterministic simulation core implemented.** The current build includes the Controller Lab safety boundary and a dependency-light quaternion rigid-body core with explicit Quad-X motors, forces, torques, ground contact and a fixed 240 Hz accumulator. It does not yet connect rates, a flight controller, Three.js Free Flight or training lessons.
 
 ## Implemented
 
@@ -15,11 +15,12 @@ A browser-based FPV flight school and freestyle trick trainer focused on trustwo
 - Raw / calibrated / normalized / deadband / filtered / final diagnostics
 - Versioned local controller profiles with compatibility checks
 - Mandatory processed neutral-stability test and future-flight eligibility gate
-- Architecture and controller documentation in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/CONTROLLER_SYSTEM.md`](docs/CONTROLLER_SYSTEM.md), and [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)
+- Deterministic 5-inch quad dynamics: validated configuration, exact motor lag, Quad-X allocation, `r × F` moments, gravity, drag, quaternion integration, safety resets and fixed-step timing
+- Architecture, controller and physics documentation in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/CONTROLLER_SYSTEM.md`](docs/CONTROLLER_SYSTEM.md), [`docs/COORDINATE_SYSTEM.md`](docs/COORDINATE_SYSTEM.md), [`docs/PHYSICS.md`](docs/PHYSICS.md), and [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)
 
 ## In progress / next
 
-Phase 2 is the deterministic simulation core: explicit coordinate conventions, quaternion rigid-body state, fixed-step integration, motors, thrust, torque and Quad-X mixer. No flight controller or physics is claimed in the current build.
+Phase 3 connects Betaflight-style Actual Rates, angular-rate control and mixer commands to the validated simulation core. Phase 4 will add the Three.js Free Flight scene and developer HUD. The current core has no hardware-realism claim and remains independent of React and rendering.
 
 ## Planned
 
