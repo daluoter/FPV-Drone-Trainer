@@ -4,7 +4,7 @@ Initial inspection: main at 35c66d2 contained only README.md and MIT LICENSE. Ph
 
 ## Current checkpoint
 
-Phase 8 replay is complete in this checkpoint. It consumes the Phase 6/7 controller, simulation, training and renderer contracts through actual fixed-step samples, adds a bounded decimated recorder for compact immutable pose/input/controller-output snapshots, independent shortest-path-interpolated ghost playback, trajectory presentation, playback controls, and live-runtime safety boundaries. Entering replay disarms and aborts an active lesson; playback does not call the training hook; exit resets live time/controller memory and requires explicit rearm. Straight-line, box-pattern, and figure-eight replacements remain intentionally excluded. Browser smoke, WebGL disposal, physical transmitter evidence, and human maneuver evidence remain separate from automated gates.
+Phase 9 integration/polish is complete for the automated checkpoint. Terminal lesson outcomes transition through `RESULT`, persist once per session, and permit direct lesson selection; the React flow has a mocked-runtime/renderer regression for start/arm/samples, success/failure, retry/reset, replay, and tuning isolation. Phase 8 replay still consumes the Phase 6/7 controller, simulation, training and renderer contracts through actual fixed-step samples, with bounded decimated recording, immutable pose/input/controller-output snapshots, independent shortest-path-interpolated ghost playback, trajectory presentation, playback controls, and live-runtime safety boundaries. Straight-line, box-pattern, and figure-eight replacements remain intentionally excluded. Browser smoke, WebGL disposal, physical transmitter evidence, and human maneuver evidence are required owner checks and are not implied by the mock or automated gates; see [`VALIDATION.md`](VALIDATION.md).
 
 ## Architecture decisions
 
@@ -31,6 +31,6 @@ This is multi-seam work. Exclusive ownership passes serially in /workspaces/FPV-
 | 6 Training framework | src/training contracts/state machine, menu/results/sticks, fixed-step sample hook and scene reference IDs | state transitions, progress, reset/session isolation and truthful unavailable lessons; complete in this checkpoint |
 | 7 Lessons | four geometric lesson evaluators, armed telemetry safety, fixtures, and reference/path presentation | positive/negative maneuver traces; complete in this checkpoint |
 | 8 Replay | src/replay and playback/path integration | bounded recorder, immutable snapshots/playback; complete in this checkpoint |
-| 9 Verification/polish | integration fixes, accessibility and truthful docs | independent review, all commands, browser checks; commit |
+| 9 Verification/polish | integration fixes, accessibility and truthful docs | independent review, all commands, browser checks; automated checkpoint complete, owner browser/hardware checks remain required |
 
 All phases run npm test, npm run typecheck, npm run lint, npm run build. Never commit a knowingly broken build. Preserve LICENSE and history. Browser/hardware limitations must remain explicit; synthetic tests are not transmitter validation. If blocked, checkpoint coherently rather than claiming completion.

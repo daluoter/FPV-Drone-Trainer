@@ -21,11 +21,12 @@ describe('application shell', () => {
     expect(screen.getByRole('button', { name: /apply \+ reset/i })).toBeEnabled()
   })
 
-  it('exposes the planned signal path without starting simulation', () => {
+  it('exposes the implemented signal path without starting simulation', () => {
     render(<App />)
 
     expect(screen.getByText('RC device')).toBeInTheDocument()
     expect(screen.getByText('Renderer')).toBeInTheDocument()
+    expect(screen.getByLabelText('Implemented simulator data flow')).toBeInTheDocument()
     expect(screen.getByText('Free Flight runtime / scroll above')).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: /make the transmitter boring/i })).toBeInTheDocument()
     expect(screen.getByText(/Gamepad API unavailable/i)).toBeInTheDocument()

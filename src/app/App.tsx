@@ -90,6 +90,12 @@ function statusLabel(status: RoadmapStatus): string {
   return 'Planned'
 }
 
+function resultStateForUi(session: TrainingSession, state: TrainingMachineState): TrainingMachineState {
+  return state.result && (state.phase === 'SUCCESS' || state.phase === 'FAILED')
+    ? session.showResult()
+    : state
+}
+
 export default function App() {
   const poller = useMemo(() => createBrowserGamepadPoller(), [])
   const tuningStore = useMemo(() => new TuningSettingsStore(), [])
@@ -141,17 +147,18 @@ export default function App() {
       armed: sample.armed,
     })
     if (next === previous) return
+    const displayState = resultStateForUi(session, next)
 
-    const checkpointKey = Object.values(next.checkpoints)
+    const checkpointKey = Object.values(displayState.checkpoints)
       .map((checkpoint) => `${checkpoint.id}:${checkpoint.completed}:${checkpoint.completedAtSeconds ?? ''}`)
       .join('|')
-    const phaseChanged = next.phase !== previous.phase
-    const resultChanged = next.result !== previous.result
+    const phaseChanged = displayState.phase !== previous.phase
+    const resultChanged = displayState.result !== previous.result
     const checkpointChanged = checkpointKey !== trainingUiCheckpointKeyRef.current
     const lastPublishedSeconds = trainingUiLastPublishedSecondsRef.current
     const throttledMetricUpdate = lastPublishedSeconds === null || sample.timestampSeconds - lastPublishedSeconds >= 0.1
     if (phaseChanged || resultChanged || checkpointChanged || throttledMetricUpdate) {
-      syncTrainingState(next)
+      syncTrainingState(displayState)
       trainingUiLastPublishedSecondsRef.current = sample.timestampSeconds
       trainingUiCheckpointKeyRef.current = checkpointKey
     }
@@ -168,10 +175,11 @@ export default function App() {
       // ended at this explicit presentation boundary; terminal results remain
       // available for review while the ghost is playing.
       if (phase === 'ACTIVE') {
-        syncTrainingState(session.abort(
+        const aborted = session.abort(
           'Replay opened; the active lesson was aborted before playback.',
           telemetry.state.timeSeconds,
-        ))
+        )
+        syncTrainingState(resultStateForUi(session, aborted))
       } else if (phase === 'COUNTDOWN') {
         syncTrainingState(session.reset())
       }
@@ -179,10 +187,11 @@ export default function App() {
     }
     if (telemetry.armed) return
     if (phase === 'ACTIVE' && session.getState().armedAtLeastOnce === true) {
-      syncTrainingState(session.abort(
+      const aborted = session.abort(
         telemetry.safetyReasons[0] ?? 'The flight was disarmed, reset, or focus was lost; the attempt was stopped safely.',
         telemetry.state.timeSeconds,
-      ))
+      )
+      syncTrainingState(resultStateForUi(session, aborted))
     }
   }, [syncTrainingState])
   const selectTrainingLesson = useCallback((lessonId: string) => {
@@ -428,7 +437,7 @@ export default function App() {
               loop will never depend on React renders.
             </p>
           </div>
-          <div className="pipeline" aria-label="Planned simulator data flow">
+          <div className="pipeline" aria-label="Implemented simulator data flow">
             {pipeline.map((stage, index) => (
               <div className="pipeline-stage" key={stage}>
                 <span className="pipeline-number">{String(index + 1).padStart(2, '0')}</span>
@@ -443,7 +452,7 @@ export default function App() {
       <footer className="app-footer">
         <span>FPV Drone Trainer</span>
         <span>Built for measurable flight feel.</span>
-        <span className="footer-version">v0.1.0 / phase 7 training</span>
+        <span className="footer-version">v0.1.0 / phase 8 replay</span>
       </footer>
     </div>
   )
