@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_DRONE_CONFIG, hoverThrottle, validateDroneConfig } from './config'
+import { DroneSimulation } from '../simulation/simulation'
 
 describe('drone configuration', () => {
   it('provides a valid explicit 5-inch configuration', () => {
@@ -28,6 +29,30 @@ describe('drone configuration', () => {
     expect(validation.errors.join(' ')).toContain('Mass')
     expect(validation.errors.join(' ')).toContain('inertia')
     expect(validation.errors.join(' ')).toContain('response time')
+  })
+
+  it('rejects malformed nested runtime values and safely falls back in the simulation', () => {
+    const malformed = {
+      ...DEFAULT_DRONE_CONFIG,
+      inertiaKgM2: null,
+      linearDragCoefficientNPerMps: undefined,
+      angularDragCoefficientNmPerRadPerSec: null,
+      motors: [null, ...DEFAULT_DRONE_CONFIG.motors.slice(1)],
+      ground: undefined,
+      safety: null,
+      mixer: undefined,
+    } as unknown
+
+    expect(() => validateDroneConfig(malformed)).not.toThrow()
+    const validation = validateDroneConfig(malformed)
+    expect(validation.valid).toBe(false)
+    expect(validation.errors.join(' ')).toContain('Ground configuration is missing')
+    expect(validation.errors.join(' ')).toContain('Motor 0 configuration is missing')
+
+    expect(() => new DroneSimulation(malformed as typeof DEFAULT_DRONE_CONFIG)).not.toThrow()
+    const simulation = new DroneSimulation(malformed as typeof DEFAULT_DRONE_CONFIG)
+    expect(simulation.config).toBe(DEFAULT_DRONE_CONFIG)
+    expect(simulation.getState().warnings[0]).toContain('Invalid drone configuration')
   })
 
   it('derives a finite hover command from total available thrust', () => {

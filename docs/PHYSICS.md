@@ -10,7 +10,7 @@ The state contains world position and velocity, a body-to-world quaternion, body
 q_next = normalize(q * quaternion(axis = omega_body, angle = |omega_body| * dt))
 ```
 
-The fixed simulation timestep defaults to 240 Hz. A render-frame accumulator bounds catch-up work and reports dropped steps; render FPS therefore does not choose the physics timestep.
+The fixed simulation timestep defaults to 240 Hz. A render-frame accumulator bounds catch-up work and reports dropped steps; render FPS therefore does not choose the physics timestep. An invalid render delta resets the accumulator; any already buffered sub-step is discarded and reported in `droppedSeconds` (while `droppedSteps` remains zero because no complete fixed step was buffered).
 
 Linear motion uses semi-implicit Euler:
 
@@ -46,7 +46,7 @@ The mixer adds pilot-positive roll/pitch/yaw differentials to collective in the 
 
 Ground contact clamps position to the configured plane. A downward normal velocity is reflected with restitution, while tangential velocity is multiplied by the configured contact retention. This is a minimal collision response, not an artificial hover force.
 
-Invalid configuration, timestep, command, non-finite state, excessive speed or distance causes a safe reset to the validated spawn state and returns a warning. The fixed-step accumulator also reports invalid frame deltas and dropped catch-up steps. Warnings are surfaced to callers for developer HUDs; numerical failure is never silently propagated.
+Invalid configuration, timestep, command, non-finite state, negative simulation time, excessive speed or distance causes a safe reset to the validated spawn state and returns a warning. The fixed-step accumulator also reports invalid frame deltas and dropped catch-up steps. Warnings are surfaced to callers for developer HUDs; numerical failure is never silently propagated.
 
 ## Configuration assumptions
 

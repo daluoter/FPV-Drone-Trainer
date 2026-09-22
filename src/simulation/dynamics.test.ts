@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createInitialDroneState, DEFAULT_DRONE_CONFIG, hoverThrottle } from '../drone'
+import { createInitialDroneState, DEFAULT_DRONE_CONFIG, hoverThrottle, isFiniteDroneState } from '../drone'
 import { quaternionFromRotationVector, quaternionNorm, type Quaternion } from '../math'
 import { stepDroneState } from './dynamics'
 
@@ -69,7 +69,24 @@ describe('rigid-body dynamics', () => {
     expect(result.state.orientation).toEqual({ x: 0, y: 0, z: 0, w: 1 })
   })
 
-  it('resets safely and reports invalid timesteps and motor state', () => {
+  it('applies the Euler gyroscopic term with the documented sign', () => {
+    const config = {
+      ...DEFAULT_DRONE_CONFIG,
+      inertiaKgM2: { x: 2, y: 3, z: 5 },
+      angularDragCoefficientNmPerRadPerSec: { x: 0, y: 0, z: 0 },
+    }
+    const initial = createInitialDroneState(config, { x: 0, y: 2, z: 0 })
+    const state = { ...initial, angularVelocityBodyRadPerSec: { x: 1, y: 2, z: 3 } }
+    const deltaSeconds = 0.001
+    const result = stepDroneState(state, [0, 0, 0, 0], config, deltaSeconds)
+
+    expect(result.reset).toBe(false)
+    expect(result.state.angularVelocityBodyRadPerSec.x).toBeCloseTo(1 - 6 * deltaSeconds, 12)
+    expect(result.state.angularVelocityBodyRadPerSec.y).toBeCloseTo(2 + 3 * deltaSeconds, 12)
+    expect(result.state.angularVelocityBodyRadPerSec.z).toBeCloseTo(3 - 0.4 * deltaSeconds, 12)
+  })
+
+  it('resets safely and reports invalid timesteps, state time and motor state', () => {
     const invalidStep = stepDroneState(stateAt(), [0, 0, 0, 0], DEFAULT_DRONE_CONFIG, Number.NaN)
     expect(invalidStep.reset).toBe(true)
     expect(invalidStep.state.warnings[0]).toContain('Invalid integration timestep')
@@ -83,5 +100,11 @@ describe('rigid-body dynamics', () => {
     const invalidMotor = stepDroneState(invalidMotorState, [0, 0, 0, 0], DEFAULT_DRONE_CONFIG, DT)
     expect(invalidMotor.reset).toBe(true)
     expect(invalidMotor.state.warnings[0]).toContain('Drone state was invalid')
+
+    const negativeTimeState = { ...base, timeSeconds: -1 }
+    expect(isFiniteDroneState(negativeTimeState)).toBe(false)
+    const negativeTime = stepDroneState(negativeTimeState, [0, 0, 0, 0], DEFAULT_DRONE_CONFIG, DT)
+    expect(negativeTime.reset).toBe(true)
+    expect(negativeTime.state.timeSeconds).toBe(0)
   })
 })

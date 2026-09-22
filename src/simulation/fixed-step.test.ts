@@ -28,14 +28,20 @@ describe('fixed timestep simulation', () => {
     expect(quaternionNearlyEqual(at60.orientation, at144.orientation, 1e-10)).toBe(true)
   })
 
-  it('bounds catch-up work and reports dropped steps', () => {
-    const accumulator = new FixedTimestepAccumulator({ maxCatchUpSteps: 2 })
+  it('bounds catch-up work and reports exact dropped time', () => {
+    const accumulator = new FixedTimestepAccumulator({
+      stepSeconds: 0.1,
+      maxCatchUpSteps: 2,
+      maxFrameDeltaSeconds: 1,
+    })
     let steps = 0
-    const result = accumulator.advance(1, () => { steps += 1 })
+    const result = accumulator.advance(0.55, () => { steps += 1 })
     expect(steps).toBe(2)
     expect(result.steps).toBe(2)
-    expect(result.droppedSteps).toBeGreaterThan(0)
-    expect(result.droppedSeconds).toBeGreaterThan(0)
+    expect(result.droppedSteps).toBe(3)
+    expect(result.droppedSeconds).toBeCloseTo(0.3, 12)
+    expect(result.accumulatorSeconds).toBeCloseTo(0.05, 12)
+    expect(result.simulatedSeconds + result.droppedSeconds + result.accumulatorSeconds).toBeCloseTo(0.55, 12)
     expect(result.warnings.join(' ')).toContain('Dropped')
   })
 
@@ -44,6 +50,19 @@ describe('fixed timestep simulation', () => {
     const result = accumulator.advance(1 / 60, () => undefined)
     expect(result.warnings.join(' ')).toContain('Invalid fixed timestep configuration')
     expect(result.warnings.join(' ')).toContain('Invalid fixed catch-up configuration')
+  })
+
+  it('reports a discarded remainder when an invalid render delta resets the accumulator', () => {
+    const accumulator = new FixedTimestepAccumulator({ stepSeconds: 0.1, maxFrameDeltaSeconds: 1 })
+    accumulator.advance(0.05, () => undefined)
+
+    const result = accumulator.advance(Number.NaN, () => undefined)
+
+    expect(result.steps).toBe(0)
+    expect(result.droppedSteps).toBe(0)
+    expect(result.droppedSeconds).toBeCloseTo(0.05, 12)
+    expect(result.accumulatorSeconds).toBe(0)
+    expect(result.warnings.join(' ')).toContain('Invalid render delta')
   })
 
   it('rejects non-finite render deltas instead of silently integrating', () => {

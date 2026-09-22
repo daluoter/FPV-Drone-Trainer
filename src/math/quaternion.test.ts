@@ -29,6 +29,16 @@ describe('quaternion math', () => {
     expect(quaternionNearlyEqual(orientation, normalizeQuaternion(orientation))).toBe(true)
   })
 
+  it('integrates a positive body rate with the documented quaternion sign', () => {
+    const orientation = integrateBodyAngularVelocity(IDENTITY_QUATERNION, vector3(Math.PI / 2, 0, 0), 1)
+    const rotatedBodyZ = rotateVectorByQuaternion(orientation, vector3(0, 0, 1))
+
+    expect(orientation.x).toBeGreaterThan(0)
+    expect(rotatedBodyZ.x).toBeCloseTo(0, 12)
+    expect(rotatedBodyZ.y).toBeCloseTo(-1, 12)
+    expect(rotatedBodyZ.z).toBeCloseTo(0, 12)
+  })
+
   it('does not move orientation for zero body angular velocity', () => {
     const orientation = integrateBodyAngularVelocity(IDENTITY_QUATERNION, vector3(), 1 / 240)
     expect(quaternionNearlyEqual(orientation, IDENTITY_QUATERNION)).toBe(true)

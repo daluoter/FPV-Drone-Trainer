@@ -31,6 +31,7 @@ export function isFiniteDroneState(state: DroneState): boolean {
     !isFiniteQuaternion(state.orientation) ||
     !isFiniteVector3(state.angularVelocityBodyRadPerSec) ||
     !Number.isFinite(state.timeSeconds) ||
+    state.timeSeconds < 0 ||
     !Number.isInteger(state.stepIndex) ||
     state.stepIndex < 0
   ) return false
@@ -51,7 +52,7 @@ export function resetDroneState(
   const reset = createInitialDroneState(config)
   return {
     ...reset,
-    timeSeconds: Number.isFinite(previous.timeSeconds) ? previous.timeSeconds : 0,
+    timeSeconds: Number.isFinite(previous.timeSeconds) && previous.timeSeconds >= 0 ? previous.timeSeconds : 0,
     stepIndex: Number.isInteger(previous.stepIndex) && previous.stepIndex >= 0 ? previous.stepIndex : 0,
     warnings: [...warnings],
   }

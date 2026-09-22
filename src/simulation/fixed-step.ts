@@ -48,7 +48,8 @@ function safeConfig(config: FixedStepConfig): NormalizedFixedStepConfig {
 /**
  * Render-loop independent fixed timestep accumulator. Excess work is bounded;
  * dropped steps are counted and surfaced rather than silently running a spiral
- * of catch-up work.
+ * of catch-up work. An invalid render delta resets the accumulator; any
+ * buffered sub-step is reported in droppedSeconds (not droppedSteps).
  */
 export class FixedTimestepAccumulator {
   private readonly configuration: Required<FixedStepConfig>
@@ -76,12 +77,13 @@ export class FixedTimestepAccumulator {
   public advance(frameDeltaSeconds: number, step: (deltaSeconds: number) => void): FixedStepAdvanceResult {
     const warnings: string[] = [...this.configurationWarnings]
     if (!Number.isFinite(frameDeltaSeconds) || frameDeltaSeconds < 0) {
+      const discardedRemainderSeconds = Math.max(0, this.accumulatorSeconds)
       this.accumulatorSeconds = 0
       return {
         steps: 0,
         simulatedSeconds: 0,
         droppedSteps: 0,
-        droppedSeconds: 0,
+        droppedSeconds: discardedRemainderSeconds,
         accumulatorSeconds: 0,
         interpolationAlpha: 0,
         warnings: [...warnings, 'Invalid render delta; fixed-step accumulator was reset.'],
