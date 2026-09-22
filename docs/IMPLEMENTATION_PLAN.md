@@ -1,0 +1,32 @@
+# Implementation plan and ownership
+
+Initial inspection: main at 35c66d2; clean checkout containing README.md and MIT LICENSE only.
+
+## Architecture decisions
+
+- Vite, strict TypeScript, React application shell, direct Three.js renderer, Vitest and ESLint.
+- Pure controller processing and calibration; no hardware assumptions. Poll fresh Gamepad snapshots outside React. Reject incompatible profiles, duplicate mappings, invalid endpoints and unstable neutral. Disconnect, blur and invalid input disarm.
+- Pure SI-unit simulation state with quaternion orientation; fixed 240 Hz accumulator independent of React and render FPS.
+- Pipeline: device -> calibration -> normalization -> deadband/filter -> Actual Rates -> rate controller -> Quad-X allocation -> motor response -> force/torque -> rigid body -> renderer.
+- Coordinate and mixer signs documented and tested before flight integration. Canonical Betaflight sources must support Actual Rates implementation.
+- Renderer owns presentation only. Training consumes state and trajectory, never directly moves the player. Replay snapshots are independent of player dynamics.
+- Local versioned storage only. No backend, accounts, multiplayer or decorative scope.
+
+## Serial implementation lanes
+
+This is multi-seam work. Exclusive ownership passes serially in /workspaces/FPV-Drone-Trainer on main; no concurrent writers. Each phase produces a validated commit and durable handoff before its dependent phase begins. Integration owners consume completed component contracts rather than reimplementing them.
+
+| Phase / owner seam | Files or contract | Gate / handoff |
+| --- | --- | --- |
+| 0 Foundation | package/config, shell, architecture docs | startup, test, typecheck, lint, build; commit |
+| 1 Controller | src/controller, Controller Lab UI, controller docs/tests | synthetic device calibration and neutral regression; commit |
+| 2 Dynamics | src/simulation, src/drone, math and coordinate docs/tests | gravity, thrust, torque signs, quaternion, timestep; commit |
+| 3 Flight controller | src/rates, src/flight-controller, pipeline integration | canonical rates, stability and neutral no-spin; commit |
+| 4 Free-flight integration | src/rendering, runtime and flight UI | safe arm, cameras, telemetry, browser smoke; commit |
+| 5 Tuning | settings UI, validated configuration/persistence | bounded settings, defaults, documentation; commit |
+| 6 Training framework | src/training contracts/state machine, menu/results/sticks | state transitions and progress; commit |
+| 7 Lessons | four geometric lesson evaluators and environment references | positive/negative maneuver traces; commit |
+| 8 Replay | src/replay and playback/path integration | bounded recorder, immutable snapshots/playback; commit |
+| 9 Verification/polish | integration fixes, accessibility and truthful docs | independent review, all commands, browser checks; commit |
+
+All phases run npm test, npm run typecheck, npm run lint, npm run build. Never commit a knowingly broken build. Preserve LICENSE and history. Browser/hardware limitations must remain explicit; synthetic tests are not transmitter validation. If blocked, checkpoint coherently rather than claiming completion.
