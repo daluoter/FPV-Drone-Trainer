@@ -7,6 +7,7 @@ import {
   calculateFpvCameraTransform,
   createCameraRig,
   updateCameraRig,
+  updateCameraRigOptions,
 } from './camera'
 
 describe('Free Flight camera contracts', () => {
@@ -30,6 +31,18 @@ describe('Free Flight camera contracts', () => {
       1e-10,
     )).toBe(true)
     expect(DEFAULT_FPV_MOUNT_ANGLE_DEGREES).toBe(20)
+  })
+
+  it('updates bounded FPV camera options without changing the free camera contract', () => {
+    const rig = createCameraRig()
+    updateCameraRigOptions(rig, { fpvFovDegrees: 110, fpvMountAngleDegrees: 50 })
+    expect(rig.options.fpvFovDegrees).toBe(110)
+    expect(rig.options.fpvMountAngleDegrees).toBe(50)
+    updateCameraRig(rig, {
+      positionM: { x: 0, y: 1, z: 0 },
+      orientation: quaternionFromRotationVector({ x: 0, y: 0, z: 0 }),
+    }, 'fpv')
+    expect(rig.fpv.fov).toBe(110)
   })
 
   it('updates FPV, chase, and free/debug cameras from one simulation state', () => {

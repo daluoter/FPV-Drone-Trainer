@@ -111,7 +111,7 @@ function validElapsedMs(value: number): number {
  * updates Three.js, and only publishes a throttled immutable telemetry view.
  */
 export class FlightRuntime {
-  public readonly simulation: FlightSimulation
+  public simulation: FlightSimulation
   public readonly keyboard: DeveloperKeyboardInput
   private readonly poller: RuntimePoller | null
   private readonly renderer: FlightRenderer | null
@@ -282,6 +282,27 @@ export class FlightRuntime {
     this.lastSafetyReasons = ['Flight runtime was reset and disarmed.']
     this.simulation.reset()
     this.refreshTelemetry(0, 0, 0)
+    this.emitTelemetry(true)
+  }
+
+  /**
+   * Replace simulation configuration only through an explicit reset boundary.
+   * This always disarms first, clears controller/input history, and starts the
+   * replacement simulation from its safe initial state.
+   */
+  public reconfigure(config: FlightSimulationConfig): void {
+    this.keyboard.releaseKeys()
+    this.simulation.disarm('Flight settings changed; runtime was reset and disarmed.')
+    this.simulation = new FlightSimulation(config)
+    this.signalHistory.reset()
+    this.lastSample = {
+      device: null,
+      snapshot: null,
+      processed: null,
+      input: null,
+      safetyReasons: [],
+    }
+    this.lastSafetyReasons = ['Flight settings applied; runtime was reset and disarmed.']
     this.emitTelemetry(true)
   }
 

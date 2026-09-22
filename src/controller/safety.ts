@@ -45,7 +45,7 @@ function appendArmPositionReasons(
 /**
  * Evaluates the persistent controller contract. This is intentionally safe to
  * display continuously: moving a stick after this gate passes does not revoke
- * calibration or reject an intended future flight command.
+ * calibration or reject an intended Free Flight command.
  */
 export function evaluateFlightEligibility(
   device: ControllerDevice | null,
@@ -92,7 +92,7 @@ export function evaluateFlightEligibility(
 /**
  * Arm-time handoff gate. Unlike evaluateFlightEligibility, this samples the
  * current rotational neutral and low-throttle condition only at arming; once a
- * future flight mode is armed, intended stick movement is not continuously
+ * Free Flight is armed, intended stick movement is not continuously
  * rejected by these handoff conditions.
  */
 export function evaluateFlightArmEligibility(

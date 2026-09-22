@@ -13,10 +13,12 @@ describe('application shell', () => {
         name: /train the inputs before you trust the drone/i,
       }),
     ).toBeInTheDocument()
-    expect(screen.getByText('Phase 4 / Free Flight build')).toBeInTheDocument()
+    expect(screen.getByText('Phase 5 / Tuning + Free Flight build')).toBeInTheDocument()
     expect(screen.getByText('Controller Lab reads only raw input until calibration proves it safe.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /controller lab/i })).toBeEnabled()
     expect(screen.getByRole('button', { name: /free flight/i })).toBeEnabled()
+    expect(screen.getByRole('heading', { name: /tune the response, then reset/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /apply \+ reset/i })).toBeEnabled()
   })
 
   it('exposes the planned signal path without starting simulation', () => {

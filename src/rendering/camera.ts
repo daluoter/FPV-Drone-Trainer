@@ -34,12 +34,20 @@ export interface CameraTransform {
   readonly orientation: Quaternion
 }
 
+export interface ResolvedCameraRigOptions {
+  fpvFovDegrees: number
+  fpvMountAngleDegrees: number
+  fpvMountPositionM: Vector3
+  chaseOffsetM: Vector3
+  chaseLookAtOffsetM: Vector3
+}
+
 export interface FlightCameraRig {
   readonly fpv: THREE.PerspectiveCamera
   readonly chase: THREE.PerspectiveCamera
   readonly free: THREE.PerspectiveCamera
   readonly cameras: readonly [THREE.PerspectiveCamera, THREE.PerspectiveCamera, THREE.PerspectiveCamera]
-  readonly options: Required<Pick<CameraRigOptions, 'fpvFovDegrees' | 'fpvMountAngleDegrees' | 'fpvMountPositionM' | 'chaseOffsetM' | 'chaseLookAtOffsetM'>>
+  readonly options: ResolvedCameraRigOptions
   mode: CameraMode
   freeInitialized: boolean
 }
@@ -122,6 +130,17 @@ export function createCameraRig(options: CameraRigOptions = {}): FlightCameraRig
     mode: 'fpv',
     freeInitialized: false,
   }
+}
+
+/** Update presentation-only camera tuning at an explicit application boundary. */
+export function updateCameraRigOptions(
+  rig: FlightCameraRig,
+  options: Pick<CameraRigOptions, 'fpvFovDegrees' | 'fpvMountAngleDegrees'>,
+): void {
+  rig.options.fpvFovDegrees = finiteOr(options.fpvFovDegrees, rig.options.fpvFovDegrees)
+  rig.options.fpvMountAngleDegrees = finiteOr(options.fpvMountAngleDegrees, rig.options.fpvMountAngleDegrees)
+  rig.fpv.fov = rig.options.fpvFovDegrees
+  rig.fpv.updateProjectionMatrix()
 }
 
 function applyFpvCamera(

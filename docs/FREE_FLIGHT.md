@@ -1,10 +1,11 @@
-# Free Flight integration (Phase 4)
+# Free Flight integration (Phase 4/5)
 
-Phase 4 connects the completed controller, rates, flight-controller and rigid-body simulation contracts to a direct Three.js presentation. It contains no training lessons, tuning UI or hardware-realism claim.
+Phase 4 connects the completed controller, rates, flight-controller and rigid-body simulation contracts to a direct Three.js presentation. The Free Flight seam contains no training lessons or replay; Phase 5 tuning remains a separate UI and makes no hardware-realism claim.
 
 ## Ownership
 
 - `FlightRuntime` owns one `requestAnimationFrame` loop. Each frame polls a fresh selected Gamepad snapshot, processes the handed-off profile, advances `FlightSimulation` through its fixed 240 Hz accumulator, updates the Three.js scene and publishes only a throttled telemetry snapshot to React.
+- Phase 5 tuning is handed to the runtime as a complete validated simulation configuration. `FlightRuntime.reconfigure` disarms, clears history and replaces the simulation from a safe initial state; it is never a silent in-flight mutation.
 - `ControllerLab` and `FlightRuntime` share the application-owned `GamepadPoller`. The Lab subscribes to a throttled presentation view; it does not start a second polling loop in the Phase 4 shell.
 - `FlightRenderer` owns the scene, visual quad, ground/grid, takeoff pad, reference objects, cameras, resize and disposal. It consumes `DroneState` and never edits flight state.
 
@@ -44,4 +45,4 @@ npm run lint
 npm run build
 ```
 
-For a no-hardware browser smoke check, run `npm run dev`, open the printed local URL in a desktop browser, select Developer keyboard fallback explicitly, switch FPV/Chase/Free cameras, toggle the HUD, press Arm, exercise the reset/disarm controls, and check that blur/hidden transitions return to SAFE. A physical transmitter remains required for endpoint, direction, neutral and spontaneous-rotation validation; no real hardware evidence is implied by synthetic tests or browser smoke.
+For a no-hardware browser smoke check, run `npm run dev`, open the printed local URL in a desktop browser, select Developer keyboard fallback explicitly, switch FPV/Chase/Free cameras, toggle the HUD, press Arm, exercise the reset/disarm controls, and check that blur/hidden transitions return to SAFE. A physical transmitter remains required for endpoint, direction, neutral and spontaneous-rotation validation; no real hardware evidence is implied by synthetic tests or browser smoke. Three.js disposal and actual WebGL context/resource release remain browser-only evidence; jsdom contract tests cannot prove GPU cleanup.

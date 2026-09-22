@@ -10,6 +10,7 @@ import {
   type PollerState,
   type RawGamepadSnapshot,
 } from '../controller'
+import { createDefaultFlightControllerConfig, FlightSimulation } from '../flight-controller'
 import { FlightRuntime } from './flightRuntime'
 
 const neutralReport = {
@@ -122,6 +123,123 @@ describe('Free Flight runtime safety transitions', () => {
     frames.run(200)
     expect(runtime.getTelemetry().armed).toBe(false)
     expect(runtime.getTelemetry().warnings.join(' ')).toMatch(/controller|select|disconnected/i)
+    runtime.dispose()
+  })
+
+  it('disarms and requires explicit rearm when the document becomes hidden', () => {
+    const handoff = createHandoff()
+    const poller = new FakePoller(handoff.device, handoff.snapshot)
+    const frames = nextFrameRunner()
+    const runtime = new FlightRuntime({
+      poller,
+      profile: handoff.profile,
+      scheduleFrame: frames.schedule,
+      cancelFrame: frames.cancel,
+      now: () => 100,
+    })
+    const hiddenDescriptor = Object.getOwnPropertyDescriptor(document, 'hidden')
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true })
+    try {
+      runtime.start()
+      frames.run(0)
+      expect(runtime.arm()).toBe(true)
+      document.dispatchEvent(new Event('visibilitychange'))
+      expect(runtime.getTelemetry().armed).toBe(false)
+      expect(runtime.getTelemetry().warnings.join(' ')).toMatch(/hidden|rearm/i)
+    } finally {
+      if (hiddenDescriptor) Object.defineProperty(document, 'hidden', hiddenDescriptor)
+      else Object.defineProperty(document, 'hidden', { configurable: true, value: false })
+      runtime.dispose()
+    }
+  })
+
+  it('requires explicit rearm when a connected controller changes session identity', () => {
+    const handoff = createHandoff()
+    const poller = new FakePoller(handoff.device, handoff.snapshot)
+    const frames = nextFrameRunner()
+    const runtime = new FlightRuntime({
+      poller,
+      profile: handoff.profile,
+      scheduleFrame: frames.schedule,
+      cancelFrame: frames.cancel,
+      now: () => 100,
+    })
+    runtime.start()
+    frames.run(0)
+    expect(runtime.arm()).toBe(true)
+
+    const nextDevice = { ...handoff.device, connectionSession: 'session-b' }
+    const nextSnapshot = { ...handoff.snapshot, ...nextDevice, timestamp: 4 }
+    poller.snapshot = nextSnapshot
+    poller.state = { ...poller.state, devices: [nextDevice], snapshots: [nextSnapshot] }
+    frames.run(100)
+
+    expect(runtime.getTelemetry().armed).toBe(false)
+    expect(runtime.getTelemetry().warnings.join(' ')).toMatch(/session|device|rearm/i)
+    runtime.dispose()
+  })
+
+  it('sends keyboard input through the same rates and simulation pipeline as direct RC input', () => {
+    const frames = nextFrameRunner()
+    let currentTime = 0
+    const runtime = new FlightRuntime({
+      scheduleFrame: frames.schedule,
+      cancelFrame: frames.cancel,
+      now: () => currentTime,
+    })
+    runtime.setInputSource('keyboard')
+    runtime.start()
+    frames.run(0)
+    expect(runtime.simulation.getState().stepIndex).toBe(0)
+    expect(runtime.arm()).toBe(true)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd' }))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'r' }))
+    expect(runtime.keyboard.getInput()).toEqual({ roll: 1, pitch: 0, yaw: 0, throttle: 1 })
+    currentTime = 100
+    frames.run(100)
+
+    const expected = new FlightSimulation()
+    expected.arm()
+    expected.advance(0.1, { roll: 1, pitch: 0, yaw: 0, throttle: 1 })
+    const actual = runtime.simulation.getTelemetry()
+    const expectedTelemetry = expected.getTelemetry()
+    expect(actual.targetPilotRateRadPerSec).toEqual(expectedTelemetry.targetPilotRateRadPerSec)
+    expect(actual.motors.map((motor) => motor.command)).toEqual(expectedTelemetry.motors.map((motor) => motor.command))
+    runtime.dispose()
+  })
+
+  it('reconfigures only through a disarmed reset boundary', () => {
+    const frames = nextFrameRunner()
+    const runtime = new FlightRuntime({
+      scheduleFrame: frames.schedule,
+      cancelFrame: frames.cancel,
+      now: () => 100,
+    })
+    runtime.setInputSource('keyboard')
+    runtime.start()
+    frames.run(0)
+    expect(runtime.arm()).toBe(true)
+    frames.run(16)
+    frames.run(100)
+    expect(runtime.simulation.getState().stepIndex).toBeGreaterThan(0)
+
+    const defaults = createDefaultFlightControllerConfig()
+    const controller = {
+      ...defaults,
+      rates: {
+        ...defaults.rates,
+        axes: {
+          ...defaults.rates.axes,
+          roll: { ...defaults.rates.axes.roll, centerRateDegPerSec: 120 },
+        },
+      },
+    }
+    runtime.reconfigure({ controller })
+
+    expect(runtime.getTelemetry().armed).toBe(false)
+    expect(runtime.getTelemetry().warnings.join(' ')).toMatch(/settings|reset|disarmed/i)
+    expect(runtime.simulation.getState().stepIndex).toBe(0)
+    expect(runtime.simulation.controller.config.rates.axes.roll.centerRateDegPerSec).toBe(120)
     runtime.dispose()
   })
 

@@ -3,6 +3,8 @@ import { useCallback, useMemo, useState } from 'react'
 import { createBrowserGamepadPoller } from '../controller'
 import ControllerLab, { type ControllerLabFlightHandoff } from '../controller/ControllerLab'
 import FreeFlight from '../free-flight/FreeFlight'
+import TuningPanel from '../tuning/TuningPanel'
+import { copyTuningSettings, TuningSettingsStore, type TuningSettings } from '../tuning'
 
 type RoadmapStatus = 'active' | 'next' | 'planned' | 'complete'
 
@@ -31,6 +33,11 @@ const roadmap: RoadmapItem[] = [
   {
     title: 'Free Flight',
     description: 'Safe arm handoff, Three.js field, camera modes, and developer telemetry.',
+    status: 'complete',
+  },
+  {
+    title: 'Bounded tuning',
+    description: 'Versioned Actual Rates, dynamics, PID and camera settings with reset safety.',
     status: 'active',
   },
   {
@@ -60,10 +67,21 @@ function statusLabel(status: RoadmapStatus): string {
 
 export default function App() {
   const poller = useMemo(() => createBrowserGamepadPoller(), [])
+  const tuningStore = useMemo(() => new TuningSettingsStore(), [])
+  const initialTuningLoad = useMemo(() => tuningStore.load(), [tuningStore])
+  const [tuningSettings, setTuningSettings] = useState(initialTuningLoad.settings)
+  const [tuningNotice] = useState<string | null>(() => initialTuningLoad.errors.length > 0
+    ? 'Saved tuning was unavailable or incompatible; bounded defaults are active.'
+    : null)
   const [flightProfile, setFlightProfile] = useState<ControllerLabFlightHandoff['profile']>(null)
   const onFlightHandoff = useCallback((handoff: ControllerLabFlightHandoff) => {
     setFlightProfile(handoff.profile)
   }, [])
+  const onTuningApply = useCallback((next: TuningSettings) => {
+    const result = tuningStore.save(next)
+    if (result.saved) setTuningSettings(copyTuningSettings(next))
+    return result
+  }, [tuningStore])
 
   return (
     <div className="app-shell">
@@ -79,7 +97,7 @@ export default function App() {
         </a>
         <div className="topbar-status" aria-label="Application status">
           <span className="status-light" aria-hidden="true" />
-          <span>Phase 4 / Free Flight build</span>
+          <span>Phase 5 / Tuning + Free Flight build</span>
           <span className="status-divider" aria-hidden="true" />
           <span className="muted">RC gate + developer fallback</span>
         </div>
@@ -127,7 +145,7 @@ export default function App() {
             <div className="status-readout">
               <div className="readout-row">
                 <span>Current phase</span>
-                <strong>Free Flight</strong>
+                <strong>Bounded tuning</strong>
               </div>
               <div className="readout-row">
                 <span>Controller</span>
@@ -151,7 +169,9 @@ export default function App() {
 
         <ControllerLab poller={poller} onFlightHandoff={onFlightHandoff} />
 
-        <FreeFlight poller={poller} profile={flightProfile} />
+        <TuningPanel settings={tuningSettings} notice={tuningNotice} onApply={onTuningApply} />
+
+        <FreeFlight poller={poller} profile={flightProfile} settings={tuningSettings} />
 
         <section className="workspace-grid" aria-label="Application preview and roadmap">
           <article className="viewport-card panel-card">
@@ -195,7 +215,7 @@ export default function App() {
                 <p className="panel-kicker">Build sequence</p>
                 <h2>Trust, then tune.</h2>
               </div>
-              <span className="progress-count">01 / 09</span>
+              <span className="progress-count">05 / 09</span>
             </div>
             <div className="roadmap-list">
               {roadmap.map((item, index) => (
@@ -238,7 +258,7 @@ export default function App() {
       <footer className="app-footer">
         <span>FPV Drone Trainer</span>
         <span>Built for measurable flight feel.</span>
-        <span className="footer-version">v0.1.0 / controller lab</span>
+        <span className="footer-version">v0.1.0 / phase 5 tuning</span>
       </footer>
     </div>
   )

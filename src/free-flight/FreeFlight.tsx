@@ -7,10 +7,12 @@ import {
   type FlightInputSource,
   type FlightRuntimeTelemetry,
 } from '../runtime'
+import { flightSimulationConfigFromTuning, type TuningSettings } from '../tuning'
 
 export interface FreeFlightProps {
   readonly poller: GamepadPoller
   readonly profile: ControllerProfile | null
+  readonly settings: TuningSettings
 }
 
 function format(value: number | undefined, digits = 2): string {
@@ -38,9 +40,11 @@ function fallbackTelemetryLabel(telemetry: FlightRuntimeTelemetry | null): strin
   return telemetry.armed ? 'ARMED / simulation running' : 'SAFE / disarmed'
 }
 
-export default function FreeFlight({ poller, profile }: FreeFlightProps) {
+export default function FreeFlight({ poller, profile, settings }: FreeFlightProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const appliedSettingsRef = useRef(settings)
   const runtimeRef = useRef<FlightRuntime | null>(null)
+  const rendererRef = useRef<FlightRenderer | null>(null)
   const [telemetry, setTelemetry] = useState<FlightRuntimeTelemetry | null>(null)
   const [source, setSource] = useState<FlightInputSource>('controller')
   const [cameraMode, setCameraMode] = useState<CameraMode>('fpv')
@@ -51,16 +55,18 @@ export default function FreeFlight({ poller, profile }: FreeFlightProps) {
     if (!canvas) return
 
     let cleanupResize = (): void => undefined
-    const renderer = new FlightRenderer(canvas)
+    const renderer = new FlightRenderer(canvas, settings.camera)
     const runtime = new FlightRuntime({
       poller,
       profile,
       renderer,
+      simulation: flightSimulationConfigFromTuning(settings),
       onTelemetry: setTelemetry,
     })
     runtime.setInputSource(source)
     runtime.setCameraMode(cameraMode)
     runtimeRef.current = runtime
+    rendererRef.current = renderer
     runtime.start()
     setTelemetry(runtime.getTelemetry())
 
@@ -85,10 +91,20 @@ export default function FreeFlight({ poller, profile }: FreeFlightProps) {
       runtime.dispose()
       renderer.dispose()
       runtimeRef.current = null
+      rendererRef.current = null
     }
     // The runtime owns the loop; profile/source updates are handed off by the
     // effects below rather than restarting the renderer.
   }, [poller])
+
+  useEffect(() => {
+    const runtime = runtimeRef.current
+    if (!runtime || appliedSettingsRef.current === settings) return
+    runtime.reconfigure(flightSimulationConfigFromTuning(settings))
+    rendererRef.current?.setCameraOptions(settings.camera)
+    appliedSettingsRef.current = settings
+    setTelemetry(runtime.getTelemetry())
+  }, [settings])
 
   useEffect(() => {
     runtimeRef.current?.setControllerProfile(profile)
@@ -133,11 +149,12 @@ export default function FreeFlight({ poller, profile }: FreeFlightProps) {
     <section className="free-flight-section" id="free-flight" aria-labelledby="free-flight-title">
       <div className="free-flight-heading">
         <div>
-          <p className="panel-kicker">Phase 4 / Free Flight</p>
+          <p className="panel-kicker">Phase 5 / Free Flight</p>
           <h2 id="free-flight-title">Fly the state, not the shortcut.</h2>
           <p>
             The simulation and renderer run outside React at a fixed 240 Hz. Arm is an explicit
             handoff: calibrated RC input needs a fresh session gate, neutral sticks, and low throttle.
+            Tuning changes are applied only through a disarmed reset.
           </p>
         </div>
         <div className={`flight-state-badge ${telemetry?.armed ? 'flight-state-armed' : ''}`}>

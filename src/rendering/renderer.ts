@@ -6,6 +6,7 @@ import {
   createCameraRig,
   resizeCameraRig,
   updateCameraRig,
+  updateCameraRigOptions,
   type CameraMode,
   type CameraRigOptions,
   type FlightCameraRig,
@@ -43,6 +44,11 @@ export class FlightRenderer {
 
   public setCameraMode(mode: CameraMode): void {
     this.cameraRig.mode = mode
+  }
+
+  /** Apply camera presentation settings only when the owning runtime is reset. */
+  public setCameraOptions(options: Pick<CameraRigOptions, 'fpvFovDegrees' | 'fpvMountAngleDegrees'>): void {
+    updateCameraRigOptions(this.cameraRig, options)
   }
 
   public resize(width = this.canvas.clientWidth, height = this.canvas.clientHeight): void {

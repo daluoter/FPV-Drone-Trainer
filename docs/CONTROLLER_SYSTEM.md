@@ -23,7 +23,7 @@ Gamepad snapshot
   -> remapped small deadband (roll/pitch/yaw only)
   -> short low-pass filter (history owned by the external polling loop)
   -> final normalized channel
-  -> future Actual Rates / flight controller
+  -> Actual Rates / flight controller
 ```
 
 The Controller Lab exposes every stage for Roll, Pitch, Yaw and Throttle:

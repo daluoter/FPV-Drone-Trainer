@@ -4,7 +4,7 @@ Initial inspection: main at 35c66d2 contained only README.md and MIT LICENSE. Ph
 
 ## Current checkpoint
 
-Phase 4 Free Flight integration is complete in this checkpoint. It consumes the Phase 1 controller and Phase 2/3 simulation contracts without adding training or tuning scope. The durable phase evidence includes `src/runtime`, `src/rendering`, `src/free-flight`, runtime safety-transition tests and camera-transform contract tests. Browser smoke and physical transmitter evidence remain separate from automated gates.
+Phase 5 bounded tuning is complete in this checkpoint. It consumes the Phase 1 controller and Phase 2/3 simulation contracts without adding training or replay scope. The durable phase evidence includes `src/runtime`, `src/rendering`, `src/free-flight`, `src/tuning`, hidden-document/session/keyboard safety regressions, camera-transform tests, bounded settings/persistence tests and an explicit disarmed reconfiguration boundary. Browser smoke, WebGL disposal and physical transmitter evidence remain separate from automated gates.
 
 ## Architecture decisions
 
@@ -26,8 +26,8 @@ This is multi-seam work. Exclusive ownership passes serially in /workspaces/FPV-
 | 1 Controller (complete) | src/controller, Controller Lab UI, controller docs/tests | synthetic device calibration and neutral regression; commits a70e907, f8771a8, 8b2188b |
 | 2 Dynamics (complete) | src/simulation, src/drone, math and coordinate/physics docs/tests | gravity, thrust, torque signs, quaternion, timestep; commit f8f9f7b |
 | 3 Flight controller | src/rates, src/flight-controller, pipeline integration | canonical rates, SI rate PID/antiwindup, fixed-step neutral and hover integration; commit |
-| 4 Free-flight integration | src/rendering, runtime and flight UI | safe arm, cameras, telemetry, browser smoke; complete in this checkpoint |
-| 5 Tuning | settings UI, validated configuration/persistence | bounded settings, defaults, documentation; commit |
+| 4 Free-flight integration | src/rendering, runtime and flight UI | safe arm, cameras, telemetry, browser smoke; complete |
+| 5 Tuning | src/tuning, settings UI, validated configuration/persistence and runtime boundary | bounded settings, defaults, persistence rejection, reset safety and documentation; complete in this checkpoint |
 | 6 Training framework | src/training contracts/state machine, menu/results/sticks | state transitions and progress; commit |
 | 7 Lessons | four geometric lesson evaluators and environment references | positive/negative maneuver traces; commit |
 | 8 Replay | src/replay and playback/path integration | bounded recorder, immutable snapshots/playback; commit |

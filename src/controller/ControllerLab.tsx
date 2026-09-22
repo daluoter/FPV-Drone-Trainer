@@ -547,7 +547,7 @@ export default function ControllerLab({ poller: providedPoller, onFlightHandoff 
             {selectedDevice && wizardStep === 'ready' && (
               <div className="lab-success-message">
                 <span aria-hidden="true">✓</span>
-                Fresh neutral output is verified for this connection. This Phase 1 build still has no flight mode; future flight must consume this gate.
+                Fresh neutral output is verified for this connection. Free Flight consumes this handoff at arm time; reconnects still require a new timed check.
               </div>
             )}
             {captureLabel && <p className="capture-status" role="status">{captureLabel}</p>}
@@ -569,7 +569,7 @@ export default function ControllerLab({ poller: providedPoller, onFlightHandoff 
               <span className="safety-state">{eligibility.eligible ? 'PASS' : 'LOCKED'}</span>
             </div>
             <p className="safety-description">
-              This gate is the only contract a future flight mode may use. It never hides invalid data behind a larger deadzone.
+              Free Flight uses this gate at arm time. It never hides invalid data behind a larger deadzone.
             </p>
             <ul className="safety-reasons">
               {eligibility.eligible ? <li className="reason-pass">Device, mapping, endpoints, direction and neutral are verified.</li> : eligibility.reasons.map((reason) => <li key={reason}>{reason}</li>)}

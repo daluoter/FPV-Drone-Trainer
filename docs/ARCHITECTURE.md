@@ -2,7 +2,7 @@
 
 ## Current scope
 
-Phase 4 implements the controller boundary, canonical Actual Rates, a modular SI angular-rate PID loop, deterministic controller-to-simulation runtime and the Free Flight presentation seam. The application-owned poller is sampled by the runtime's requestAnimationFrame owner; React receives throttled telemetry only. The direct Three.js scene contains ground/grid, a takeoff pad, simple references and a quad, with rigid FPV, chase and free/debug cameras. The explicit RC arm handoff consumes the Controller Lab's verified profile/session and checks current neutral/low throttle only at arm time. Developer keyboard input is opt-in and follows the same normalized RC/rates/PID path. Training, tuning, replay and lessons remain separate phases.
+Phase 5 implements the controller boundary, canonical Actual Rates, a modular SI angular-rate PID loop, deterministic controller-to-simulation runtime, the Free Flight presentation seam and bounded tuning. The application-owned poller is sampled by the runtime's requestAnimationFrame owner; React receives throttled telemetry only. The direct Three.js scene contains ground/grid, a takeoff pad, simple references and a quad, with rigid FPV, chase and free/debug cameras. The explicit RC arm handoff consumes the Controller Lab's verified profile/session and checks current neutral/low throttle only at arm time. Developer keyboard input is opt-in and follows the same normalized RC/rates/PID path. Tuning edits a copied, validated versioned configuration and reaches flight only through an explicit disarmed reset/reconfiguration boundary. Training, replay and lessons remain separate phases.
 
 The phase contract is tracked in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Each later phase must preserve the boundaries below and pass the phase gate before the next seam is started.
 
@@ -29,13 +29,14 @@ Config domain persists versioned settings and controller profiles locally.
 
 ### Ownership rules
 
-- **React/UI** owns presentation and low-frequency application state. It must not contain flight physics or direct controller-to-object rotation.
+- **React/UI** owns presentation, low-frequency application state and bounded tuning forms. It must not contain flight physics or direct controller-to-object rotation. Tuning may request a runtime reconfiguration, but it cannot mutate an armed simulation in place.
 - **Controller** owns fresh Gamepad snapshots, device selection, calibration, normalization, inversion, deadband, filtering, profile compatibility, disconnect handling and safety status. `GamepadPoller` runs outside React; the Controller Lab subscribes only to a throttled presentation view. It must not know about Three.js.
 - **Rates and flight controller** convert normalized channels into desired angular rates and motor corrections. The Phase 3 runtime owns per-axis SI rate PID state, antiwindup, bounded outputs, explicit pilot/body signs and telemetry. Acro mode never self-levels when the roll or pitch stick is released.
 - **Simulation** owns the authoritative SI-unit state: position, velocity, quaternion orientation, angular velocity, mass, inertia, forces, torques, motor response, ground contact and fixed-step integration. The Phase 3 runtime feeds bounded mixer commands into that owner, has no React or renderer dependency and reports dropped steps, controller telemetry and safe-reset warnings.
-- **Renderer** consumes simulation snapshots and owns Three.js objects, cameras, and visual environment. `FlightRenderer` handles resize/disposal and does not perform calibration or flight dynamics.
+- **Renderer** consumes simulation snapshots and owns Three.js objects, cameras, and visual environment. `FlightRenderer` handles resize/disposal and does not perform calibration or flight dynamics. Actual WebGL resource disposal/context-loss behavior remains browser-only evidence.
 - **Training** evaluates state, geometry, trajectory, and timing windows. A stick sequence alone cannot pass a lesson.
 - **Replay** stores compact immutable samples and can later drive a ghost or analysis view without mutating the player simulation.
+- **Config/tuning** validates complete versioned local settings and rejects corrupt or incompatible data. A settings apply replaces the fixed-step runtime only after disarming and resetting controller/input state.
 
 ## Data contracts
 
@@ -76,7 +77,7 @@ Normal flight is unavailable until the controller contract can prove:
 - centered roll, pitch, and yaw are stable after processing; and
 - all processed values are finite.
 
-The Controller Lab evaluates this boundary, displays each failure reason and deliberately leaves flight unavailable in Phase 1. Future flight phases must consume this gate rather than bypassing it.
+The Controller Lab evaluates this boundary and displays each failure reason. Free Flight consumes this gate rather than bypassing it; the arm-time handoff adds current neutral and low-throttle checks.
 
 ## Testing strategy
 

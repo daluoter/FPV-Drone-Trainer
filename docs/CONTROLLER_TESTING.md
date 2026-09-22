@@ -22,9 +22,9 @@ Phase 1 provides the Controller Lab and deterministic signal-processing tests. T
 13. Reload the page and confirm measured calibration loads but the historical neutral report is marked for retest. Reconnect the same device and confirm a new timed neutral test is required; changing the device layout/mapping or selecting another device must not load a profile blindly.
 14. Edit inversion/deadband or choose Recalibrate and confirm verification timestamps clear.
 
-## Flight handoff (future phases)
+## Flight handoff (Free Flight)
 
-15. Verify the continuous safety gate reports calibrated and eligible only after device, mapping, endpoints, directions, current finite data (including buttons) and a fresh connection-bound neutral report all pass. Verify the separate future arm handoff requires current rotational neutral and throttle <= 0.05.
+15. Verify the continuous safety gate reports calibrated and eligible only after device, mapping, endpoints, directions, current finite data (including buttons) and a fresh connection-bound neutral report all pass. Verify the separate Free Flight arm handoff requires current rotational neutral and throttle <= 0.05.
 16. With the transmitter at the documented safe throttle condition, enter Free Flight only after the arm gate allows it. Once armed, intended stick movement must be accepted rather than continuously rejected by the pre-arm neutral check.
 17. Leave all sticks untouched and watch Roll/Pitch/Yaw commands for spontaneous increase. Stop immediately if an unexplained command or rotation appears.
 18. Move one physical control at a time and verify expected sign and independent response before combined flight.
