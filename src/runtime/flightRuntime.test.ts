@@ -11,6 +11,7 @@ import {
   type RawGamepadSnapshot,
 } from '../controller'
 import { createDefaultFlightControllerConfig, FlightSimulation } from '../flight-controller'
+import type { LessonSetup } from '../training/types'
 import { FlightRuntime } from './flightRuntime'
 
 const neutralReport = {
@@ -240,6 +241,33 @@ describe('Free Flight runtime safety transitions', () => {
     expect(runtime.getTelemetry().warnings.join(' ')).toMatch(/settings|reset|disarmed/i)
     expect(runtime.simulation.getState().stepIndex).toBe(0)
     expect(runtime.simulation.controller.config.rates.axes.roll.centerRateDegPerSec).toBe(120)
+    runtime.dispose()
+  })
+
+  it('applies a requested training spawn/orientation only through a disarmed reset', () => {
+    const frames = nextFrameRunner()
+    const runtime = new FlightRuntime({
+      scheduleFrame: frames.schedule,
+      cancelFrame: frames.cancel,
+      now: () => 100,
+    })
+    runtime.setInputSource('keyboard')
+    runtime.start()
+    frames.run(0)
+    expect(runtime.arm()).toBe(true)
+
+    const setup: LessonSetup = {
+      requiresDisarmed: true,
+      resetSimulation: true,
+      sceneReferenceIds: ['split-s-reference'],
+      spawnPositionM: { x: 2, y: 25, z: -3 },
+      spawnOrientation: { x: 0, y: 0.70710678, z: 0, w: 0.70710678 },
+    }
+    runtime.resetForTraining(setup)
+    expect(runtime.getTelemetry().armed).toBe(false)
+    expect(runtime.simulation.getState().positionM).toEqual(setup.spawnPositionM)
+    expect(runtime.simulation.getState().orientation.y).toBeCloseTo(setup.spawnOrientation?.y ?? 0)
+    expect(runtime.simulation.getState().orientation.w).toBeCloseTo(setup.spawnOrientation?.w ?? 1)
     runtime.dispose()
   })
 

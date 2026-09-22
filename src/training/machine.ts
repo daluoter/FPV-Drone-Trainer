@@ -34,6 +34,14 @@ function lessonMap(lessons: readonly LessonDefinition[]): ReadonlyMap<string, Le
   return new Map(lessons.map((lesson) => [lesson.id, lesson]))
 }
 
+function copySceneReferences(references: readonly TrainingSceneReference[]): readonly TrainingSceneReference[] {
+  return references.map((reference) => ({
+    ...reference,
+    positionM: { ...reference.positionM },
+    sizeM: reference.sizeM ? { ...reference.sizeM } : undefined,
+  }))
+}
+
 function copyInput(input: TrainingSample['normalizedInput']): TrainingSample['normalizedInput'] {
   return input ? { ...input } : null
 }
@@ -387,11 +395,7 @@ export function createTrainingMachineState(
     lastEvaluation: null,
     result: null,
     setupRequest: null,
-    sceneReferences: (options.sceneReferences ?? []).map((reference: TrainingSceneReference) => ({
-      ...reference,
-      positionM: { ...reference.positionM },
-      sizeM: reference.sizeM ? { ...reference.sizeM } : undefined,
-    })),
+    sceneReferences: copySceneReferences(options.sceneReferences ?? []),
     lastError: null,
   }
 }
@@ -414,6 +418,16 @@ export function reduceTrainingState(
         return stateError(state, 'This lesson is coming soon; its evaluator is not available yet.')
       }
       return clearSession({ ...state, lessonId: lesson.id }, lesson.id)
+    }
+    case 'SET_SCENE_REFERENCES': {
+      // Renderer metadata is a setup contract, not a player mutation. Never
+      // replace the evaluator context once an attempt is ACTIVE.
+      if (state.phase === 'ACTIVE') return state
+      return {
+        ...state,
+        sceneReferences: copySceneReferences(action.sceneReferences),
+        lastError: null,
+      }
     }
     case 'START': {
       if (state.phase !== 'READY') return stateError(state, 'A lesson can only start from READY.')
@@ -494,6 +508,10 @@ export class TrainingSession {
 
   public selectLesson(lessonId: string): TrainingMachineState {
     return this.dispatch({ type: 'SELECT_LESSON', lessonId })
+  }
+
+  public setSceneReferences(sceneReferences: readonly TrainingSceneReference[]): TrainingMachineState {
+    return this.dispatch({ type: 'SET_SCENE_REFERENCES', sceneReferences })
   }
 
   public start(timestampSeconds: number): TrainingMachineState {

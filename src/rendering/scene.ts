@@ -4,7 +4,7 @@ import type { DroneConfig, DroneState } from '../drone'
 import { DEFAULT_DRONE_CONFIG } from '../drone'
 import type { Vector3 } from '../math/vector'
 
-export type FlightSceneReferenceKind = 'pad' | 'marker' | 'gate'
+export type FlightSceneReferenceKind = 'pad' | 'zone' | 'marker' | 'gate' | 'poi'
 
 /** Stable environment identity exposed to future training evaluators. */
 export interface FlightSceneReference {
@@ -90,38 +90,68 @@ function createQuadVisual(): THREE.Group {
   return quad
 }
 
-function createReferenceObjects(): {
+function createReferenceObjects(spawnPositionM: Vector3): {
   readonly objects: readonly THREE.Object3D[]
   readonly contract: readonly FlightSceneReference[]
 } {
   const references: THREE.Object3D[] = []
   const contract: FlightSceneReference[] = []
+
+  // The hover reference is deliberately above the pad. Its position is an
+  // immutable evaluator anchor; the visual cylinder is presentation only.
+  const hoverZonePosition = { x: spawnPositionM.x, y: 3, z: spawnPositionM.z }
+  const hoverZone = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.2, 1.2, 0.04, 32),
+    new THREE.MeshStandardMaterial({
+      color: 0xb8f36b,
+      transparent: true,
+      opacity: 0.32,
+      roughness: 0.7,
+    }),
+  )
+  hoverZone.name = 'reference-hover-zone'
+  hoverZone.position.set(hoverZonePosition.x, hoverZonePosition.y, hoverZonePosition.z)
+  references.push(hoverZone)
+  contract.push({
+    id: 'hover-zone',
+    kind: 'zone',
+    object: hoverZone,
+    positionM: hoverZonePosition,
+    sizeM: { x: 2.4, y: 0.04, z: 2.4 },
+  })
+
   const colors = [0xffc978, 0xb8f36b, 0x8abac4, 0xd28bff]
-  const positions = [
-    [-4, 0.45, -4],
-    [4, 0.45, -4],
-    [-4, 0.45, 4],
-    [4, 0.45, 4],
+  const markers = [
+    { id: 'turn-entry', name: 'reference-turn-entry', position: { x: -4, y: 0.45, z: -4 } },
+    { id: 'turn-apex', name: 'reference-turn-apex', position: { x: 4, y: 0.45, z: -4 } },
+    { id: 'turn-exit', name: 'reference-turn-exit', position: { x: -4, y: 0.45, z: 4 } },
+    { id: 'orbit-poi', name: 'reference-orbit-poi', position: { x: 4, y: 2.5, z: 4 } },
   ] as const
-  for (const [index, [x, y, z]] of positions.entries()) {
+  for (const [index, markerDefinition] of markers.entries()) {
     const marker = new THREE.Mesh(
-      new THREE.ConeGeometry(0.18, 0.9, 6),
+      new THREE.ConeGeometry(0.18, markerDefinition.id === 'orbit-poi' ? 4 : 0.9, 6),
       material(colors[index], 0.65, 0.1),
     )
-    marker.name = `reference-marker-${index}`
-    marker.position.set(x, y, z)
+    marker.name = markerDefinition.name
+    marker.position.set(
+      markerDefinition.position.x,
+      markerDefinition.position.y,
+      markerDefinition.position.z,
+    )
     references.push(marker)
     contract.push({
-      id: `marker-${index}`,
-      kind: 'marker',
+      id: markerDefinition.id,
+      kind: markerDefinition.id === 'orbit-poi' ? 'poi' : 'marker',
       object: marker,
-      positionM: { x, y, z },
-      sizeM: { x: 0.36, y: 0.9, z: 0.36 },
+      positionM: { ...markerDefinition.position },
+      sizeM: markerDefinition.id === 'orbit-poi'
+        ? { x: 0.36, y: 4, z: 0.36 }
+        : { x: 0.36, y: 0.9, z: 0.36 },
     })
   }
 
   const gate = new THREE.Group()
-  gate.name = 'reference-gate'
+  gate.name = 'reference-split-s'
   const gateMaterial = material(0x334d58, 0.72, 0.05)
   for (const [x, z] of [[-2.5, -5], [2.5, -5]] as const) {
     const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.8, 0.12), gateMaterial)
@@ -133,7 +163,7 @@ function createReferenceObjects(): {
   gate.add(crossbar)
   references.push(gate)
   contract.push({
-    id: 'gate',
+    id: 'split-s-reference',
     kind: 'gate',
     object: gate,
     positionM: { x: 0, y: 0.9, z: -5 },
@@ -220,7 +250,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   takeoffPad.position.set(config.spawnPositionM.x, 0, config.spawnPositionM.z)
   scene.add(takeoffPad)
 
-  const referenceSet = createReferenceObjects()
+  const referenceSet = createReferenceObjects(config.spawnPositionM)
   for (const reference of referenceSet.objects) scene.add(reference)
 
   const padReference: FlightSceneReference = {

@@ -1,9 +1,23 @@
 import type { LessonDefinition, LessonSetup } from './types'
 
-const DEFAULT_SETUP: LessonSetup = {
+const DEFAULT_SETUP: Omit<LessonSetup, 'sceneReferenceIds'> = {
   requiresDisarmed: true,
   resetSimulation: true,
-  sceneReferenceIds: ['takeoff-pad', 'marker-0', 'marker-1', 'marker-2', 'marker-3', 'gate'],
+}
+
+const SPLIT_S_SPAWN = { x: 0, y: 25, z: 0 } as const
+const SPLIT_S_ORIENTATION = { x: 0, y: 0, z: 0, w: 1 } as const
+
+function lessonSetup(
+  sceneReferenceIds: readonly string[],
+  options: Pick<LessonSetup, 'spawnPositionM' | 'spawnOrientation'> = {},
+): LessonSetup {
+  return {
+    ...DEFAULT_SETUP,
+    sceneReferenceIds,
+    ...(options.spawnPositionM ? { spawnPositionM: { ...options.spawnPositionM } } : {}),
+    ...(options.spawnOrientation ? { spawnOrientation: { ...options.spawnOrientation } } : {}),
+  }
 }
 
 function comingSoonLesson(
@@ -12,8 +26,10 @@ function comingSoonLesson(
   title: string,
   description: string,
   objectives: readonly string[],
+  setup: LessonSetup,
   checkpoints: LessonDefinition['checkpoints'],
   hints: readonly string[],
+  metricLabels: readonly string[],
 ): LessonDefinition {
   return {
     id,
@@ -23,7 +39,7 @@ function comingSoonLesson(
     availability: 'coming-soon',
     available: false,
     objectives,
-    setup: { ...DEFAULT_SETUP },
+    setup,
     checkpoints,
     success: {
       title: 'Evaluator pending',
@@ -39,7 +55,7 @@ function comingSoonLesson(
       maxScore: 100,
       minimumPassingScore: 70,
       minimumActiveSeconds: 0,
-      metricLabels: ['elapsedSeconds', 'sampleCount', 'completedCheckpoints'],
+      metricLabels,
     },
     hints,
     evaluator: null,
@@ -53,73 +69,85 @@ function comingSoonLesson(
  */
 export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
   comingSoonLesson(
-    'stable-hover',
+    'hover',
     1,
-    'Stable hover',
-    'Hold a controlled hover with measurable attitude, altitude, and drift limits.',
+    'Hover',
+    'Establish and hold a bounded hover inside the elevated hover zone above the takeoff pad.',
     [
-      'Establish a safe lift-off without over-correcting.',
-      'Keep attitude and horizontal drift inside the evaluator window.',
-      'Settle back to the reference altitude before ending the attempt.',
+      'Reach the hover zone at its reference altitude.',
+      'Hold position and attitude inside the hover envelope.',
+      'Exit and settle without leaving the bounded zone.',
     ],
+    lessonSetup(['takeoff-pad', 'hover-zone']),
     [
-      { id: 'lift-off', title: 'Lift off', description: 'Leave the pad while maintaining a bounded attitude.' },
-      { id: 'hold', title: 'Hold', description: 'Remain inside the hover position and attitude envelope.' },
-      { id: 'settle', title: 'Settle', description: 'Return to a controlled reference altitude.' },
+      { id: 'enter-hover-zone', title: 'Enter hover zone', description: 'Reach the elevated hover-zone reference above the pad.' },
+      { id: 'hold-hover', title: 'Hold hover', description: 'Remain inside the position, altitude, and attitude envelope.' },
+      { id: 'settle-hover', title: 'Settle', description: 'Finish with bounded drift and a controlled reference altitude.' },
     ],
-    ['Use small, early corrections; do not chase a drifting quad with full stick.'],
+    ['Prioritize position and altitude before making small attitude corrections.'],
+    ['altitudeErrorM', 'horizontalDriftM', 'maxTiltDegrees'],
   ),
   comingSoonLesson(
-    'straight-line',
+    'coordinated-turn',
     2,
-    'Straight line',
-    'Translate through a gate while preserving a bounded heading and lateral path.',
+    'Coordinated Turn',
+    'Track the ordered turn-entry, apex, and exit references through a bounded 90-degree route.',
     [
-      'Build speed with a measured pitch input.',
-      'Cross the gate inside its geometric corridor.',
-      'Reduce rate and finish without a hard correction.',
+      'Enter the route at the reference altitude and heading.',
+      'Track the 90-degree apex with bounded lateral and altitude error.',
+      'Exit aligned with the route and settle the turn.',
     ],
+    lessonSetup(['takeoff-pad', 'turn-entry', 'turn-apex', 'turn-exit']),
     [
-      { id: 'launch', title: 'Launch', description: 'Leave the start reference with a controlled heading.' },
-      { id: 'gate-entry', title: 'Gate entry', description: 'Enter the gate corridor with bounded lateral error.' },
-      { id: 'gate-exit', title: 'Gate exit', description: 'Clear the gate without exceeding the failure envelope.' },
+      { id: 'turn-entry', title: 'Turn entry', description: 'Reach the entry reference with bounded speed and altitude.' },
+      { id: 'turn-apex', title: 'Turn apex', description: 'Pass the 90-degree apex inside the route corridor.' },
+      { id: 'turn-exit', title: 'Turn exit', description: 'Leave the route aligned with the exit reference.' },
     ],
-    ['Look through the gate and make one correction at a time.'],
+    ['Look through the route and keep altitude bounded while the heading changes.'],
+    ['entryErrorM', 'apexErrorM', 'exitErrorM', 'headingErrorDegrees'],
   ),
   comingSoonLesson(
-    'box-pattern',
+    'split-s',
     3,
-    'Box pattern',
-    'Fly four measured legs around the reference markers with clean corner transitions.',
+    'Split-S',
+    'Use the elevated split-S reference to invert, descend, reverse heading, and recover level.',
     [
-      'Use the environment references rather than stick timing alone.',
-      'Turn at each corner while keeping altitude bounded.',
-      'Close the pattern at the starting reference.',
+      'Enter the split-S from sufficient altitude with bounded energy.',
+      'Pass through the inverted and descending portions of the reference.',
+      'Reverse heading and recover level without exceeding the safety envelope.',
     ],
+    lessonSetup(['split-s-reference'], {
+      spawnPositionM: SPLIT_S_SPAWN,
+      spawnOrientation: SPLIT_S_ORIENTATION,
+    }),
     [
-      { id: 'leg-one', title: 'Leg one', description: 'Reach the first reference marker.' },
-      { id: 'leg-two', title: 'Leg two', description: 'Turn and reach the second reference marker.' },
-      { id: 'leg-three', title: 'Leg three', description: 'Turn and reach the third reference marker.' },
-      { id: 'leg-four', title: 'Leg four', description: 'Close the pattern at the start.' },
+      { id: 'entry', title: 'Entry', description: 'Reach the split-S entry reference at sufficient altitude.' },
+      { id: 'inverted', title: 'Inverted', description: 'Pass through the inverted portion with bounded attitude.' },
+      { id: 'descent', title: 'Descent', description: 'Descend through the reference plane without exceeding limits.' },
+      { id: 'reversed', title: 'Reversed heading', description: 'Complete the heading reversal inside the geometric corridor.' },
+      { id: 'recovered', title: 'Recovered', description: 'Recover level flight with bounded altitude and speed.' },
     ],
-    ['Prioritize altitude and geometry before adding speed.'],
+    ['Use the reference altitude for the entry; recovery quality matters more than speed.'],
+    ['entryAltitudeM', 'invertedTiltDegrees', 'descentRateMps', 'headingChangeDegrees', 'recoveryAltitudeErrorM'],
   ),
   comingSoonLesson(
-    'figure-eight',
+    'orbit',
     4,
-    'Figure eight',
-    'Connect two reference points with a coordinated figure-eight trajectory.',
+    'Orbit / 刷鍋',
+    'Fly a bounded orbit around the orbit point of interest while preserving altitude and heading flow.',
     [
-      'Cross the center with a controlled heading change.',
-      'Trace both loops inside the geometric corridor.',
-      'Finish aligned with the exit reference.',
+      'Enter the orbit at the reference altitude and radius.',
+      'Hold the desired approximately 10 m radius around the point of interest.',
+      'Exit aligned with bounded altitude, speed, and radial error.',
     ],
+    lessonSetup(['takeoff-pad', 'orbit-poi']),
     [
-      { id: 'first-loop', title: 'First loop', description: 'Complete the first loop around its reference.' },
-      { id: 'crossing', title: 'Center crossing', description: 'Cross the center with bounded speed and altitude.' },
-      { id: 'second-loop', title: 'Second loop', description: 'Complete the second loop and exit cleanly.' },
+      { id: 'orbit-entry', title: 'Orbit entry', description: 'Reach the orbit point of interest at the reference altitude.' },
+      { id: 'orbit-lap', title: 'Orbit lap', description: 'Maintain the desired radius and altitude through the orbit.' },
+      { id: 'orbit-exit', title: 'Orbit exit', description: 'Exit aligned without exceeding radial or speed limits.' },
     ],
-    ['Smooth coordinated inputs beat alternating full-stick commands.'],
+    ['Keep the point of interest in a steady reference position while preserving altitude.'],
+    ['radialErrorM', 'altitudeErrorM', 'headingErrorDegrees', 'orbitProgress'],
   ),
 ]
 

@@ -9,6 +9,7 @@ import {
   type FlightRuntimeTelemetry,
 } from '../runtime'
 import Mode2StickOverlay from '../training/StickOverlay'
+import type { TrainingSceneReference, TrainingSetupRequest } from '../training/types'
 import { flightSimulationConfigFromTuning, type TuningSettings } from '../tuning'
 
 export interface FreeFlightProps {
@@ -16,6 +17,8 @@ export interface FreeFlightProps {
   readonly profile: ControllerProfile | null
   readonly settings: TuningSettings
   readonly trainingResetKey?: number
+  readonly trainingSetupRequest?: TrainingSetupRequest | null
+  readonly onSceneReferences?: (references: readonly TrainingSceneReference[]) => void
   readonly onFixedStep?: (sample: FlightRuntimeFixedStepSample) => void
   readonly onTelemetry?: (telemetry: FlightRuntimeTelemetry) => void
 }
@@ -50,6 +53,8 @@ export default function FreeFlight({
   profile,
   settings,
   trainingResetKey = 0,
+  trainingSetupRequest = null,
+  onSceneReferences,
   onFixedStep,
   onTelemetry,
 }: FreeFlightProps) {
@@ -63,6 +68,11 @@ export default function FreeFlight({
   const [showHud, setShowHud] = useState(true)
   const fixedStepListenerRef = useRef(onFixedStep)
   const telemetryListenerRef = useRef(onTelemetry)
+  const sceneReferencesListenerRef = useRef(onSceneReferences)
+
+  useEffect(() => {
+    sceneReferencesListenerRef.current = onSceneReferences
+  }, [onSceneReferences])
 
   useEffect(() => {
     fixedStepListenerRef.current = onFixedStep
@@ -93,6 +103,12 @@ export default function FreeFlight({
     runtime.setCameraMode(cameraMode)
     runtimeRef.current = runtime
     rendererRef.current = renderer
+    sceneReferencesListenerRef.current?.(renderer.flightScene.sceneReferences.map((reference) => ({
+      id: reference.id,
+      kind: reference.kind,
+      positionM: { ...reference.positionM },
+      sizeM: reference.sizeM ? { ...reference.sizeM } : undefined,
+    })))
     runtime.start()
     setTelemetry(runtime.getTelemetry())
 
@@ -131,6 +147,13 @@ export default function FreeFlight({
     appliedSettingsRef.current = settings
     setTelemetry(runtime.getTelemetry())
   }, [settings])
+
+  useEffect(() => {
+    const runtime = runtimeRef.current
+    if (!runtime || !trainingSetupRequest) return
+    runtime.resetForTraining(trainingSetupRequest.setup)
+    setTelemetry(runtime.getTelemetry())
+  }, [trainingSetupRequest])
 
   useEffect(() => {
     const runtime = runtimeRef.current

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { createInitialDroneState, DEFAULT_DRONE_CONFIG } from '../drone'
 import type { NormalizedRcInput } from '../flight-controller'
 import { createTrainingMachineState, reduceTrainingState, TrainingSession } from './machine'
-import type { LessonDefinition, TrainingSample } from './types'
+import type { LessonDefinition, TrainingSample, TrainingSceneReference } from './types'
 
 const input: NormalizedRcInput = { roll: 0, pitch: 0, yaw: 0, throttle: 0.4 }
 
@@ -85,6 +85,39 @@ describe('training state machine', () => {
     expect(after.trajectory).toHaveLength(1)
     expect(after.lastError).toMatch(/increase|monotonic/i)
     expect(after.sampleCount).toBe(before.sampleCount)
+  })
+
+  it('passes copied scene references to evaluator context and keeps them stable while ACTIVE', () => {
+    const sceneReference: TrainingSceneReference = {
+      id: 'takeoff-pad',
+      kind: 'pad',
+      positionM: { x: 0, y: 0.5, z: 0 },
+      sizeM: { x: 2.4, y: 0.08, z: 2.4 },
+    }
+    const continuingLesson: LessonDefinition = {
+      ...testLesson,
+      evaluator: {
+        evaluate: (_sample, context) => ({
+          status: 'continue',
+          metrics: { referenceCount: context.sceneReferences.length },
+        }),
+      },
+    }
+    const session = new TrainingSession({
+      lessons: [continuingLesson],
+      initialLessonId: continuingLesson.id,
+      countdownDurationSeconds: 0,
+      sceneReferences: [sceneReference],
+    })
+    expect(session.getState().sceneReferences).toEqual([sceneReference])
+    session.start(0)
+    session.tick(0)
+    session.consumeSample(sample(1))
+    const active = session.getState()
+    expect(active.phase).toBe('ACTIVE')
+    expect(active.lastEvaluation?.metrics).toEqual({ referenceCount: 1 })
+    expect(session.setSceneReferences([])).toBe(active)
+    expect(session.getState().sceneReferences).toEqual([sceneReference])
   })
 
   it('cannot start an unavailable lesson and never fabricates a result', () => {

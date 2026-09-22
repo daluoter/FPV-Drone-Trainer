@@ -171,6 +171,7 @@ export interface TrainingMachineState {
 
 export type TrainingAction =
   | { readonly type: 'SELECT_LESSON'; readonly lessonId: string }
+  | { readonly type: 'SET_SCENE_REFERENCES'; readonly sceneReferences: readonly TrainingSceneReference[] }
   | { readonly type: 'START'; readonly timestampSeconds: number }
   | { readonly type: 'TICK'; readonly timestampSeconds: number }
   | { readonly type: 'SAMPLE'; readonly sample: TrainingSample }

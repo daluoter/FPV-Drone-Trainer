@@ -17,6 +17,7 @@ import {
   type NormalizedRcInput,
 } from '../flight-controller'
 import type { DroneState } from '../drone'
+import type { LessonSetup } from '../training/types'
 import { FlightRenderer } from '../rendering'
 import { DeveloperKeyboardInput } from './keyboard'
 
@@ -298,6 +299,34 @@ export class FlightRuntime {
   }
 
   public reset(): void {
+    this.resetAt(this.simulation.droneConfig.spawnPositionM, undefined, 'Flight runtime was reset and disarmed.')
+  }
+
+  /**
+   * Honor a lesson's spawn/orientation only through an explicit disarmed reset.
+   * App/runtime callers invoke this during COUNTDOWN; fixed-step ACTIVE samples
+   * never call it, so an evaluator cannot move the player as a side effect.
+   */
+  public resetForTraining(setup: LessonSetup): DroneState {
+    if (setup.requiresDisarmed !== true || setup.resetSimulation !== true) {
+      return this.resetAt(
+        this.simulation.droneConfig.spawnPositionM,
+        undefined,
+        'Invalid training setup; runtime was reset and disarmed.',
+      )
+    }
+    return this.resetAt(
+      setup.spawnPositionM ?? this.simulation.droneConfig.spawnPositionM,
+      setup.spawnOrientation,
+      'Training setup applied through an explicit disarmed reset.',
+    )
+  }
+
+  private resetAt(
+    positionM: { readonly x: number; readonly y: number; readonly z: number },
+    orientation: { readonly x: number; readonly y: number; readonly z: number; readonly w: number } | undefined,
+    reason: string,
+  ): DroneState {
     this.keyboard.releaseKeys()
     this.signalHistory.reset()
     this.lastSample = {
@@ -307,10 +336,12 @@ export class FlightRuntime {
       input: null,
       safetyReasons: [],
     }
-    this.lastSafetyReasons = ['Flight runtime was reset and disarmed.']
-    this.simulation.reset()
+    this.lastSafetyReasons = [reason]
+    this.simulation.disarm(reason)
+    this.simulation.resetAt(positionM, orientation)
     this.refreshTelemetry(0, 0, 0)
     this.emitTelemetry(true)
+    return this.simulation.getState()
   }
 
   /**

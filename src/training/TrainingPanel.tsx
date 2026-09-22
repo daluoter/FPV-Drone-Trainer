@@ -33,6 +33,11 @@ function progressFor(progress: TrainingProgressDocument, lessonId: string): Less
   return progress.lessons[lessonId] ?? { recent: null, best: null, completed: false, attempts: 0 }
 }
 
+function activeElapsedSeconds(state: TrainingMachineState): number {
+  if (state.activeStartedAtSeconds === null || state.lastTimestampSeconds === null) return 0
+  return Math.max(0, state.lastTimestampSeconds - state.activeStartedAtSeconds)
+}
+
 export default function TrainingPanel({
   lessons = DEFAULT_LESSONS,
   state,
@@ -130,6 +135,16 @@ export default function TrainingPanel({
                   return <span className={checkpointState?.completed ? 'training-checkpoint-done' : ''} key={checkpoint.id}>{checkpointState?.completed ? '✓ ' : '○ '}{checkpoint.title}</span>
                 })}</div>
               </div>
+              {state.phase === 'ACTIVE' && (
+                <div className="training-live-metrics" aria-live="polite">
+                  <strong>Live metrics</strong>
+                  <span>Active {activeElapsedSeconds(state).toFixed(2)} s</span>
+                  <span>{state.sampleCount} samples</span>
+                  {Object.entries(state.lastEvaluation?.metrics ?? {}).map(([metric, value]) => (
+                    <span key={metric}>{metric} {value.toFixed(2)}</span>
+                  ))}
+                </div>
+              )}
               {selectedProgress && (
                 <div className="training-progress-summary">
                   <span>{selectedProgress.attempts} attempts</span>

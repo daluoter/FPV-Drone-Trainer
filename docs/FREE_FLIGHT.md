@@ -7,11 +7,11 @@ Phase 4 connects the completed controller, rates, flight-controller and rigid-bo
 - `FlightRuntime` owns one `requestAnimationFrame` loop. Each frame polls a fresh selected Gamepad snapshot, processes the handed-off profile, advances `FlightSimulation` through its fixed 240 Hz accumulator, updates the Three.js scene and publishes only a throttled telemetry snapshot to React. The optional `onFixedStep` observer receives one timestamped state/input sample per completed fixed step for training; it cannot run or mutate physics.
 - Phase 5 tuning is handed to the runtime as a complete validated simulation configuration. `FlightRuntime.reconfigure` disarms, clears history and replaces the simulation from a safe initial state; it is never a silent in-flight mutation.
 - `ControllerLab` and `FlightRuntime` share the application-owned `GamepadPoller`. The Lab subscribes to a throttled presentation view; it does not start a second polling loop in the Phase 4 shell.
-- `FlightRenderer` owns the scene, visual quad, ground/grid, takeoff pad, stable `sceneReferences` (`takeoff-pad`, `marker-0` … `marker-3`, `gate`), cameras, resize and disposal. It consumes `DroneState` and never edits flight state. Training uses the reference IDs/positions as a read-only contract.
+- `FlightRenderer` owns the scene, visual quad, ground/grid, takeoff pad, semantic `sceneReferences` (`takeoff-pad`, `hover-zone`, `turn-entry`, `turn-apex`, `turn-exit`, `split-s-reference`, `orbit-poi`), cameras, resize and disposal. It consumes `DroneState` and never edits flight state. Training receives copied reference IDs/positions/dimensions as a read-only contract.
 
 ## Scene and cameras
 
-The field uses the documented axes: world/body +X is right, +Y is up and -Z is the nose direction. The quad group receives position and quaternion directly from `DroneState`.
+The field uses the documented axes: world/body +X is right, +Y is up and -Z is the nose direction. The quad group receives position and quaternion directly from `DroneState`. A lesson setup may request a spawn position/orientation only through `FlightRuntime.resetForTraining`, which disarms and resets before COUNTDOWN; the ACTIVE fixed-step observer never applies setup changes.
 
 - FPV is rigidly mounted at body-local `(0, 0.08, -0.11)` m, with a 20° local pitch and 90° FOV.
 - Chase follows a body-relative rear/above offset and looks at the aircraft.

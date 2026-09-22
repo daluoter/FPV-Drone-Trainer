@@ -9,6 +9,7 @@ import {
   TrainingProgressStore,
   TrainingSession,
   type TrainingMachineState,
+  type TrainingSceneReference,
 } from '../training'
 import TuningPanel from '../tuning/TuningPanel'
 import { copyTuningSettings, TuningSettingsStore, type TuningSettings } from '../tuning'
@@ -101,6 +102,8 @@ export default function App() {
   const [trainingLiveInput, setTrainingLiveInput] = useState<NormalizedRcInput | null>(null)
   const [trainingResetKey, setTrainingResetKey] = useState(0)
   const recordedTrainingSessionRef = useRef<string | null>(null)
+  const trainingUiLastPublishedSecondsRef = useRef<number | null>(null)
+  const trainingUiCheckpointKeyRef = useRef('')
   const onFlightHandoff = useCallback((handoff: ControllerLabFlightHandoff) => {
     setFlightProfile(handoff.profile)
   }, [])
@@ -111,6 +114,11 @@ export default function App() {
     const persisted = progressStore.recordResult(next.result)
     if (persisted.saved) setTrainingProgress(persisted.progress)
   }, [progressStore])
+  const onTrainingSceneReferences = useCallback((sceneReferences: readonly TrainingSceneReference[]) => {
+    const session = trainingSessionRef.current
+    if (!session) return
+    syncTrainingState(session.setSceneReferences(sceneReferences))
+  }, [syncTrainingState])
   const onTrainingFixedStep = useCallback((sample: FlightRuntimeFixedStepSample) => {
     const session = trainingSessionRef.current
     if (!session) return
@@ -121,9 +129,22 @@ export default function App() {
       normalizedInput: sample.normalizedInput,
     })
     if (next === previous) return
-    // React receives only phase/result changes here. The fixed-step hook still
-    // feeds every sample to the pure session, without creating a second loop.
-    if (next.phase !== previous.phase || next.result !== previous.result) syncTrainingState(next)
+
+    const checkpointKey = Object.values(next.checkpoints)
+      .map((checkpoint) => `${checkpoint.id}:${checkpoint.completed}:${checkpoint.completedAtSeconds ?? ''}`)
+      .join('|')
+    const phaseChanged = next.phase !== previous.phase
+    const resultChanged = next.result !== previous.result
+    const checkpointChanged = checkpointKey !== trainingUiCheckpointKeyRef.current
+    const lastPublishedSeconds = trainingUiLastPublishedSecondsRef.current
+    const throttledMetricUpdate = lastPublishedSeconds === null || sample.timestampSeconds - lastPublishedSeconds >= 0.1
+    if (phaseChanged || resultChanged || checkpointChanged || throttledMetricUpdate) {
+      syncTrainingState(next)
+      trainingUiLastPublishedSecondsRef.current = sample.timestampSeconds
+      trainingUiCheckpointKeyRef.current = checkpointKey
+    }
+    // The fixed-step hook still feeds every sample to the pure session without
+    // creating a second loop; only the React publication is throttled.
   }, [syncTrainingState])
   const onTrainingTelemetry = useCallback((telemetry: FlightRuntimeTelemetry) => {
     setTrainingLiveInput(telemetry.normalizedInput)
@@ -131,26 +152,36 @@ export default function App() {
   const selectTrainingLesson = useCallback((lessonId: string) => {
     const session = trainingSessionRef.current
     if (!session) return
+    trainingUiLastPublishedSecondsRef.current = null
+    trainingUiCheckpointKeyRef.current = ''
     syncTrainingState(session.selectLesson(lessonId))
   }, [syncTrainingState])
   const startTraining = useCallback(() => {
     const session = trainingSessionRef.current
     if (!session) return
-    const next = session.start(0)
-    syncTrainingState(next)
-    if (next.phase === 'COUNTDOWN') setTrainingResetKey((key) => key + 1)
+    trainingUiLastPublishedSecondsRef.current = null
+    trainingUiCheckpointKeyRef.current = ''
+    syncTrainingState(session.start(0))
   }, [syncTrainingState])
   const retryTraining = useCallback(() => {
     const session = trainingSessionRef.current
     if (!session) return
+    trainingUiLastPublishedSecondsRef.current = null
+    trainingUiCheckpointKeyRef.current = ''
     syncTrainingState(session.retry())
     setTrainingResetKey((key) => key + 1)
   }, [syncTrainingState])
   const resetTraining = useCallback(() => {
     const session = trainingSessionRef.current
     if (!session) return
+    const previousPhase = session.getState().phase
+    trainingUiLastPublishedSecondsRef.current = null
+    trainingUiCheckpointKeyRef.current = ''
     syncTrainingState(session.reset())
-    setTrainingResetKey((key) => key + 1)
+    // An ACTIVE attempt is reset in the training domain only. The player is
+    // never moved by a React state update while ACTIVE; the next START applies
+    // its setup through the explicit disarmed runtime API.
+    if (previousPhase !== 'ACTIVE') setTrainingResetKey((key) => key + 1)
   }, [syncTrainingState])
   const onTuningApply = useCallback((next: TuningSettings) => {
     const result = tuningStore.save(next)
@@ -266,6 +297,8 @@ export default function App() {
           profile={flightProfile}
           settings={tuningSettings}
           trainingResetKey={trainingResetKey}
+          trainingSetupRequest={trainingState.phase === 'COUNTDOWN' ? trainingState.setupRequest : null}
+          onSceneReferences={onTrainingSceneReferences}
           onFixedStep={onTrainingFixedStep}
           onTelemetry={onTrainingTelemetry}
         />

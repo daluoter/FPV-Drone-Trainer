@@ -213,7 +213,13 @@ export class TrainingProgressStore {
     const loaded = parsed as TrainingProgressDocument
     const merged = createDefaultTrainingProgress(this.lessonIds)
     const lessons = { ...merged.lessons }
-    for (const [lessonId, progress] of Object.entries(loaded.lessons)) lessons[lessonId] = copyLessonProgress(progress)
+    const knownLessonIds = new Set(this.lessonIds)
+    // Lesson IDs are persistence keys. Unknown IDs (including the Phase 6
+    // placeholder catalog) are intentionally ignored rather than relabeled as
+    // completions for the replacement curriculum.
+    for (const [lessonId, progress] of Object.entries(loaded.lessons)) {
+      if (knownLessonIds.has(lessonId)) lessons[lessonId] = copyLessonProgress(progress)
+    }
     return { progress: { ...merged, lessons }, loaded: true, errors: [] }
   }
 

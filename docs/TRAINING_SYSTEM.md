@@ -108,18 +108,37 @@ stick sequence alone. The machine enforces timestamp order, minimum active
 duration, score bounds, and configured minimum pass score; an evaluator
 exception becomes a safe failed attempt rather than a fake pass.
 
-The next phase should implement positive and negative traces for:
+### Phase 7 lesson handoff
 
-1. `stable-hover` — altitude, attitude, and horizontal-drift windows;
-2. `straight-line` — gate corridor, heading, and speed windows;
-3. `box-pattern` — marker order, corner geometry, and altitude windows;
-4. `figure-eight` — both loops, center crossing, and exit alignment.
+The Phase 6 catalog contains exactly these unavailable evaluator slots:
 
-Each evaluator should use the stable scene IDs `takeoff-pad`, `marker-0` …
-`marker-3`, and `gate` exposed by `FlightScene.sceneReferences`. A reference
-contains its stable `id`, `kind`, object, and immutable world-space `positionM`.
-The object is for presentation; geometric checks should use the reference
-position contract or a copied snapshot, not mutate Three.js objects.
+| ID | Title | Setup references | Checkpoints |
+| --- | --- | --- | --- |
+| `hover` | Hover | `takeoff-pad`, `hover-zone` | `enter-hover-zone`, `hold-hover`, `settle-hover` |
+| `coordinated-turn` | Coordinated Turn | `takeoff-pad`, `turn-entry`, `turn-apex`, `turn-exit` | `turn-entry`, `turn-apex`, `turn-exit` |
+| `split-s` | Split-S | `split-s-reference` | `entry`, `inverted`, `descent`, `reversed`, `recovered` |
+| `orbit` | Orbit / 刷鍋 | `takeoff-pad`, `orbit-poi` | `orbit-entry`, `orbit-lap`, `orbit-exit` |
+
+All four entries remain `available: false` with `evaluator: null`. The Split-S
+setup requests a disarmed reset at `{ x: 0, y: 25, z: 0 }` with an explicit
+identity spawn orientation so the evaluator can start from sufficient altitude.
+The other lessons use the ground takeoff spawn. These are setup requests only;
+the application honors them through `FlightRuntime.resetForTraining` during
+COUNTDOWN and never mutates the player from an ACTIVE evaluator callback.
+
+`FlightScene.sceneReferences` exposes immutable, renderer-independent handoff
+snapshots for the IDs above: `takeoff-pad` at the configured spawn, `hover-zone`
+three metres above the pad, ordered `turn-entry`/`turn-apex`/`turn-exit`
+markers, the `split-s-reference` gate at `{ x: 0, y: 0.9, z: -5 }` with size
+`{ x: 5.12, y: 1.8, z: 0.12 }`, and the `orbit-poi` tower at its copied anchor.
+The reference object is presentation-only; geometric checks must use copied
+positions/dimensions and must not mutate Three.js objects. Thresholds and
+positive/negative traces belong to the Phase 7 evaluator owner.
+
+Each evaluator should use those semantic stable IDs rather than generic marker
+names. The Phase 7 owner must cover both successful and false-positive traces
+for altitude, attitude, route/corridor, heading, radial and speed limits as
+appropriate to the lesson.
 
 ## Progress persistence
 
@@ -129,7 +148,11 @@ position contract or a copied snapshot, not mutate Three.js objects.
 count, completed/total checkpoints, completion timestamp, and evaluator
 metrics. JSON, schema, timestamps, finite numeric ranges, and checkpoint
 relationships are validated before use; malformed data falls back to empty
-progress and never reaches the runtime.
+progress and never reaches the runtime. The schema version is retained for
+this catalog correction, but load merges only current lesson IDs. Legacy
+placeholder keys such as `stable-hover`, `straight-line`, `box-pattern`, and
+`figure-eight` are ignored rather than relabeled as completions for the new
+curriculum; no shipped Phase 6 evaluator can create an actual completion.
 
 ## Presentation
 
@@ -142,7 +165,7 @@ pitch + roll. It does not arm, reset, evaluate, or mutate the simulator.
 
 - The four evaluator slots and geometric positive/negative trace fixtures are
   intentionally deferred to Phase 7.
-- Scene references currently provide stable IDs and anchor positions; richer
-  gate dimensions/corridors belong with the evaluator owner.
+- Scene references provide stable semantic IDs, copied anchor positions and
+  dimensions; richer corridors and thresholds belong with the evaluator owner.
 - Browser WebGL, transmitter, and aerodynamic realism evidence remain separate
   from deterministic framework tests.

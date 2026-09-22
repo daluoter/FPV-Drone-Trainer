@@ -3,6 +3,8 @@ import {
   type DroneConfig,
   type DroneState,
 } from '../drone'
+import { IDENTITY_QUATERNION, type Quaternion } from '../math/quaternion'
+import type { Vector3 } from '../math/vector'
 import {
   DEFAULT_FIXED_STEP_SECONDS,
   DroneSimulation,
@@ -122,14 +124,23 @@ export class FlightSimulation {
 
   /** Reset simulation time, accumulator, controller memory and commands. */
   public reset(): DroneState {
+    return this.resetAt(this.droneConfig.spawnPositionM, IDENTITY_QUATERNION, 'Flight runtime was reset and disarmed.')
+  }
+
+  /** Explicit disarmed reset boundary used by training setup requests. */
+  public resetAt(
+    positionM: Vector3 = this.droneConfig.spawnPositionM,
+    orientation: Quaternion = IDENTITY_QUATERNION,
+    reason = 'Flight runtime was reset and disarmed.',
+  ): DroneState {
     this.controller.reset()
     this.accumulator.reset()
-    this.state = this.simulation.reset()
+    this.state = this.simulation.resetAt(positionM, orientation)
     this.armed = false
     this.telemetry = this.makeTelemetry(
-      this.controller.safeOutput(['Flight runtime was reset and disarmed.']),
+      this.controller.safeOutput([reason]),
       this.state,
-      ['Flight runtime was reset and disarmed.'],
+      [reason],
     )
     return this.state
   }

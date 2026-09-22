@@ -1,5 +1,7 @@
 import { DEFAULT_DRONE_CONFIG, validateDroneConfig } from '../drone'
-import type { DroneConfig, DroneState, DroneStepResult } from '../drone'
+import { IDENTITY_QUATERNION, isFiniteQuaternion, quaternionNorm, type Quaternion } from '../math/quaternion'
+import { isFiniteVector3, type Vector3 } from '../math/vector'
+import { createInitialDroneState, type DroneConfig, type DroneState, type DroneStepResult } from '../drone'
 import { createSafeInitialState, stepDroneState } from './dynamics'
 import {
   DEFAULT_FIXED_STEP_SECONDS,
@@ -45,8 +47,20 @@ export class DroneSimulation {
   }
 
   public reset(): DroneState {
+    return this.resetAt(this.config.spawnPositionM, IDENTITY_QUATERNION)
+  }
+
+  /**
+   * Reset at an explicit disarmed training spawn. Callers use this boundary
+   * before an attempt starts; it never changes a running state in place.
+   */
+  public resetAt(positionM: Vector3 = this.config.spawnPositionM, orientation: Quaternion = IDENTITY_QUATERNION): DroneState {
     this.accumulator.reset()
-    this.state = createSafeInitialState(this.config)
+    const safePosition = isFiniteVector3(positionM) ? { ...positionM } : { ...this.config.spawnPositionM }
+    const safeOrientation = isFiniteQuaternion(orientation) && quaternionNorm(orientation) > Number.EPSILON
+      ? { ...orientation }
+      : IDENTITY_QUATERNION
+    this.state = createInitialDroneState(this.config, safePosition, safeOrientation)
     return this.state
   }
 
