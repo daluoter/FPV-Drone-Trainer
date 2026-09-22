@@ -19,6 +19,12 @@ import {
 import type { DroneState } from '../drone'
 import type { LessonSetup } from '../training/types'
 import { FlightRenderer } from '../rendering'
+import {
+  FlightReplayRecorder,
+  ReplayPlayback,
+  type ReplayRecording,
+  type ReplaySpeed,
+} from '../replay'
 import { DeveloperKeyboardInput } from './keyboard'
 
 export type FlightInputSource = 'controller' | 'keyboard'
@@ -48,6 +54,17 @@ export interface FlightRuntimeFixedStepSample {
   readonly telemetry: FlightTelemetry
 }
 
+export interface FlightRuntimeReplayTelemetry {
+  readonly active: boolean
+  readonly playing: boolean
+  readonly available: boolean
+  readonly sampleCount: number
+  readonly currentTimeSeconds: number
+  readonly durationSeconds: number
+  readonly speed: ReplaySpeed
+  readonly label: 'LIVE' | 'PLAYBACK'
+}
+
 export interface FlightRuntimeTelemetry extends FlightTelemetry {
   readonly state: DroneState
   readonly source: FlightInputSource
@@ -57,6 +74,7 @@ export interface FlightRuntimeTelemetry extends FlightTelemetry {
   readonly metrics: FlightRuntimeMetrics
   readonly cameraMode: 'fpv' | 'chase' | 'free'
   readonly safetyReasons: readonly string[]
+  readonly replay: FlightRuntimeReplayTelemetry
 }
 
 export interface FlightRuntimeOptions {
@@ -71,6 +89,8 @@ export interface FlightRuntimeOptions {
   readonly onTelemetry?: (telemetry: FlightRuntimeTelemetry) => void
   /** Called exactly once after each completed fixed simulation step. */
   readonly onFixedStep?: (sample: FlightRuntimeFixedStepSample) => void
+  /** Optional bounded recorder; a recorder is created when omitted. */
+  readonly replayRecorder?: FlightReplayRecorder
 }
 
 interface SampledInput {
@@ -151,6 +171,8 @@ export class FlightRuntime {
   private readonly telemetryIntervalMs: number
   private readonly telemetryListener: ((telemetry: FlightRuntimeTelemetry) => void) | null
   private readonly fixedStepListener: ((sample: FlightRuntimeFixedStepSample) => void) | null
+  public readonly replayRecorder: FlightReplayRecorder
+  private replayPlayback: ReplayPlayback | null = null
   private controllerProfile: ControllerProfile | null
   private tuningLocked = false
   private source: FlightInputSource = 'controller'
@@ -205,6 +227,7 @@ export class FlightRuntime {
     this.telemetryIntervalMs = Number.isFinite(interval) && interval > 0 ? interval : DEFAULT_TELEMETRY_INTERVAL_MS
     this.telemetryListener = options.onTelemetry ?? null
     this.fixedStepListener = options.onFixedStep ?? null
+    this.replayRecorder = options.replayRecorder ?? new FlightReplayRecorder()
     this.lastTelemetry = this.makeTelemetry(this.simulation.getTelemetry(), 0, 0, 0, 0)
   }
 
@@ -218,6 +241,79 @@ export class FlightRuntime {
 
   public isRunning(): boolean {
     return this.running
+  }
+
+  public isReplayActive(): boolean {
+    return this.replayPlayback !== null
+  }
+
+  public getReplayRecording(): ReplayRecording | null {
+    return this.replayRecorder.getRecording()
+  }
+
+  public getReplayPlayback(): ReplayPlayback | null {
+    return this.replayPlayback
+  }
+
+  /** Enter an independent ghost view from the bounded last-flight recording. */
+  public enterReplay(recording: ReplayRecording | null = this.getReplayRecording()): boolean {
+    if (!recording || recording.samples.length === 0) return false
+    if (this.replayPlayback) return true
+    this.keyboard.releaseKeys()
+    this.disarm('Replay playback entered; live flight was explicitly disarmed.')
+    this.replayPlayback = new ReplayPlayback(recording)
+    this.lastFrameTimeMs = null
+    this.lastTelemetryTimeMs = null
+    this.renderer?.setReplayPath(recording.samples.map((sample) => sample.positionM))
+    this.renderReplay()
+    this.emitTelemetry(true)
+    return true
+  }
+
+  public exitReplay(): boolean {
+    if (!this.replayPlayback) return false
+    this.replayPlayback = null
+    this.renderer?.clearReplay()
+    // A replay exit is a clean live-runtime boundary: time and controller
+    // memory restart at zero, and arm must be requested explicitly again.
+    this.reset()
+    this.lastFrameTimeMs = null
+    this.lastTelemetryTimeMs = null
+    this.emitTelemetry(true)
+    return true
+  }
+
+  public playReplay(): boolean {
+    if (!this.replayPlayback) return false
+    this.replayPlayback.play()
+    this.renderReplay()
+    this.emitTelemetry(true)
+    return true
+  }
+
+  public pauseReplay(): boolean {
+    if (!this.replayPlayback) return false
+    this.replayPlayback.pause()
+    this.renderReplay()
+    this.emitTelemetry(true)
+    return true
+  }
+
+  public seekReplay(seconds: number): boolean {
+    if (!this.replayPlayback) return false
+    const changed = this.replayPlayback.seek(seconds)
+    if (changed) {
+      this.renderReplay()
+      this.emitTelemetry(true)
+    }
+    return changed
+  }
+
+  public setReplaySpeed(speed: number): boolean {
+    if (!this.replayPlayback) return false
+    const changed = this.replayPlayback.setSpeed(speed)
+    if (changed) this.emitTelemetry(true)
+    return changed
   }
 
   public start(): void {
@@ -238,6 +334,7 @@ export class FlightRuntime {
     this.frameHandle = null
     this.removeSafetyListeners()
     this.keyboard.releaseKeys()
+    if (this.replayPlayback) this.exitReplay()
     this.disarm('Flight runtime stopped; explicit rearm is required.')
   }
 
@@ -281,6 +378,11 @@ export class FlightRuntime {
   }
 
   public arm(): boolean {
+    if (this.replayPlayback) {
+      this.lastSafetyReasons = ['Exit replay playback before explicitly rearming the live flight.']
+      this.emitTelemetry(true)
+      return false
+    }
     const sample = this.sampleInput()
     this.lastSample = sample
     if (this.source === 'controller') {
@@ -299,18 +401,24 @@ export class FlightRuntime {
     }
     this.lastSafetyReasons = []
     this.simulation.arm()
+    if (this.simulation.isArmed()) this.replayRecorder.beginFlight()
     this.emitTelemetry(true)
     return this.simulation.isArmed()
   }
 
   public disarm(reason = 'Flight runtime was disarmed.'): void {
     this.simulation.disarm(reason)
+    this.replayRecorder.endFlight()
     this.lastSafetyReasons = [reason]
     this.refreshTelemetry(0, 0, 0)
     this.emitTelemetry(true)
   }
 
   public reset(): void {
+    if (this.replayPlayback) {
+      this.exitReplay()
+      return
+    }
     this.resetAt(this.simulation.droneConfig.spawnPositionM, undefined, 'Flight runtime was reset and disarmed.')
   }
 
@@ -349,6 +457,7 @@ export class FlightRuntime {
       safetyReasons: [],
     }
     this.lastSafetyReasons = [reason]
+    this.replayRecorder.endFlight()
     this.simulation.disarm(reason)
     this.simulation.resetAt(positionM, orientation)
     this.refreshTelemetry(0, 0, 0)
@@ -362,8 +471,9 @@ export class FlightRuntime {
    * replacement simulation from its safe initial state.
    */
   public reconfigure(config: FlightSimulationConfig): boolean {
-    if (this.tuningLocked) return false
+    if (this.tuningLocked || this.replayPlayback) return false
     this.keyboard.releaseKeys()
+    this.replayRecorder.endFlight()
     this.simulation.disarm('Flight settings changed; runtime was reset and disarmed.')
     this.simulation = new FlightSimulation(config)
     this.signalHistory.reset()
@@ -388,6 +498,14 @@ export class FlightRuntime {
     this.lastFrameTimeMs = frameTime
     this.framesSinceTelemetry += 1
 
+    if (this.replayPlayback) {
+      this.replayPlayback.advance(frameDeltaSeconds)
+      this.renderReplay()
+      this.refreshTelemetry(0, 0, frameDeltaSeconds * 1_000)
+      this.scheduleNextFrame()
+      return
+    }
+
     const sample = this.sampleInput()
     this.lastSample = sample
     if (sample.safetyReasons.length > 0 && this.simulation.isArmed()) {
@@ -396,13 +514,15 @@ export class FlightRuntime {
 
     if (this.keyboard.consumeResetRequest()) this.reset()
     const result = this.simulation.advance(frameDeltaSeconds, sample.input, (step) => {
-      this.fixedStepListener?.({
+      const fixedStepSample: FlightRuntimeFixedStepSample = {
         timestampSeconds: step.state.timeSeconds,
         state: copyDroneState(step.state),
         normalizedInput: copyNormalizedInput(sample.input),
         armed: step.telemetry.armed,
         telemetry: step.telemetry,
-      })
+      }
+      if (fixedStepSample.armed) this.replayRecorder.record(fixedStepSample)
+      this.fixedStepListener?.(fixedStepSample)
     })
     this.stepsSinceTelemetry += result.steps
     this.droppedStepsTotal += result.droppedSteps
@@ -417,6 +537,14 @@ export class FlightRuntime {
       frameDeltaSeconds * 1_000,
     )
     this.scheduleNextFrame()
+  }
+
+  private renderReplay(): void {
+    const playback = this.replayPlayback
+    if (!playback) return
+    const ghost = playback.getGhostState()
+    if (!ghost) return
+    this.renderer?.renderGhost(ghost)
   }
 
   private sampleInput(): SampledInput {
@@ -539,6 +667,8 @@ export class FlightRuntime {
       lastDroppedSeconds: droppedSeconds,
     },
   ): FlightRuntimeTelemetry {
+    const recordingSummary = this.replayRecorder.getSummary()
+    const playbackState = this.replayPlayback?.getState() ?? null
     return {
       ...telemetry,
       state: this.simulation.getState(),
@@ -554,6 +684,16 @@ export class FlightRuntime {
         lastDroppedSeconds: metrics.lastDroppedSeconds,
       },
       cameraMode: this.cameraMode,
+      replay: {
+        active: playbackState !== null,
+        playing: playbackState?.playing ?? false,
+        available: recordingSummary.available,
+        sampleCount: recordingSummary.sampleCount,
+        currentTimeSeconds: playbackState?.currentTimeSeconds ?? 0,
+        durationSeconds: playbackState?.durationSeconds ?? recordingSummary.durationSeconds,
+        speed: playbackState?.speed ?? 1,
+        label: playbackState ? 'PLAYBACK' : 'LIVE',
+      },
       safetyReasons: [...this.lastSafetyReasons, ...this.lastSample.safetyReasons].filter(
         (reason, index, reasons) => reasons.indexOf(reason) === index,
       ),

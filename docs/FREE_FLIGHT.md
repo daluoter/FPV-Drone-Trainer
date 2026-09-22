@@ -1,13 +1,13 @@
-# Free Flight integration (Phase 4/7)
+# Free Flight integration (Phase 4/8)
 
-Phase 4 connects the completed controller, rates, flight-controller and rigid-body simulation contracts to a direct Three.js presentation. Phase 5 tuning and Phase 7 training remain separate UI/domain seams; training observes the runtime through one fixed-step hook, draws semantic references/path data, and makes no hardware-realism claim.
+Phase 4 connects the completed controller, rates, flight-controller and rigid-body simulation contracts to a direct Three.js presentation. Phase 5 tuning, Phase 7 training, and Phase 8 replay remain separate UI/domain seams; training observes the runtime through one fixed-step hook, while replay observes armed fixed-step samples into a bounded compact ring and makes no hardware-realism claim.
 
 ## Ownership
 
 - `FlightRuntime` owns one `requestAnimationFrame` loop. Each frame polls a fresh selected Gamepad snapshot, processes the handed-off profile, advances `FlightSimulation` through its fixed 240 Hz accumulator, updates the Three.js scene and publishes only a throttled telemetry snapshot to React. The optional `onFixedStep` observer receives one timestamped state/input sample per completed fixed step for training; it cannot run or mutate physics.
 - Phase 5 tuning is handed to the runtime as a complete validated simulation configuration. `FlightRuntime.reconfigure` disarms, clears history and replaces the simulation from a safe initial state; it is never a silent in-flight mutation.
 - `ControllerLab` and `FlightRuntime` share the application-owned `GamepadPoller`. The Lab subscribes to a throttled presentation view; it does not start a second polling loop in the Phase 4 shell.
-- `FlightRenderer` owns the scene, visual quad, ground/grid, takeoff pad, hover target, turn gates/poles, Split-S gate, orbit tower/circle, semantic `sceneReferences` (`takeoff-pad`, `hover-zone`, `turn-entry`, `turn-apex`, `turn-exit`, `split-s-reference`, `orbit-poi`), cameras, bounded training path, resize and disposal. It consumes `DroneState` and never edits flight state. Training receives copied reference IDs/positions/dimensions as a read-only contract.
+- `FlightRenderer` owns the scene, visual quad, ground/grid, takeoff pad, hover target, turn gates/poles, Split-S gate, orbit tower/circle, semantic `sceneReferences` (`takeoff-pad`, `hover-zone`, `turn-entry`, `turn-apex`, `turn-exit`, `split-s-reference`, `orbit-poi`), cameras, bounded training/replay paths, the separate replay ghost, resize and disposal. It consumes live `DroneState` or presentation-only ghost pose through distinct methods and never edits flight state. Training receives copied reference IDs/positions/dimensions as a read-only contract.
 
 ## Scene and cameras
 
@@ -31,6 +31,10 @@ The Controller Lab hands the selected compatible profile to Free Flight. RC armi
 The last condition is an **arm-time handoff only**. Once armed, intended stick movement is passed through normalized RC, Actual Rates, SI rate PID, mixer, motor response and simulation without reapplying the neutral/low-throttle condition. Disconnect, connection-session change, profile/source change, invalid processed input, window blur and hidden documents disarm and require a new explicit Arm action. Reset uses the simulation reset path and remains disarmed.
 
 The developer keyboard fallback is opt-in in the Free Flight source selector. W/S, A/D, Q/E and R/F produce normalized RC values through the same controller/rates/PID path. Blur releases keys. X requests reset; there are no keyboard pose or Euler-angle shortcuts.
+
+## Replay boundary
+
+The Free Flight replay card retains the bounded last armed flight in memory. Entering replay disarms the live simulation and blocks Arm; the runtime does not advance fixed steps or call the training observer while the ghost clock runs. The App aborts an ACTIVE lesson (or clears a countdown) at this explicit boundary. Playback uses the existing FPV/chase/free camera rig with an independent ghost and trajectory path. Exit clears that presentation, resets live timestamps/controller history while disarmed, and requires explicit re-arm. See [`REPLAY.md`](REPLAY.md) for sample fields, decimation, interpolation and limitations.
 
 ## Developer HUD and evidence
 

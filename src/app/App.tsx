@@ -65,6 +65,11 @@ const roadmap: RoadmapItem[] = [
     description: 'Hover, coordinated turn, Split-S, and Orbit / 刷鍋 state/trajectory checks.',
     status: 'complete',
   },
+  {
+    title: 'Bounded replay',
+    description: 'Decimated last-flight ghost playback with safe live-runtime isolation.',
+    status: 'complete',
+  },
 ]
 
 const pipeline = [
@@ -154,10 +159,26 @@ export default function App() {
     // creating a second loop; only the React publication is throttled.
   }, [syncTrainingState])
   const onTrainingTelemetry = useCallback((telemetry: FlightRuntimeTelemetry) => {
-    setTrainingLiveInput(telemetry.normalizedInput)
+    setTrainingLiveInput(telemetry.replay.active ? null : telemetry.normalizedInput)
     const session = trainingSessionRef.current
-    if (!session || telemetry.armed) return
-    if (session.getState().phase === 'ACTIVE' && session.getState().armedAtLeastOnce === true) {
+    if (!session) return
+    const phase = session.getState().phase
+    if (telemetry.replay.active) {
+      // Replay has no fixed-step training feed. An in-progress attempt is
+      // ended at this explicit presentation boundary; terminal results remain
+      // available for review while the ghost is playing.
+      if (phase === 'ACTIVE') {
+        syncTrainingState(session.abort(
+          'Replay opened; the active lesson was aborted before playback.',
+          telemetry.state.timeSeconds,
+        ))
+      } else if (phase === 'COUNTDOWN') {
+        syncTrainingState(session.reset())
+      }
+      return
+    }
+    if (telemetry.armed) return
+    if (phase === 'ACTIVE' && session.getState().armedAtLeastOnce === true) {
       syncTrainingState(session.abort(
         telemetry.safetyReasons[0] ?? 'The flight was disarmed, reset, or focus was lost; the attempt was stopped safely.',
         telemetry.state.timeSeconds,
@@ -229,9 +250,9 @@ export default function App() {
         </a>
         <div className="topbar-status" aria-label="Application status">
           <span className="status-light" aria-hidden="true" />
-          <span>Phase 7 / Flight school build</span>
+          <span>Phase 8 / Replay build</span>
           <span className="status-divider" aria-hidden="true" />
-          <span className="muted">Phase 6 / Training framework complete</span>
+          <span className="muted">Phase 7 / Flight school evaluators complete</span>
         </div>
       </header>
 
@@ -281,7 +302,7 @@ export default function App() {
             <div className="status-readout">
               <div className="readout-row">
                 <span>Current phase</span>
-                <strong>Flight school evaluators</strong>
+                <strong>Bounded replay playback</strong>
               </div>
               <div className="readout-row">
                 <span>Controller</span>
@@ -379,7 +400,7 @@ export default function App() {
                 <p className="panel-kicker">Build sequence</p>
                 <h2>Trust, then tune.</h2>
               </div>
-              <span className="progress-count">07 / 09</span>
+              <span className="progress-count">08 / 09</span>
             </div>
             <div className="roadmap-list">
               {roadmap.map((item, index) => (

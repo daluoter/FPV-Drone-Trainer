@@ -52,8 +52,9 @@ state. The runtime must be explicitly armed again through its normal source
 and neutral gates.
 
 **Reset defaults** submits a fresh factory configuration through that same
-boundary and persistence path. Tuning does not add training lessons, replay,
-attitude shortcuts or direct physics/renderer mutation.
+boundary and persistence path. Tuning does not add training lessons, replay
+input, attitude shortcuts or direct physics/renderer mutation; replay remains a
+separate bounded presentation path.
 
 ## Evidence limits
 

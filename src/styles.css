@@ -1850,6 +1850,62 @@ h1 em {
   line-height: 1.5;
 }
 
+.flight-replay-card {
+  padding: 17px;
+  border: 1px solid rgba(255, 201, 120, 0.28);
+  background: rgba(19, 29, 39, 0.62);
+}
+
+.flight-replay-card h3 {
+  margin: 6px 0 0;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.flight-replay-note {
+  margin: 0 0 13px;
+  color: var(--muted);
+  font-size: 0.67rem;
+  line-height: 1.5;
+}
+
+.flight-replay-actions,
+.flight-replay-speeds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+}
+
+.flight-replay-seek {
+  display: block;
+  margin-top: 14px;
+  color: var(--faint);
+  font-size: 0.61rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.flight-replay-seek input {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  accent-color: var(--warning);
+}
+
+.flight-replay-speeds {
+  margin-top: 12px;
+  color: var(--faint);
+  font-size: 0.61rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.flight-replay-speeds > span {
+  margin-right: 2px;
+}
+
 .flight-safety-card,
 .flight-hud {
   padding: 21px;

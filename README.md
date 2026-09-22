@@ -2,7 +2,7 @@
 
 A browser-based FPV flight school and freestyle trick trainer focused on trustworthy transmitter input, believable Acro / Rate flight, and measurable feedback.
 
-> **Status: Phase 7 — four geometric training evaluators implemented.** The current build includes the Controller Lab handoff, explicit RC/developer arm gates, a direct Three.js field and quad, rigid FPV/chase/free cameras, a renderer-independent requestAnimationFrame owner around the fixed 240 Hz controller/simulation runtime, bounded tuning, pure state/trajectory evaluators for Hover, Coordinated Turn, Split-S, and Orbit / 刷鍋, defensive progress persistence, live diagnostics, a bounded training path, and Mode 2 sticks. Straight-line, box-pattern, and figure-eight replacements are not shipped; replay remains out of scope.
+> **Status: Phase 8 — bounded replay implemented.** The current build includes the Controller Lab handoff, explicit RC/developer arm gates, a direct Three.js field and quad, rigid FPV/chase/free cameras, a renderer-independent requestAnimationFrame owner around the fixed 240 Hz controller/simulation runtime, bounded tuning, pure state/trajectory evaluators for Hover, Coordinated Turn, Split-S, and Orbit / 刷鍋, defensive progress persistence, live diagnostics, a bounded training path, Mode 2 sticks, and decimated immutable last-flight ghost playback. Straight-line, box-pattern, and figure-eight replacements are not shipped; replay is in-memory only and not a physics continuation.
 
 ## Implemented
 
@@ -20,15 +20,16 @@ A browser-based FPV flight school and freestyle trick trainer focused on trustwo
 - Free Flight integration: direct Three.js ground/grid/takeoff field and quad, rigid FPV/chase/free cameras, resize/dispose handling, fixed-loop sampling/rendering, throttled telemetry HUD, RC arm handoff and explicit developer keyboard fallback
 - Bounded tuning: per-axis Actual Rates center/max/expo with curve graph, bounded simplified mass/motor/drag/PID controls, discrete FPV mount angles and FOV, versioned local persistence with incompatible-data rejection, reset defaults and an explicit disarmed runtime reconfiguration boundary
 - Training framework and Phase 7 lessons: explicit READY/COUNTDOWN/ACTIVE/SUCCESS/FAILED/RESULT machine, disarmed lesson setup/reset boundary, fixed-step armed telemetry, pure incremental Hover/Coordinated Turn/Split-S/Orbit geometry checks, contiguous hover dwell, ordered turn gates, real Split-S inversion/reversal, directed orbit lap rejection of yaw-in-place/teleports, defensive progress, live metrics/checkpoints/results/retry, visible references/path, and reusable Mode 2 sticks
+- Phase 8 replay: bounded decimated recorder for actual fixed-step pose/quaternion/velocity/angular-rate/normalized-RC/controller-output samples, immutable snapshots, shortest-path quaternion ghost interpolation, 0.25x/0.5x/1x/2x playback, trajectory visualization, and explicit disarm/training/arm isolation; see [`docs/REPLAY.md`](docs/REPLAY.md)
 - Architecture, controller, physics, Free Flight, tuning and training documentation in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/CONTROLLER_SYSTEM.md`](docs/CONTROLLER_SYSTEM.md), [`docs/COORDINATE_SYSTEM.md`](docs/COORDINATE_SYSTEM.md), [`docs/PHYSICS.md`](docs/PHYSICS.md), [`docs/FREE_FLIGHT.md`](docs/FREE_FLIGHT.md), [`docs/TUNING.md`](docs/TUNING.md), [`docs/TRAINING_SYSTEM.md`](docs/TRAINING_SYSTEM.md), and [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)
 
 ## In progress / next
 
-Phase 7 is complete. Replay and final verification remain separate phases. The settings and maneuver thresholds are provisional trainer assumptions only: the core makes no hardware-realism or flight-worthiness claim, and deterministic fixture/browser evidence is not transmitter or human-pilot validation.
+Phase 8 replay is complete. Final verification remains separate. The recorder is bounded and in-memory only; replay is presentation evidence rather than a full physics continuation. The settings and maneuver thresholds are provisional trainer assumptions only: the core makes no hardware-realism or flight-worthiness claim, and deterministic fixture/browser evidence is not transmitter or human-pilot validation.
 
 ## Planned
 
-The serial plan continues through replay and verification. See the implementation plan and [`docs/TRAINING_SYSTEM.md`](docs/TRAINING_SYSTEM.md) for the evaluator contract, safety boundaries, evidence limits, and current browser-smoke status.
+The serial plan continues through verification. See the implementation plan, [`docs/REPLAY.md`](docs/REPLAY.md), and [`docs/TRAINING_SYSTEM.md`](docs/TRAINING_SYSTEM.md) for the recorder/ghost contract, evaluator safety boundaries, evidence limits, and current browser-smoke status.
 
 ## Local development
 

@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 
 import { DEFAULT_DRONE_CONFIG, type DroneState } from '../drone'
+import type { ReplayGhostState } from '../replay'
 import {
   activeCamera,
   createCameraRig,
@@ -65,9 +66,34 @@ export class FlightRenderer {
 
   public render(state: DroneState): void {
     if (this.disposed) return
+    this.flightScene.setReplayVisible(false)
     this.flightScene.applyState(state)
     updateCameraRig(this.cameraRig, state, this.cameraRig.mode)
     this.renderer?.render(this.flightScene.scene, this.camera)
+  }
+
+  /** Render only the independent replay ghost and never apply a live DroneState. */
+  public renderGhost(
+    state: Pick<ReplayGhostState, 'positionM' | 'orientation'>,
+    trajectory: readonly { readonly x: number; readonly y: number; readonly z: number }[] = [],
+  ): void {
+    if (this.disposed) return
+    this.flightScene.applyGhost(state)
+    this.flightScene.setReplayVisible(true)
+    if (trajectory.length > 0) this.flightScene.setReplayPath(trajectory)
+    updateCameraRig(this.cameraRig, state, this.cameraRig.mode)
+    this.renderer?.render(this.flightScene.scene, this.camera)
+  }
+
+  public clearReplay(): void {
+    if (this.disposed) return
+    this.flightScene.setReplayVisible(false)
+    this.flightScene.setReplayPath([])
+  }
+
+  public setReplayPath(path: readonly { readonly x: number; readonly y: number; readonly z: number }[]): void {
+    if (this.disposed) return
+    this.flightScene.setReplayPath(path)
   }
 
   public setTrainingPath(path: readonly { readonly x: number; readonly y: number; readonly z: number }[]): void {

@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import type { DroneConfig, DroneState } from '../drone'
 import { DEFAULT_DRONE_CONFIG } from '../drone'
 import type { Vector3 } from '../math/vector'
+import type { ReplayGhostState } from '../replay'
 
 export type FlightSceneReferenceKind = 'pad' | 'zone' | 'marker' | 'gate' | 'poi'
 
@@ -18,6 +19,7 @@ export interface FlightSceneReference {
 export interface FlightScene {
   readonly scene: THREE.Scene
   readonly drone: THREE.Group
+  readonly ghost: THREE.Group
   readonly ground: THREE.Mesh
   readonly grid: THREE.GridHelper
   readonly takeoffPad: THREE.Object3D
@@ -26,8 +28,12 @@ export interface FlightScene {
   readonly sceneReferences: readonly FlightSceneReference[]
   getReference(id: string): FlightSceneReference | null
   applyState(state: DroneState): void
+  /** Apply an independent presentation ghost; this never mutates DroneState. */
+  applyGhost(state: Pick<ReplayGhostState, 'positionM' | 'orientation'>): void
+  setReplayVisible(visible: boolean): void
   /** Presentation-only bounded path trace; evaluators remain renderer-independent. */
   setTrainingPath(path: readonly Vector3[]): void
+  setReplayPath(path: readonly Vector3[]): void
   dispose(): void
 }
 
@@ -287,6 +293,26 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   const drone = createQuadVisual()
   scene.add(drone)
 
+  const ghost = createQuadVisual()
+  ghost.name = 'replay-ghost'
+  ghost.visible = false
+  ghost.traverse((object) => {
+    const mesh = object as THREE.Mesh
+    const materials = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []
+    for (const materialValue of materials) {
+      const ghostMaterial = materialValue.clone()
+      ghostMaterial.transparent = true
+      ghostMaterial.opacity = Math.min(ghostMaterial.opacity, 0.52)
+      if ('color' in ghostMaterial && ghostMaterial.color instanceof THREE.Color) ghostMaterial.color.set(0xffc978)
+      if (Array.isArray(mesh.material)) {
+        mesh.material = mesh.material.map((candidate) => candidate === materialValue ? ghostMaterial : candidate)
+      } else {
+        mesh.material = ghostMaterial
+      }
+    }
+  })
+  scene.add(ghost)
+
   const trainingPath = new THREE.Line(
     new THREE.BufferGeometry(),
     new THREE.LineBasicMaterial({ color: 0xb8f36b, transparent: true, opacity: 0.8 }),
@@ -294,6 +320,14 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   trainingPath.name = 'training-path'
   trainingPath.visible = false
   scene.add(trainingPath)
+
+  const replayPath = new THREE.Line(
+    new THREE.BufferGeometry(),
+    new THREE.LineBasicMaterial({ color: 0xffc978, transparent: true, opacity: 0.72 }),
+  )
+  replayPath.name = 'replay-path'
+  replayPath.visible = false
+  scene.add(replayPath)
 
   const applyState = (state: DroneState): void => {
     drone.position.set(state.positionM.x, state.positionM.y, state.positionM.z)
@@ -305,27 +339,51 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     ).normalize()
   }
 
-  const setTrainingPath = (path: readonly Vector3[]): void => {
+  const applyGhost = (state: Pick<ReplayGhostState, 'positionM' | 'orientation'>): void => {
+    ghost.position.set(state.positionM.x, state.positionM.y, state.positionM.z)
+    ghost.quaternion.set(
+      state.orientation.x,
+      state.orientation.y,
+      state.orientation.z,
+      state.orientation.w,
+    ).normalize()
+  }
+
+  const setReplayVisible = (visible: boolean): void => {
+    ghost.visible = visible
+    if (!visible) replayPath.visible = false
+  }
+
+  const setPath = (line: THREE.Line, path: readonly Vector3[], yOffset: number): void => {
     const maximumPoints = 1_200
     const stride = Math.max(1, Math.ceil(path.length / maximumPoints))
     const points: THREE.Vector3[] = []
     for (let index = 0; index < path.length; index += stride) {
       const position = path[index]
       if (!position) continue
-      points.push(new THREE.Vector3(position.x, position.y + 0.04, position.z))
+      points.push(new THREE.Vector3(position.x, position.y + yOffset, position.z))
     }
     const last = path[path.length - 1]
     if (last && (points.length === 0 || points[points.length - 1].x !== last.x || points[points.length - 1].y !== last.y || points[points.length - 1].z !== last.z)) {
-      points.push(new THREE.Vector3(last.x, last.y + 0.04, last.z))
+      points.push(new THREE.Vector3(last.x, last.y + yOffset, last.z))
     }
-    trainingPath.geometry.dispose()
-    trainingPath.geometry = new THREE.BufferGeometry().setFromPoints(points)
-    trainingPath.visible = points.length >= 2
+    line.geometry.dispose()
+    line.geometry = new THREE.BufferGeometry().setFromPoints(points)
+    line.visible = points.length >= 2
+  }
+
+  const setTrainingPath = (path: readonly Vector3[]): void => {
+    setPath(trainingPath, path, 0.04)
+  }
+
+  const setReplayPath = (path: readonly Vector3[]): void => {
+    setPath(replayPath, path, 0.07)
   }
 
   return {
     scene,
     drone,
+    ghost,
     ground,
     grid,
     takeoffPad,
@@ -333,7 +391,10 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     sceneReferences,
     getReference: (id: string): FlightSceneReference | null => referenceById.get(id) ?? null,
     applyState,
+    applyGhost,
+    setReplayVisible,
     setTrainingPath,
+    setReplayPath,
     dispose: () => disposeFlightScene(scene),
   }
 }

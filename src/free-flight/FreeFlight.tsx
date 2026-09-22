@@ -11,6 +11,7 @@ import {
 import Mode2StickOverlay from '../training/StickOverlay'
 import type { TrainingSample, TrainingSceneReference, TrainingSetupRequest } from '../training/types'
 import { flightSimulationConfigFromTuning, type TuningSettings } from '../tuning'
+import { REPLAY_SPEEDS, type ReplaySpeed } from '../replay'
 
 export interface FreeFlightProps {
   readonly poller: GamepadPoller
@@ -48,6 +49,7 @@ function channelValues(telemetry: FlightRuntimeTelemetry | null): readonly [stri
 
 function fallbackTelemetryLabel(telemetry: FlightRuntimeTelemetry | null): string {
   if (!telemetry) return 'Starting runtime…'
+  if (telemetry.replay.active) return telemetry.replay.playing ? 'PLAYBACK / playing ghost' : 'PLAYBACK / paused ghost'
   return telemetry.armed ? 'ARMED / simulation running' : 'SAFE / disarmed'
 }
 
@@ -153,12 +155,12 @@ export default function FreeFlight({
 
   useEffect(() => {
     const runtime = runtimeRef.current
-    if (!runtime || trainingSettingsLocked || appliedSettingsRef.current === settings) return
+    if (!runtime || trainingSettingsLocked || telemetry?.replay.active || appliedSettingsRef.current === settings) return
     if (runtime.reconfigure(flightSimulationConfigFromTuning(settings)) === false) return
     rendererRef.current?.setCameraOptions(settings.camera)
     appliedSettingsRef.current = settings
     setTelemetry(runtime.getTelemetry())
-  }, [settings, trainingSettingsLocked])
+  }, [settings, telemetry?.replay.active, trainingSettingsLocked])
 
   useEffect(() => {
     const runtime = runtimeRef.current
@@ -204,6 +206,48 @@ export default function FreeFlight({
     setTelemetry(runtime.getTelemetry())
   }
 
+  const enterReplay = (): void => {
+    const runtime = runtimeRef.current
+    if (!runtime) return
+    runtime.enterReplay()
+    setTelemetry(runtime.getTelemetry())
+  }
+
+  const exitReplay = (): void => {
+    const runtime = runtimeRef.current
+    if (!runtime) return
+    runtime.exitReplay()
+    setTelemetry(runtime.getTelemetry())
+  }
+
+  const playReplay = (): void => {
+    const runtime = runtimeRef.current
+    if (!runtime) return
+    runtime.playReplay()
+    setTelemetry(runtime.getTelemetry())
+  }
+
+  const pauseReplay = (): void => {
+    const runtime = runtimeRef.current
+    if (!runtime) return
+    runtime.pauseReplay()
+    setTelemetry(runtime.getTelemetry())
+  }
+
+  const seekReplay = (seconds: number): void => {
+    const runtime = runtimeRef.current
+    if (!runtime) return
+    runtime.seekReplay(seconds)
+    setTelemetry(runtime.getTelemetry())
+  }
+
+  const setReplaySpeed = (speed: ReplaySpeed): void => {
+    const runtime = runtimeRef.current
+    if (!runtime) return
+    runtime.setReplaySpeed(speed)
+    setTelemetry(runtime.getTelemetry())
+  }
+
   const disarm = (): void => {
     const runtime = runtimeRef.current
     if (!runtime) return
@@ -246,10 +290,11 @@ export default function FreeFlight({
           <div className="free-flight-viewport" role="img" aria-label="Three.js Free Flight simulation viewport">
             <canvas ref={canvasRef} className="flight-canvas" aria-label="Free Flight 3D scene" />
             <div className="flight-viewport-overlay" aria-hidden="true">
-              <span>LIVE SIM / {telemetry?.cameraMode?.toUpperCase() ?? 'FPV'}</span>
+              <span>{telemetry?.replay.active ? 'PLAYBACK GHOST' : 'LIVE SIM'} / {telemetry?.cameraMode?.toUpperCase() ?? 'FPV'}</span>
               <span>{format(telemetry?.metrics.fps, 0)} FPS · {format(telemetry?.metrics.simHz, 0)} SIM HZ</span>
             </div>
-            {!telemetry?.armed && <div className="flight-safe-overlay">SAFE / explicit arm required</div>}
+            {!telemetry?.armed && !telemetry?.replay.active && <div className="flight-safe-overlay">SAFE / explicit arm required</div>}
+            {telemetry?.replay.active && <div className="flight-safe-overlay">PLAYBACK / live arm blocked</div>}
           </div>
           <div className="flight-controls" aria-label="Flight controls">
             <div className="flight-control-group">
@@ -278,10 +323,10 @@ export default function FreeFlight({
               ))}
             </div>
             <div className="flight-action-group">
-              <button className="lab-button lab-button-primary" type="button" onClick={arm} disabled={Boolean(telemetry?.armed)}>
+              <button className="lab-button lab-button-primary" type="button" onClick={arm} disabled={Boolean(telemetry?.armed || telemetry?.replay.active)}>
                 Arm
               </button>
-              <button className="lab-button" type="button" onClick={disarm} disabled={!telemetry?.armed}>
+              <button className="lab-button" type="button" onClick={disarm} disabled={!telemetry?.armed || Boolean(telemetry?.replay.active)}>
                 Disarm
               </button>
               <button className="lab-button" type="button" onClick={reset}>
@@ -289,6 +334,64 @@ export default function FreeFlight({
               </button>
             </div>
           </div>
+          <section className="flight-replay-card" aria-labelledby="flight-replay-title">
+            <div className="flight-card-heading">
+              <div>
+                <p className="panel-kicker">Bounded last flight</p>
+                <h3 id="flight-replay-title">Replay / ghost playback</h3>
+              </div>
+              <span className={telemetry?.replay.active ? 'flight-pass' : 'flight-warn'}>
+                {telemetry?.replay.active ? 'PLAYBACK' : telemetry?.replay.available ? 'READY' : 'EMPTY'}
+              </span>
+            </div>
+            <p className="flight-replay-note">
+              Playback is presentation-only. It disarms live flight, does not feed training, and is not saved to local storage.
+            </p>
+            <div className="flight-replay-actions">
+              {!telemetry?.replay.active ? (
+                <button className="lab-button lab-button-primary" type="button" onClick={enterReplay} disabled={!telemetry?.replay.available}>
+                  Enter replay
+                </button>
+              ) : (
+                <>
+                  <button className="lab-button lab-button-primary" type="button" onClick={telemetry.replay.playing ? pauseReplay : playReplay}>
+                    {telemetry.replay.playing ? 'Pause' : 'Play'}
+                  </button>
+                  <button className="lab-button" type="button" onClick={exitReplay}>Exit playback</button>
+                </>
+              )}
+            </div>
+            {telemetry?.replay.active && (
+              <>
+                <label className="flight-replay-seek" htmlFor="flight-replay-timeline">
+                  <span>Timeline {format(telemetry.replay.currentTimeSeconds, 2)} / {format(telemetry.replay.durationSeconds, 2)} s</span>
+                  <input
+                    id="flight-replay-timeline"
+                    type="range"
+                    min={0}
+                    max={Math.max(telemetry.replay.durationSeconds, 0.01)}
+                    step={0.01}
+                    value={Math.min(telemetry.replay.currentTimeSeconds, Math.max(telemetry.replay.durationSeconds, 0.01))}
+                    onChange={(event) => seekReplay(Number(event.target.value))}
+                  />
+                </label>
+                <div className="flight-replay-speeds" aria-label="Replay speed">
+                  <span>Speed</span>
+                  {REPLAY_SPEEDS.map((speed) => (
+                    <button
+                      className={`lab-button lab-button-small ${telemetry.replay.speed === speed ? 'flight-camera-selected' : ''}`}
+                      type="button"
+                      key={speed}
+                      aria-pressed={telemetry.replay.speed === speed}
+                      onClick={() => setReplaySpeed(speed)}
+                    >
+                      {speed}×
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </section>
           {source === 'keyboard' && (
             <p className="flight-input-note">
               Developer fallback selected: W/S pitch · A/D roll · Q/E yaw · R/F throttle · X reset.
