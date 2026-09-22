@@ -341,4 +341,29 @@ describe('Free Flight runtime safety transitions', () => {
     expect(runtime.getTelemetry().armed).toBe(false)
     runtime.dispose()
   })
+
+  it('disarms and blocks arm while the visible renderer is unavailable', () => {
+    const frames = nextFrameRunner()
+    const runtime = new FlightRuntime({
+      scheduleFrame: frames.schedule,
+      cancelFrame: frames.cancel,
+      now: () => 100,
+    })
+    runtime.setInputSource('keyboard')
+    runtime.start()
+    frames.run(0)
+    expect(runtime.arm()).toBe(true)
+
+    runtime.setRenderingAvailable(false, 'WebGL context was lost; recover the viewport before arming.')
+    expect(runtime.isRenderingAvailable()).toBe(false)
+    expect(runtime.getTelemetry().armed).toBe(false)
+    expect(runtime.getTelemetry().safetyReasons).toContain('WebGL context was lost; recover the viewport before arming.')
+    expect(runtime.arm()).toBe(false)
+
+    runtime.setRenderingAvailable(true)
+    expect(runtime.isRenderingAvailable()).toBe(true)
+    expect(runtime.getTelemetry().armed).toBe(false)
+    expect(runtime.arm()).toBe(true)
+    runtime.dispose()
+  })
 })

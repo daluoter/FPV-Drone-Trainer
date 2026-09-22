@@ -14,9 +14,42 @@ import {
 } from './camera'
 import { createFlightScene, type FlightScene } from './scene'
 
+export type FlightRendererStatusKind = 'ready' | 'context-lost' | 'unavailable'
+
+export interface FlightRendererStatus {
+  readonly kind: FlightRendererStatusKind
+  readonly message?: string
+}
+
+export type WebGLRendererFactory = (
+  parameters: THREE.WebGLRendererParameters,
+) => THREE.WebGLRenderer
+
 export interface FlightRendererOptions extends CameraRigOptions {
   readonly pixelRatio?: number
   readonly scene?: FlightScene
+  /** Called when the canvas stops being safe to use for visible flight. */
+  readonly onStatusChange?: (status: FlightRendererStatus) => void
+  /** Test seam for a renderer double; production uses Three.js directly. */
+  readonly rendererFactory?: WebGLRendererFactory
+}
+
+function rendererErrorMessage(error: unknown): string {
+  if (error instanceof Error && /error is not a function/i.test(error.message)) {
+    return 'The browser could not create a WebGL2 rendering context. Check hardware acceleration and retry.'
+  }
+  if (error instanceof Error && error.message.trim().length > 0) return error.message
+  return 'The browser could not create a WebGL2 rendering context. Check hardware acceleration and retry.'
+}
+
+export class FlightRendererInitializationError extends Error {
+  public readonly cause: unknown
+
+  public constructor(cause: unknown) {
+    super(`WebGL renderer initialization failed: ${rendererErrorMessage(cause)}`)
+    this.name = 'FlightRendererInitializationError'
+    this.cause = cause
+  }
 }
 
 /** Three.js presentation owner for the Free Flight viewport. */
@@ -24,15 +57,44 @@ export class FlightRenderer {
   public readonly canvas: HTMLCanvasElement
   public readonly flightScene: FlightScene
   public readonly cameraRig: FlightCameraRig
-  public readonly renderer: THREE.WebGLRenderer | null
+  public readonly renderer: THREE.WebGLRenderer
+  private readonly statusListener: ((status: FlightRendererStatus) => void) | null
+  private status: FlightRendererStatus = { kind: 'ready' }
   private disposed = false
+  private readonly onContextLostBound = (): void => {
+    if (this.disposed) return
+    this.setStatus({
+      kind: 'context-lost',
+      message: 'The WebGL context was lost. Flight has been disarmed; retry rendering to recover.',
+    })
+  }
+  private readonly onContextRestoredBound = (): void => {
+    if (this.disposed) return
+    this.setStatus({ kind: 'ready' })
+  }
 
   public constructor(canvas: HTMLCanvasElement, options: FlightRendererOptions = {}) {
     this.canvas = canvas
     this.flightScene = options.scene ?? createFlightScene(DEFAULT_DRONE_CONFIG)
     this.cameraRig = createCameraRig(options)
-    this.renderer = this.createWebGlRenderer(options.pixelRatio)
-    this.resize()
+    this.statusListener = options.onStatusChange ?? null
+    let renderer: THREE.WebGLRenderer | null = null
+    try {
+      renderer = this.createWebGlRenderer(options.pixelRatio, options.rendererFactory)
+      this.renderer = renderer
+      this.canvas.addEventListener('webglcontextlost', this.onContextLostBound)
+      this.canvas.addEventListener('webglcontextrestored', this.onContextRestoredBound)
+      this.resize()
+    } catch (error) {
+      this.canvas.removeEventListener('webglcontextlost', this.onContextLostBound)
+      this.canvas.removeEventListener('webglcontextrestored', this.onContextRestoredBound)
+      renderer?.dispose()
+      this.flightScene.dispose()
+      throw error instanceof FlightRendererInitializationError
+        ? error
+        : new FlightRendererInitializationError(error)
+    }
+    this.statusListener?.(this.status)
   }
 
   public get scene(): THREE.Scene {
@@ -56,7 +118,7 @@ export class FlightRenderer {
     const safeWidth = Number.isFinite(width) && width > 0 ? width : 1
     const safeHeight = Number.isFinite(height) && height > 0 ? height : 1
     resizeCameraRig(this.cameraRig, safeWidth / safeHeight)
-    if (!this.renderer) return
+    if (this.status.kind !== 'ready') return
     const pixelRatio = typeof window !== 'undefined' && Number.isFinite(window.devicePixelRatio)
       ? Math.min(window.devicePixelRatio, 2)
       : 1
@@ -64,12 +126,23 @@ export class FlightRenderer {
     this.renderer.setSize(safeWidth, safeHeight, false)
   }
 
+  public getStatus(): FlightRendererStatus {
+    return this.status
+  }
+
   public render(state: DroneState): void {
-    if (this.disposed) return
-    this.flightScene.setReplayVisible(false)
-    this.flightScene.applyState(state)
-    updateCameraRig(this.cameraRig, state, this.cameraRig.mode)
-    this.renderer?.render(this.flightScene.scene, this.camera)
+    if (this.disposed || this.status.kind !== 'ready') return
+    try {
+      this.flightScene.setReplayVisible(false)
+      this.flightScene.applyState(state)
+      updateCameraRig(this.cameraRig, state, this.cameraRig.mode)
+      this.renderer.render(this.flightScene.scene, this.camera)
+    } catch (error) {
+      this.setStatus({
+        kind: 'unavailable',
+        message: `WebGL rendering failed: ${rendererErrorMessage(error)}`,
+      })
+    }
   }
 
   /** Render only the independent replay ghost and never apply a live DroneState. */
@@ -77,12 +150,19 @@ export class FlightRenderer {
     state: Pick<ReplayGhostState, 'positionM' | 'orientation'>,
     trajectory: readonly { readonly x: number; readonly y: number; readonly z: number }[] = [],
   ): void {
-    if (this.disposed) return
-    this.flightScene.applyGhost(state)
-    this.flightScene.setReplayVisible(true)
-    if (trajectory.length > 0) this.flightScene.setReplayPath(trajectory)
-    updateCameraRig(this.cameraRig, state, this.cameraRig.mode)
-    this.renderer?.render(this.flightScene.scene, this.camera)
+    if (this.disposed || this.status.kind !== 'ready') return
+    try {
+      this.flightScene.applyGhost(state)
+      this.flightScene.setReplayVisible(true)
+      if (trajectory.length > 0) this.flightScene.setReplayPath(trajectory)
+      updateCameraRig(this.cameraRig, state, this.cameraRig.mode)
+      this.renderer.render(this.flightScene.scene, this.camera)
+    } catch (error) {
+      this.setStatus({
+        kind: 'unavailable',
+        message: `WebGL rendering failed: ${rendererErrorMessage(error)}`,
+      })
+    }
   }
 
   public clearReplay(): void {
@@ -104,19 +184,31 @@ export class FlightRenderer {
   public dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.canvas.removeEventListener('webglcontextlost', this.onContextLostBound)
+    this.canvas.removeEventListener('webglcontextrestored', this.onContextRestoredBound)
     this.flightScene.dispose()
-    this.renderer?.dispose()
-    this.renderer?.forceContextLoss?.()
+    // Do not force context loss here. React StrictMode intentionally mounts,
+    // disposes, and remounts effects against the same canvas; a forced loss
+    // leaves that canvas permanently unable to create the next WebGL2 context.
+    this.renderer.dispose()
   }
 
-  private createWebGlRenderer(pixelRatio: number | undefined): THREE.WebGLRenderer | null {
-    if (
-      typeof window !== 'undefined' &&
-      typeof WebGLRenderingContext === 'undefined' &&
-      typeof WebGL2RenderingContext === 'undefined'
-    ) return null
+  private setStatus(status: FlightRendererStatus): void {
+    if (this.status.kind === status.kind && this.status.message === status.message) return
+    this.status = status
+    this.statusListener?.(status)
+  }
+
+  private createWebGlRenderer(
+    pixelRatio: number | undefined,
+    rendererFactory: WebGLRendererFactory | undefined,
+  ): THREE.WebGLRenderer {
     try {
-      const renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: false })
+      const renderer = (rendererFactory ?? ((parameters) => new THREE.WebGLRenderer(parameters)))({
+        canvas: this.canvas,
+        antialias: true,
+        alpha: false,
+      })
       const safePixelRatio = Number.isFinite(pixelRatio) && (pixelRatio ?? 0) > 0
         ? Math.min(pixelRatio as number, 2)
         : typeof window !== 'undefined' && Number.isFinite(window.devicePixelRatio)
@@ -126,10 +218,8 @@ export class FlightRenderer {
       renderer.outputColorSpace = THREE.SRGBColorSpace
       renderer.shadowMap.enabled = true
       return renderer
-    } catch {
-      // jsdom and browsers without WebGL still get the simulation/HUD. A
-      // renderer is optional at this boundary; it must never block safe input.
-      return null
+    } catch (error) {
+      throw new FlightRendererInitializationError(error)
     }
   }
 }

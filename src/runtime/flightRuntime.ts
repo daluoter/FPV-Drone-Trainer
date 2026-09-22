@@ -80,7 +80,10 @@ export interface FlightRuntimeTelemetry extends FlightTelemetry {
 export interface FlightRuntimeOptions {
   readonly poller?: RuntimePoller | GamepadPoller
   readonly profile?: ControllerProfile | null
+  /** Omit only for renderer-independent simulation tests or inject a renderer double. */
   readonly renderer?: FlightRenderer | null
+  /** Production Free Flight sets this false until a visible renderer is ready. */
+  readonly renderingAvailable?: boolean
   readonly simulation?: FlightSimulationConfig
   readonly scheduleFrame?: (callback: (time: number) => void) => number
   readonly cancelFrame?: (handle: number) => void
@@ -175,6 +178,8 @@ export class FlightRuntime {
   private replayPlayback: ReplayPlayback | null = null
   private controllerProfile: ControllerProfile | null
   private tuningLocked = false
+  private renderingAvailable: boolean
+  private renderingSafetyReason: string | null = null
   private source: FlightInputSource = 'controller'
   private cameraMode: FlightRuntimeTelemetry['cameraMode'] = DEFAULT_CAMERA_MODE
   private running = false
@@ -214,6 +219,7 @@ export class FlightRuntime {
   public constructor(options: FlightRuntimeOptions = {}) {
     this.poller = options.poller ?? null
     this.renderer = options.renderer ?? null
+    this.renderingAvailable = options.renderingAvailable ?? true
     this.simulation = new FlightSimulation(options.simulation)
     this.keyboard = new DeveloperKeyboardInput()
     this.controllerProfile = options.profile ?? null
@@ -368,6 +374,29 @@ export class FlightRuntime {
     this.emitTelemetry(true)
   }
 
+  public isRenderingAvailable(): boolean {
+    return this.renderingAvailable
+  }
+
+  /**
+   * A live simulator is not armable unless its state can be shown. Renderer
+   * context loss therefore follows the same explicit disarm boundary as blur,
+   * disconnect, and invalid controller input.
+   */
+  public setRenderingAvailable(available: boolean, reason = 'The 3D renderer is unavailable; recover the viewport before arming.'): void {
+    if (available) {
+      const previousReason = this.renderingSafetyReason
+      this.renderingAvailable = true
+      this.renderingSafetyReason = null
+      if (previousReason) this.lastSafetyReasons = this.lastSafetyReasons.filter((candidate) => candidate !== previousReason)
+      this.emitTelemetry(true)
+      return
+    }
+    this.renderingAvailable = false
+    this.renderingSafetyReason = reason
+    this.disarm(reason)
+  }
+
   /** Prevent tuning from rebuilding the simulation during a lesson attempt. */
   public setTuningLocked(locked: boolean): void {
     this.tuningLocked = locked
@@ -381,6 +410,11 @@ export class FlightRuntime {
     if (this.replayPlayback) {
       this.lastSafetyReasons = ['Exit replay playback before explicitly rearming the live flight.']
       this.emitTelemetry(true)
+      return false
+    }
+    if (!this.renderingAvailable) {
+      const reason = this.renderingSafetyReason ?? 'The 3D renderer is unavailable; recover the viewport before arming.'
+      this.disarm(reason)
       return false
     }
     const sample = this.sampleInput()

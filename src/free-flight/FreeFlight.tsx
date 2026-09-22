@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import type { ControllerProfile, GamepadPoller } from '../controller'
-import { FlightRenderer, type CameraMode } from '../rendering'
+import {
+  FlightRenderer,
+  FlightRendererInitializationError,
+  type CameraMode,
+  type FlightRendererStatus,
+} from '../rendering'
 import {
   FlightRuntime,
   type FlightInputSource,
@@ -47,10 +52,23 @@ function channelValues(telemetry: FlightRuntimeTelemetry | null): readonly [stri
   return [format(input.roll, 3), format(input.pitch, 3), format(input.yaw, 3), format(input.throttle, 3)]
 }
 
-function fallbackTelemetryLabel(telemetry: FlightRuntimeTelemetry | null): string {
+type FreeFlightRenderingState = 'initializing' | FlightRendererStatus['kind']
+
+function fallbackTelemetryLabel(
+  telemetry: FlightRuntimeTelemetry | null,
+  renderingState: FreeFlightRenderingState,
+): string {
+  if (renderingState === 'initializing') return 'RENDERER / starting'
+  if (renderingState !== 'ready') return 'SAFE / rendering unavailable'
   if (!telemetry) return 'Starting runtime…'
   if (telemetry.replay.active) return telemetry.replay.playing ? 'PLAYBACK / playing ghost' : 'PLAYBACK / paused ghost'
   return telemetry.armed ? 'ARMED / simulation running' : 'SAFE / disarmed'
+}
+
+function rendererFailureMessage(error: unknown): string {
+  if (error instanceof FlightRendererInitializationError) return error.message
+  if (error instanceof Error && error.message.trim().length > 0) return `WebGL renderer initialization failed: ${error.message}`
+  return 'WebGL renderer initialization failed. Check browser hardware acceleration and retry.'
 }
 
 export default function FreeFlight({
@@ -71,6 +89,9 @@ export default function FreeFlight({
   const runtimeRef = useRef<FlightRuntime | null>(null)
   const rendererRef = useRef<FlightRenderer | null>(null)
   const [telemetry, setTelemetry] = useState<FlightRuntimeTelemetry | null>(null)
+  const [renderingState, setRenderingState] = useState<FreeFlightRenderingState>('initializing')
+  const [renderingError, setRenderingError] = useState<string | null>(null)
+  const [rendererRetryKey, setRendererRetryKey] = useState(0)
   const [source, setSource] = useState<FlightInputSource>('controller')
   const [cameraMode, setCameraMode] = useState<CameraMode>('fpv')
   const [showHud, setShowHud] = useState(true)
@@ -94,12 +115,45 @@ export default function FreeFlight({
     const canvas = canvasRef.current
     if (!canvas) return
 
+    let active = true
     let cleanupResize = (): void => undefined
-    const renderer = new FlightRenderer(canvas, settings.camera)
-    const runtime = new FlightRuntime({
+    let runtime: FlightRuntime | null = null
+    let currentRendererStatus: FlightRendererStatus = { kind: 'ready' }
+    setTelemetry(null)
+    setRenderingState('initializing')
+    setRenderingError(null)
+
+    const onRendererStatus = (status: FlightRendererStatus): void => {
+      currentRendererStatus = status
+      if (!active) return
+      setRenderingState(status.kind)
+      setRenderingError(status.kind === 'ready' ? null : status.message ?? 'The WebGL renderer is unavailable.')
+      runtime?.setRenderingAvailable?.(status.kind === 'ready', status.message)
+    }
+
+    let renderer: FlightRenderer
+    try {
+      renderer = new FlightRenderer(canvas, {
+        ...settings.camera,
+        onStatusChange: onRendererStatus,
+      })
+    } catch (error) {
+      setRenderingState('unavailable')
+      setRenderingError(rendererFailureMessage(error))
+      return () => {
+        active = false
+        runtimeRef.current = null
+        rendererRef.current = null
+      }
+    }
+    setRenderingState(currentRendererStatus.kind)
+    setRenderingError(currentRendererStatus.kind === 'ready' ? null : currentRendererStatus.message ?? 'The WebGL renderer is unavailable.')
+
+    runtime = new FlightRuntime({
       poller,
       profile,
       renderer,
+      renderingAvailable: currentRendererStatus.kind === 'ready',
       simulation: flightSimulationConfigFromTuning(settings),
       onTelemetry: (nextTelemetry) => {
         setTelemetry(nextTelemetry)
@@ -107,11 +161,13 @@ export default function FreeFlight({
       },
       onFixedStep: (sample) => fixedStepListenerRef.current?.(sample),
     })
+    runtime.setRenderingAvailable?.(currentRendererStatus.kind === 'ready', currentRendererStatus.message)
     runtime.setInputSource(source)
     runtime.setCameraMode(cameraMode)
     runtime.setTuningLocked(trainingSettingsLocked)
     runtimeRef.current = runtime
     rendererRef.current = renderer
+    appliedSettingsRef.current = settings
     sceneReferencesListenerRef.current?.(renderer.flightScene.sceneReferences.map((reference) => ({
       id: reference.id,
       kind: reference.kind,
@@ -138,15 +194,16 @@ export default function FreeFlight({
     }
 
     return () => {
+      active = false
       cleanupResize()
-      runtime.dispose()
+      runtime?.dispose()
       renderer.dispose()
-      runtimeRef.current = null
-      rendererRef.current = null
+      if (runtimeRef.current === runtime) runtimeRef.current = null
+      if (rendererRef.current === renderer) rendererRef.current = null
     }
     // The runtime owns the loop; profile/source updates are handed off by the
     // effects below rather than restarting the renderer.
-  }, [poller])
+  }, [poller, rendererRetryKey])
 
   useEffect(() => {
     const runtime = runtimeRef.current
@@ -199,9 +256,15 @@ export default function FreeFlight({
     runtimeRef.current?.setCameraMode(cameraMode)
   }, [cameraMode])
 
+  const retryRendering = (): void => {
+    setRenderingState('initializing')
+    setRenderingError(null)
+    setRendererRetryKey((key) => key + 1)
+  }
+
   const arm = (): void => {
     const runtime = runtimeRef.current
-    if (!runtime) return
+    if (!runtime || renderingState !== 'ready') return
     runtime.arm()
     setTelemetry(runtime.getTelemetry())
   }
@@ -280,21 +343,31 @@ export default function FreeFlight({
             Tuning changes are applied only through a disarmed reset.
           </p>
         </div>
-        <div className={`flight-state-badge ${telemetry?.armed ? 'flight-state-armed' : ''}`}>
-          <span aria-hidden="true" /> {fallbackTelemetryLabel(telemetry)}
+        <div className={`flight-state-badge ${renderingState === 'ready' && telemetry?.armed ? 'flight-state-armed' : ''}`}>
+          <span aria-hidden="true" /> {fallbackTelemetryLabel(telemetry, renderingState)}
         </div>
       </div>
 
       <div className="free-flight-layout">
         <div className="free-flight-main">
           <div className="free-flight-viewport" role="img" aria-label="Three.js Free Flight simulation viewport">
-            <canvas ref={canvasRef} className="flight-canvas" aria-label="Free Flight 3D scene" />
+            <canvas key={rendererRetryKey} ref={canvasRef} className="flight-canvas" aria-label="Free Flight 3D scene" />
             <div className="flight-viewport-overlay" aria-hidden="true">
               <span>{telemetry?.replay.active ? 'PLAYBACK GHOST' : 'LIVE SIM'} / {telemetry?.cameraMode?.toUpperCase() ?? 'FPV'}</span>
               <span>{format(telemetry?.metrics.fps, 0)} FPS · {format(telemetry?.metrics.simHz, 0)} SIM HZ</span>
             </div>
-            {!telemetry?.armed && !telemetry?.replay.active && <div className="flight-safe-overlay">SAFE / explicit arm required</div>}
-            {telemetry?.replay.active && <div className="flight-safe-overlay">PLAYBACK / live arm blocked</div>}
+            {renderingState !== 'ready' && (
+              <div className="flight-rendering-error" role="alert" data-testid="flight-rendering-error">
+                <strong>3D viewport unavailable</strong>
+                <span>{renderingState === 'initializing' ? 'Starting the WebGL renderer…' : renderingError}</span>
+                {renderingState !== 'initializing' && <span>Flight is disarmed and Arm is blocked until the viewport recovers.</span>}
+                {renderingState !== 'initializing' && (
+                  <button className="lab-button lab-button-small" type="button" onClick={retryRendering}>Retry rendering</button>
+                )}
+              </div>
+            )}
+            {renderingState === 'ready' && !telemetry?.armed && !telemetry?.replay.active && <div className="flight-safe-overlay">SAFE / explicit arm required</div>}
+            {renderingState === 'ready' && telemetry?.replay.active && <div className="flight-safe-overlay">PLAYBACK / live arm blocked</div>}
           </div>
           <div className="flight-controls" aria-label="Flight controls">
             <div className="flight-control-group">
@@ -323,7 +396,7 @@ export default function FreeFlight({
               ))}
             </div>
             <div className="flight-action-group">
-              <button className="lab-button lab-button-primary" type="button" onClick={arm} disabled={Boolean(telemetry?.armed || telemetry?.replay.active)}>
+              <button className="lab-button lab-button-primary" type="button" onClick={arm} disabled={Boolean(renderingState !== 'ready' || telemetry?.armed || telemetry?.replay.active)}>
                 Arm
               </button>
               <button className="lab-button" type="button" onClick={disarm} disabled={!telemetry?.armed || Boolean(telemetry?.replay.active)}>

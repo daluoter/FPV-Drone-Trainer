@@ -165,7 +165,6 @@ Automated evaluator fixtures cover positive and negative traces for all four
 lessons, retry isolation, disarmed telemetry, upright Split-S U-turns,
 yaw-in-place/oscillatory orbit behavior, and path gaps/teleports. They do not
 prove that a human can pilot the maneuver in a browser or that the simplified
-physics model is realistic. Browser WebGL and physical transmitter checks
-remain separate evidence gates. On the current verification host, Chromium
-smoke testing is blocked unless the missing `libnspr4.so` dependency is
-resolved without unrelated system changes.
+physics model is realistic. A local headless Chromium smoke run covered the
+Free Flight renderer and context-loss safety path; physical-browser/GPU,
+physical transmitter, and human-pilot checks remain separate evidence gates.

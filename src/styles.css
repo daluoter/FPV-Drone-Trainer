@@ -1787,6 +1787,39 @@ h1 em {
   white-space: nowrap;
 }
 
+.flight-rendering-error {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  width: min(390px, calc(100% - 32px));
+  flex-direction: column;
+  gap: 9px;
+  padding: 17px;
+  border: 1px solid rgba(255, 201, 120, 0.55);
+  color: var(--warning);
+  background: rgba(8, 13, 19, 0.94);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.32);
+  font-size: 0.7rem;
+  line-height: 1.45;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+}
+
+.flight-rendering-error strong {
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.flight-rendering-error span {
+  overflow-wrap: anywhere;
+}
+
+.flight-rendering-error .lab-button {
+  align-self: flex-start;
+}
+
 .flight-controls {
   display: flex;
   flex-wrap: wrap;
