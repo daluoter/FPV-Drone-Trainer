@@ -1,10 +1,19 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 
 import { createBrowserGamepadPoller } from '../controller'
 import ControllerLab, { type ControllerLabFlightHandoff } from '../controller/ControllerLab'
 import FreeFlight from '../free-flight/FreeFlight'
+import {
+  DEFAULT_LESSONS,
+  TrainingPanel,
+  TrainingProgressStore,
+  TrainingSession,
+  type TrainingMachineState,
+} from '../training'
 import TuningPanel from '../tuning/TuningPanel'
 import { copyTuningSettings, TuningSettingsStore, type TuningSettings } from '../tuning'
+import type { FlightRuntimeFixedStepSample, FlightRuntimeTelemetry } from '../runtime'
+import type { NormalizedRcInput } from '../flight-controller'
 
 type RoadmapStatus = 'active' | 'next' | 'planned' | 'complete'
 
@@ -38,12 +47,17 @@ const roadmap: RoadmapItem[] = [
   {
     title: 'Bounded tuning',
     description: 'Versioned Actual Rates, dynamics, PID and camera settings with reset safety.',
-    status: 'active',
+    status: 'complete',
   },
   {
-    title: 'Flight school',
-    description: 'Stateful lessons that judge trajectory and aircraft state—not stick rituals.',
-    status: 'planned',
+    title: 'Training framework',
+    description: 'Explicit lesson state, truthful progress, fixed-step samples, results and Mode 2 sticks.',
+    status: 'complete',
+  },
+  {
+    title: 'Flight school evaluators',
+    description: 'Four geometric lesson evaluators and environment references.',
+    status: 'next',
   },
 ]
 
@@ -74,9 +88,70 @@ export default function App() {
     ? 'Saved tuning was unavailable or incompatible; bounded defaults are active.'
     : null)
   const [flightProfile, setFlightProfile] = useState<ControllerLabFlightHandoff['profile']>(null)
+  const progressStore = useMemo(() => new TrainingProgressStore(), [])
+  const initialProgressLoad = useMemo(() => progressStore.load(), [progressStore])
+  const trainingSessionRef = useRef<TrainingSession | null>(null)
+  if (trainingSessionRef.current === null) {
+    trainingSessionRef.current = new TrainingSession({ lessons: DEFAULT_LESSONS, initialLessonId: DEFAULT_LESSONS[0]?.id ?? null })
+  }
+  const [trainingState, setTrainingState] = useState<TrainingMachineState>(
+    () => trainingSessionRef.current?.getState() ?? new TrainingSession({ lessons: DEFAULT_LESSONS }).getState(),
+  )
+  const [trainingProgress, setTrainingProgress] = useState(initialProgressLoad.progress)
+  const [trainingLiveInput, setTrainingLiveInput] = useState<NormalizedRcInput | null>(null)
+  const [trainingResetKey, setTrainingResetKey] = useState(0)
+  const recordedTrainingSessionRef = useRef<string | null>(null)
   const onFlightHandoff = useCallback((handoff: ControllerLabFlightHandoff) => {
     setFlightProfile(handoff.profile)
   }, [])
+  const syncTrainingState = useCallback((next: TrainingMachineState) => {
+    setTrainingState(next)
+    if (!next.result || recordedTrainingSessionRef.current === next.result.sessionId) return
+    recordedTrainingSessionRef.current = next.result.sessionId
+    const persisted = progressStore.recordResult(next.result)
+    if (persisted.saved) setTrainingProgress(persisted.progress)
+  }, [progressStore])
+  const onTrainingFixedStep = useCallback((sample: FlightRuntimeFixedStepSample) => {
+    const session = trainingSessionRef.current
+    if (!session) return
+    const previous = session.getState()
+    const next = session.consumeSample({
+      timestampSeconds: sample.timestampSeconds,
+      state: sample.state,
+      normalizedInput: sample.normalizedInput,
+    })
+    if (next === previous) return
+    // React receives only phase/result changes here. The fixed-step hook still
+    // feeds every sample to the pure session, without creating a second loop.
+    if (next.phase !== previous.phase || next.result !== previous.result) syncTrainingState(next)
+  }, [syncTrainingState])
+  const onTrainingTelemetry = useCallback((telemetry: FlightRuntimeTelemetry) => {
+    setTrainingLiveInput(telemetry.normalizedInput)
+  }, [])
+  const selectTrainingLesson = useCallback((lessonId: string) => {
+    const session = trainingSessionRef.current
+    if (!session) return
+    syncTrainingState(session.selectLesson(lessonId))
+  }, [syncTrainingState])
+  const startTraining = useCallback(() => {
+    const session = trainingSessionRef.current
+    if (!session) return
+    const next = session.start(0)
+    syncTrainingState(next)
+    if (next.phase === 'COUNTDOWN') setTrainingResetKey((key) => key + 1)
+  }, [syncTrainingState])
+  const retryTraining = useCallback(() => {
+    const session = trainingSessionRef.current
+    if (!session) return
+    syncTrainingState(session.retry())
+    setTrainingResetKey((key) => key + 1)
+  }, [syncTrainingState])
+  const resetTraining = useCallback(() => {
+    const session = trainingSessionRef.current
+    if (!session) return
+    syncTrainingState(session.reset())
+    setTrainingResetKey((key) => key + 1)
+  }, [syncTrainingState])
   const onTuningApply = useCallback((next: TuningSettings) => {
     const result = tuningStore.save(next)
     if (result.saved) setTuningSettings(copyTuningSettings(next))
@@ -97,9 +172,9 @@ export default function App() {
         </a>
         <div className="topbar-status" aria-label="Application status">
           <span className="status-light" aria-hidden="true" />
-          <span>Phase 5 / Tuning + Free Flight build</span>
+          <span>Phase 6 / Training framework build</span>
           <span className="status-divider" aria-hidden="true" />
-          <span className="muted">RC gate + developer fallback</span>
+          <span className="muted">Phase 5 / Tuning + Free Flight build</span>
         </div>
       </header>
 
@@ -128,6 +203,10 @@ export default function App() {
                 Free Flight
                 <span className="button-meta">Open screen</span>
               </button>
+              <button className="button button-secondary" type="button" onClick={() => document.getElementById('training')?.scrollIntoView({ behavior: 'smooth' })}>
+                Training
+                <span className="button-meta">View lessons</span>
+              </button>
             </div>
             <p className="safety-note">
               <span className="safety-icon" aria-hidden="true">
@@ -145,7 +224,7 @@ export default function App() {
             <div className="status-readout">
               <div className="readout-row">
                 <span>Current phase</span>
-                <strong>Bounded tuning</strong>
+                <strong>Training framework</strong>
               </div>
               <div className="readout-row">
                 <span>Controller</span>
@@ -171,7 +250,25 @@ export default function App() {
 
         <TuningPanel settings={tuningSettings} notice={tuningNotice} onApply={onTuningApply} />
 
-        <FreeFlight poller={poller} profile={flightProfile} settings={tuningSettings} />
+        <TrainingPanel
+          state={trainingState}
+          progress={trainingProgress}
+          progressNotice={initialProgressLoad.errors.length > 0 ? 'Saved training progress was unavailable; empty progress is active.' : null}
+          liveInput={trainingLiveInput}
+          onSelectLesson={selectTrainingLesson}
+          onStart={startTraining}
+          onRetry={retryTraining}
+          onReset={resetTraining}
+        />
+
+        <FreeFlight
+          poller={poller}
+          profile={flightProfile}
+          settings={tuningSettings}
+          trainingResetKey={trainingResetKey}
+          onFixedStep={onTrainingFixedStep}
+          onTelemetry={onTrainingTelemetry}
+        />
 
         <section className="workspace-grid" aria-label="Application preview and roadmap">
           <article className="viewport-card panel-card">
@@ -215,7 +312,7 @@ export default function App() {
                 <p className="panel-kicker">Build sequence</p>
                 <h2>Trust, then tune.</h2>
               </div>
-              <span className="progress-count">05 / 09</span>
+              <span className="progress-count">06 / 09</span>
             </div>
             <div className="roadmap-list">
               {roadmap.map((item, index) => (
@@ -258,7 +355,7 @@ export default function App() {
       <footer className="app-footer">
         <span>FPV Drone Trainer</span>
         <span>Built for measurable flight feel.</span>
-        <span className="footer-version">v0.1.0 / phase 5 tuning</span>
+        <span className="footer-version">v0.1.0 / phase 6 training</span>
       </footer>
     </div>
   )

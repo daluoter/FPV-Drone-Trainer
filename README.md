@@ -2,7 +2,7 @@
 
 A browser-based FPV flight school and freestyle trick trainer focused on trustworthy transmitter input, believable Acro / Rate flight, and measurable feedback.
 
-> **Status: Phase 5 — bounded tuning implemented.** The current build includes the Controller Lab handoff, explicit RC/developer arm gates, a direct Three.js field and quad, rigid FPV/chase/free cameras, a renderer-independent requestAnimationFrame owner around the fixed 240 Hz controller/simulation runtime, and a compact versioned tuning screen. Training lessons and replay remain out of scope.
+> **Status: Phase 6 — training framework implemented.** The current build includes the Controller Lab handoff, explicit RC/developer arm gates, a direct Three.js field and quad, rigid FPV/chase/free cameras, a renderer-independent requestAnimationFrame owner around the fixed 240 Hz controller/simulation runtime, bounded tuning, a pure training state machine, defensive progress persistence, and Mode 2 sticks. The four geometric evaluators remain unavailable until Phase 7; replay remains out of scope.
 
 ## Implemented
 
@@ -19,15 +19,16 @@ A browser-based FPV flight school and freestyle trick trainer focused on trustwo
 - Betaflight Actual Rates to explicit pilot/body SI angular targets, bounded rate PID with antiwindup and derivative-on-measurement, fixed-step flight runtime, motor telemetry and safe reset/disarm
 - Free Flight integration: direct Three.js ground/grid/takeoff field and quad, rigid FPV/chase/free cameras, resize/dispose handling, fixed-loop sampling/rendering, throttled telemetry HUD, RC arm handoff and explicit developer keyboard fallback
 - Bounded tuning: per-axis Actual Rates center/max/expo with curve graph, bounded simplified mass/motor/drag/PID controls, discrete FPV mount angles and FOV, versioned local persistence with incompatible-data rejection, reset defaults and an explicit disarmed runtime reconfiguration boundary
-- Architecture, controller, physics, Free Flight and tuning documentation in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/CONTROLLER_SYSTEM.md`](docs/CONTROLLER_SYSTEM.md), [`docs/COORDINATE_SYSTEM.md`](docs/COORDINATE_SYSTEM.md), [`docs/PHYSICS.md`](docs/PHYSICS.md), [`docs/FREE_FLIGHT.md`](docs/FREE_FLIGHT.md), [`docs/TUNING.md`](docs/TUNING.md), and [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)
+- Training framework: explicit READY/COUNTDOWN/ACTIVE/SUCCESS/FAILED/RESULT machine, data-driven lesson contracts, one fixed-step sample hook, defensive recent/best/completed progress, truthful unavailable lesson menu/results/retry seam, scene reference IDs, and reusable live/demonstration Mode 2 sticks
+- Architecture, controller, physics, Free Flight, tuning and training documentation in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/CONTROLLER_SYSTEM.md`](docs/CONTROLLER_SYSTEM.md), [`docs/COORDINATE_SYSTEM.md`](docs/COORDINATE_SYSTEM.md), [`docs/PHYSICS.md`](docs/PHYSICS.md), [`docs/FREE_FLIGHT.md`](docs/FREE_FLIGHT.md), [`docs/TUNING.md`](docs/TUNING.md), [`docs/TRAINING_SYSTEM.md`](docs/TRAINING_SYSTEM.md), and [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)
 
 ## In progress / next
 
-Phase 5 is complete. Training/evaluators, replay and final verification remain separate phases. The settings are provisional trainer assumptions only: the core makes no hardware-realism or flight-worthiness claim, and synthetic/browser evidence is not transmitter or flight validation.
+Phase 6 is complete. The four geometric evaluators are the next Phase 7 owner; replay and final verification remain separate phases. The settings are provisional trainer assumptions only: the core makes no hardware-realism or flight-worthiness claim, and synthetic/browser evidence is not transmitter or flight validation.
 
 ## Planned
 
-The serial plan continues through training state/evaluators, replay and verification. See the implementation plan for phase gates and ownership.
+The serial plan continues through geometric lesson evaluators, replay and verification. See the implementation plan and [`docs/TRAINING_SYSTEM.md`](docs/TRAINING_SYSTEM.md) for phase gates and evaluator ownership.
 
 ## Local development
 
@@ -62,7 +63,7 @@ See [`docs/CONTROLLER_SYSTEM.md`](docs/CONTROLLER_SYSTEM.md) for the processing 
 
 ## Evidence status
 
-- **Automated:** controller normalization, center offsets, asymmetric endpoints, inversion, throttle mapping, deadband remapping, non-finite rejection, axis identification, endpoint checks, neutral jitter, profile compatibility/persistence, safety gating and disconnect behavior are covered by Vitest. Phase 4/5 cover hidden-document and connection-session safety, keyboard pipeline equivalence, camera transforms, tuning ranges, persistence rejection and disarmed apply/reset behavior.
+- **Automated:** controller normalization, center offsets, asymmetric endpoints, inversion, throttle mapping, deadband remapping, non-finite rejection, axis identification, endpoint checks, neutral jitter, profile compatibility/persistence, safety gating and disconnect behavior are covered by Vitest. Phase 4/5 cover hidden-document and connection-session safety, keyboard pipeline equivalence, camera transforms, tuning ranges, persistence rejection and disarmed apply/reset behavior. Phase 6 covers training timing/session reset, malformed progress, fixed-step sample delivery and the lesson catalog contract.
 - **Browser:** the Vite application, Controller Lab handoff, Three.js Free Flight scene, tuning UI and developer HUD are build- and test-verified. A real browser smoke check can confirm WebGL rendering, camera switching, keyboard fallback and settings application. Actual WebGL resource disposal/context-loss behavior remains browser-only evidence; jsdom tests do not prove GPU cleanup.
 - **Hardware:** no physical RC transmitter was available during implementation; endpoint, direction, neutral and no-spontaneous-rotation checks remain required manual evidence.
 

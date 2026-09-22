@@ -37,6 +37,14 @@ export interface FlightRuntimeMetrics {
   readonly lastDroppedSeconds: number
 }
 
+export interface FlightRuntimeFixedStepSample {
+  /** Authoritative fixed-step simulation time in seconds. */
+  readonly timestampSeconds: number
+  readonly state: DroneState
+  readonly normalizedInput: NormalizedRcInput | null
+  readonly telemetry: FlightTelemetry
+}
+
 export interface FlightRuntimeTelemetry extends FlightTelemetry {
   readonly state: DroneState
   readonly source: FlightInputSource
@@ -58,6 +66,8 @@ export interface FlightRuntimeOptions {
   readonly now?: () => number
   readonly telemetryIntervalMs?: number
   readonly onTelemetry?: (telemetry: FlightRuntimeTelemetry) => void
+  /** Called exactly once after each completed fixed simulation step. */
+  readonly onFixedStep?: (sample: FlightRuntimeFixedStepSample) => void
 }
 
 interface SampledInput {
@@ -105,6 +115,22 @@ function validElapsedMs(value: number): number {
   return Number.isFinite(value) && value >= 0 ? value : 0
 }
 
+function copyDroneState(state: DroneState): DroneState {
+  return {
+    ...state,
+    positionM: { ...state.positionM },
+    velocityMps: { ...state.velocityMps },
+    orientation: { ...state.orientation },
+    angularVelocityBodyRadPerSec: { ...state.angularVelocityBodyRadPerSec },
+    motors: state.motors.map((motor) => ({ ...motor })) as unknown as DroneState['motors'],
+    warnings: [...state.warnings],
+  }
+}
+
+function copyNormalizedInput(input: NormalizedRcInput | null): NormalizedRcInput | null {
+  return input ? { ...input } : null
+}
+
 /**
  * Owns the high-frequency Phase 4 loop. It samples the selected Gamepad,
  * processes the verified profile, advances the fixed-step flight simulation,
@@ -121,6 +147,7 @@ export class FlightRuntime {
   private readonly now: () => number
   private readonly telemetryIntervalMs: number
   private readonly telemetryListener: ((telemetry: FlightRuntimeTelemetry) => void) | null
+  private readonly fixedStepListener: ((sample: FlightRuntimeFixedStepSample) => void) | null
   private controllerProfile: ControllerProfile | null
   private source: FlightInputSource = 'controller'
   private cameraMode: FlightRuntimeTelemetry['cameraMode'] = DEFAULT_CAMERA_MODE
@@ -173,6 +200,7 @@ export class FlightRuntime {
     const interval = options.telemetryIntervalMs ?? DEFAULT_TELEMETRY_INTERVAL_MS
     this.telemetryIntervalMs = Number.isFinite(interval) && interval > 0 ? interval : DEFAULT_TELEMETRY_INTERVAL_MS
     this.telemetryListener = options.onTelemetry ?? null
+    this.fixedStepListener = options.onFixedStep ?? null
     this.lastTelemetry = this.makeTelemetry(this.simulation.getTelemetry(), 0, 0, 0, 0)
   }
 
@@ -322,7 +350,14 @@ export class FlightRuntime {
     }
 
     if (this.keyboard.consumeResetRequest()) this.reset()
-    const result = this.simulation.advance(frameDeltaSeconds, sample.input)
+    const result = this.simulation.advance(frameDeltaSeconds, sample.input, (step) => {
+      this.fixedStepListener?.({
+        timestampSeconds: step.state.timeSeconds,
+        state: copyDroneState(step.state),
+        normalizedInput: copyNormalizedInput(sample.input),
+        telemetry: step.telemetry,
+      })
+    })
     this.stepsSinceTelemetry += result.steps
     this.droppedStepsTotal += result.droppedSteps
     this.droppedSecondsTotal += result.droppedSeconds

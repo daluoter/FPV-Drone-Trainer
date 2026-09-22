@@ -2,6 +2,18 @@ import * as THREE from 'three'
 
 import type { DroneConfig, DroneState } from '../drone'
 import { DEFAULT_DRONE_CONFIG } from '../drone'
+import type { Vector3 } from '../math/vector'
+
+export type FlightSceneReferenceKind = 'pad' | 'marker' | 'gate'
+
+/** Stable environment identity exposed to future training evaluators. */
+export interface FlightSceneReference {
+  readonly id: string
+  readonly kind: FlightSceneReferenceKind
+  readonly object: THREE.Object3D
+  readonly positionM: Vector3
+  readonly sizeM?: Vector3
+}
 
 export interface FlightScene {
   readonly scene: THREE.Scene
@@ -9,7 +21,10 @@ export interface FlightScene {
   readonly ground: THREE.Mesh
   readonly grid: THREE.GridHelper
   readonly takeoffPad: THREE.Object3D
+  /** Legacy visual collection; use sceneReferences for stable lesson IDs. */
   readonly references: readonly THREE.Object3D[]
+  readonly sceneReferences: readonly FlightSceneReference[]
+  getReference(id: string): FlightSceneReference | null
   applyState(state: DroneState): void
   dispose(): void
 }
@@ -75,8 +90,12 @@ function createQuadVisual(): THREE.Group {
   return quad
 }
 
-function createReferenceObjects(): THREE.Object3D[] {
+function createReferenceObjects(): {
+  readonly objects: readonly THREE.Object3D[]
+  readonly contract: readonly FlightSceneReference[]
+} {
   const references: THREE.Object3D[] = []
+  const contract: FlightSceneReference[] = []
   const colors = [0xffc978, 0xb8f36b, 0x8abac4, 0xd28bff]
   const positions = [
     [-4, 0.45, -4],
@@ -92,6 +111,13 @@ function createReferenceObjects(): THREE.Object3D[] {
     marker.name = `reference-marker-${index}`
     marker.position.set(x, y, z)
     references.push(marker)
+    contract.push({
+      id: `marker-${index}`,
+      kind: 'marker',
+      object: marker,
+      positionM: { x, y, z },
+      sizeM: { x: 0.36, y: 0.9, z: 0.36 },
+    })
   }
 
   const gate = new THREE.Group()
@@ -106,7 +132,14 @@ function createReferenceObjects(): THREE.Object3D[] {
   crossbar.position.set(0, 1.78, -5)
   gate.add(crossbar)
   references.push(gate)
-  return references
+  contract.push({
+    id: 'gate',
+    kind: 'gate',
+    object: gate,
+    positionM: { x: 0, y: 0.9, z: -5 },
+    sizeM: { x: 5.12, y: 1.8, z: 0.12 },
+  })
+  return { objects: references, contract }
 }
 
 function disposeMaterial(materialValue: THREE.Material): void {
@@ -187,8 +220,18 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   takeoffPad.position.set(config.spawnPositionM.x, 0, config.spawnPositionM.z)
   scene.add(takeoffPad)
 
-  const references = createReferenceObjects()
-  for (const reference of references) scene.add(reference)
+  const referenceSet = createReferenceObjects()
+  for (const reference of referenceSet.objects) scene.add(reference)
+
+  const padReference: FlightSceneReference = {
+    id: 'takeoff-pad',
+    kind: 'pad',
+    object: takeoffPad,
+    positionM: { ...config.spawnPositionM },
+    sizeM: { x: 2.4, y: 0.08, z: 2.4 },
+  }
+  const sceneReferences = [padReference, ...referenceSet.contract]
+  const referenceById = new Map(sceneReferences.map((reference) => [reference.id, reference]))
 
   const drone = createQuadVisual()
   scene.add(drone)
@@ -209,7 +252,9 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     ground,
     grid,
     takeoffPad,
-    references,
+    references: referenceSet.objects,
+    sceneReferences,
+    getReference: (id: string): FlightSceneReference | null => referenceById.get(id) ?? null,
     applyState,
     dispose: () => disposeFlightScene(scene),
   }

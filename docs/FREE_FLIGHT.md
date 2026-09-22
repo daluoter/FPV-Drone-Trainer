@@ -1,13 +1,13 @@
-# Free Flight integration (Phase 4/5)
+# Free Flight integration (Phase 4/6)
 
-Phase 4 connects the completed controller, rates, flight-controller and rigid-body simulation contracts to a direct Three.js presentation. The Free Flight seam contains no training lessons or replay; Phase 5 tuning remains a separate UI and makes no hardware-realism claim.
+Phase 4 connects the completed controller, rates, flight-controller and rigid-body simulation contracts to a direct Three.js presentation. Phase 5 tuning remains a separate UI and Phase 6 training observes the runtime through a fixed-step hook; evaluators and replay remain separate seams and no hardware-realism claim is made.
 
 ## Ownership
 
-- `FlightRuntime` owns one `requestAnimationFrame` loop. Each frame polls a fresh selected Gamepad snapshot, processes the handed-off profile, advances `FlightSimulation` through its fixed 240 Hz accumulator, updates the Three.js scene and publishes only a throttled telemetry snapshot to React.
+- `FlightRuntime` owns one `requestAnimationFrame` loop. Each frame polls a fresh selected Gamepad snapshot, processes the handed-off profile, advances `FlightSimulation` through its fixed 240 Hz accumulator, updates the Three.js scene and publishes only a throttled telemetry snapshot to React. The optional `onFixedStep` observer receives one timestamped state/input sample per completed fixed step for training; it cannot run or mutate physics.
 - Phase 5 tuning is handed to the runtime as a complete validated simulation configuration. `FlightRuntime.reconfigure` disarms, clears history and replaces the simulation from a safe initial state; it is never a silent in-flight mutation.
 - `ControllerLab` and `FlightRuntime` share the application-owned `GamepadPoller`. The Lab subscribes to a throttled presentation view; it does not start a second polling loop in the Phase 4 shell.
-- `FlightRenderer` owns the scene, visual quad, ground/grid, takeoff pad, reference objects, cameras, resize and disposal. It consumes `DroneState` and never edits flight state.
+- `FlightRenderer` owns the scene, visual quad, ground/grid, takeoff pad, stable `sceneReferences` (`takeoff-pad`, `marker-0` … `marker-3`, `gate`), cameras, resize and disposal. It consumes `DroneState` and never edits flight state. Training uses the reference IDs/positions as a read-only contract.
 
 ## Scene and cameras
 

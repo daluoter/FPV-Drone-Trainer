@@ -4,7 +4,7 @@ Initial inspection: main at 35c66d2 contained only README.md and MIT LICENSE. Ph
 
 ## Current checkpoint
 
-Phase 5 bounded tuning is complete in this checkpoint. It consumes the Phase 1 controller and Phase 2/3 simulation contracts without adding training or replay scope. The durable phase evidence includes `src/runtime`, `src/rendering`, `src/free-flight`, `src/tuning`, hidden-document/session/keyboard safety regressions, camera-transform tests, bounded settings/persistence tests and an explicit disarmed reconfiguration boundary. Browser smoke, WebGL disposal and physical transmitter evidence remain separate from automated gates.
+Phase 6 training framework is complete in this checkpoint. It consumes the Phase 5 controller/simulation contracts through one fixed-step runtime sample hook, adds the explicit training machine, data-driven lesson catalog, defensive progress persistence, menu/results/retry presentation, scene reference IDs, and reusable Mode 2 sticks. The four geometric evaluators remain deliberately unavailable for Phase 7. Browser smoke, WebGL disposal, physical transmitter evidence, and maneuver evidence remain separate from automated gates.
 
 ## Architecture decisions
 
@@ -27,9 +27,9 @@ This is multi-seam work. Exclusive ownership passes serially in /workspaces/FPV-
 | 2 Dynamics (complete) | src/simulation, src/drone, math and coordinate/physics docs/tests | gravity, thrust, torque signs, quaternion, timestep; commit f8f9f7b |
 | 3 Flight controller | src/rates, src/flight-controller, pipeline integration | canonical rates, SI rate PID/antiwindup, fixed-step neutral and hover integration; commit |
 | 4 Free-flight integration | src/rendering, runtime and flight UI | safe arm, cameras, telemetry, browser smoke; complete |
-| 5 Tuning | src/tuning, settings UI, validated configuration/persistence and runtime boundary | bounded settings, defaults, persistence rejection, reset safety and documentation; complete in this checkpoint |
-| 6 Training framework | src/training contracts/state machine, menu/results/sticks | state transitions and progress; commit |
-| 7 Lessons | four geometric lesson evaluators and environment references | positive/negative maneuver traces; commit |
+| 5 Tuning | src/tuning, settings UI, validated configuration/persistence and runtime boundary | bounded settings, defaults, persistence rejection, reset safety and documentation; complete |
+| 6 Training framework | src/training contracts/state machine, menu/results/sticks, fixed-step sample hook and scene reference IDs | state transitions, progress, reset/session isolation and truthful unavailable lessons; complete in this checkpoint |
+| 7 Lessons | four geometric lesson evaluators and environment references | positive/negative maneuver traces; next owner |
 | 8 Replay | src/replay and playback/path integration | bounded recorder, immutable snapshots/playback; commit |
 | 9 Verification/polish | integration fixes, accessibility and truthful docs | independent review, all commands, browser checks; commit |
 

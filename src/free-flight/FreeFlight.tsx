@@ -5,14 +5,19 @@ import { FlightRenderer, type CameraMode } from '../rendering'
 import {
   FlightRuntime,
   type FlightInputSource,
+  type FlightRuntimeFixedStepSample,
   type FlightRuntimeTelemetry,
 } from '../runtime'
+import Mode2StickOverlay from '../training/StickOverlay'
 import { flightSimulationConfigFromTuning, type TuningSettings } from '../tuning'
 
 export interface FreeFlightProps {
   readonly poller: GamepadPoller
   readonly profile: ControllerProfile | null
   readonly settings: TuningSettings
+  readonly trainingResetKey?: number
+  readonly onFixedStep?: (sample: FlightRuntimeFixedStepSample) => void
+  readonly onTelemetry?: (telemetry: FlightRuntimeTelemetry) => void
 }
 
 function format(value: number | undefined, digits = 2): string {
@@ -40,7 +45,14 @@ function fallbackTelemetryLabel(telemetry: FlightRuntimeTelemetry | null): strin
   return telemetry.armed ? 'ARMED / simulation running' : 'SAFE / disarmed'
 }
 
-export default function FreeFlight({ poller, profile, settings }: FreeFlightProps) {
+export default function FreeFlight({
+  poller,
+  profile,
+  settings,
+  trainingResetKey = 0,
+  onFixedStep,
+  onTelemetry,
+}: FreeFlightProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const appliedSettingsRef = useRef(settings)
   const runtimeRef = useRef<FlightRuntime | null>(null)
@@ -49,6 +61,16 @@ export default function FreeFlight({ poller, profile, settings }: FreeFlightProp
   const [source, setSource] = useState<FlightInputSource>('controller')
   const [cameraMode, setCameraMode] = useState<CameraMode>('fpv')
   const [showHud, setShowHud] = useState(true)
+  const fixedStepListenerRef = useRef(onFixedStep)
+  const telemetryListenerRef = useRef(onTelemetry)
+
+  useEffect(() => {
+    fixedStepListenerRef.current = onFixedStep
+  }, [onFixedStep])
+
+  useEffect(() => {
+    telemetryListenerRef.current = onTelemetry
+  }, [onTelemetry])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -61,7 +83,11 @@ export default function FreeFlight({ poller, profile, settings }: FreeFlightProp
       profile,
       renderer,
       simulation: flightSimulationConfigFromTuning(settings),
-      onTelemetry: setTelemetry,
+      onTelemetry: (nextTelemetry) => {
+        setTelemetry(nextTelemetry)
+        telemetryListenerRef.current?.(nextTelemetry)
+      },
+      onFixedStep: (sample) => fixedStepListenerRef.current?.(sample),
     })
     runtime.setInputSource(source)
     runtime.setCameraMode(cameraMode)
@@ -105,6 +131,13 @@ export default function FreeFlight({ poller, profile, settings }: FreeFlightProp
     appliedSettingsRef.current = settings
     setTelemetry(runtime.getTelemetry())
   }, [settings])
+
+  useEffect(() => {
+    const runtime = runtimeRef.current
+    if (!runtime || trainingResetKey <= 0) return
+    runtime.reset()
+    setTelemetry(runtime.getTelemetry())
+  }, [trainingResetKey])
 
   useEffect(() => {
     runtimeRef.current?.setControllerProfile(profile)
@@ -219,6 +252,7 @@ export default function FreeFlight({ poller, profile, settings }: FreeFlightProp
         </div>
 
         <aside className="flight-side-panel">
+          <Mode2StickOverlay input={telemetry?.normalizedInput} mode="live" compact />
           <section className="flight-safety-card" aria-labelledby="flight-safety-title">
             <div className="flight-card-heading">
               <h3 id="flight-safety-title">Arm handoff</h3>

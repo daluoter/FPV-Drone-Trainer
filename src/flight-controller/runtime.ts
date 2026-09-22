@@ -158,7 +158,11 @@ export class FlightSimulation {
    * Consume a render-frame delta. The callback computes fresh PID output for
    * every fixed step, so render FPS cannot change controller or motor dynamics.
    */
-  public advance(frameDeltaSeconds: number, input: NormalizedRcInput | null): FlightAdvanceResult {
+  public advance(
+    frameDeltaSeconds: number,
+    input: NormalizedRcInput | null,
+    onFixedStep?: (result: FlightStepResult) => void,
+  ): FlightAdvanceResult {
     const inputValid = safeRuntimeInput(input)
     const inputWarning = inputValid ? null : 'Invalid normalized RC input; stale motor commands were discarded.'
     if (inputWarning) this.disarm(inputWarning)
@@ -176,6 +180,15 @@ export class FlightSimulation {
     const fixed = this.accumulator.advance(frameDeltaSeconds, (deltaSeconds) => {
       const result = this.stepInternal(commandInput, deltaSeconds, immediateWarnings)
       lastWarnings = result.warnings
+      if (onFixedStep) {
+        try {
+          onFixedStep(result)
+        } catch {
+          // Observers cannot be allowed to break the authoritative fixed-step
+          // loop. The observer is presentation/training integration only.
+          lastWarnings = [...lastWarnings, 'A fixed-step observer failed; flight simulation continued.']
+        }
+      }
     })
     warnings.push(...lastWarnings, ...fixed.warnings)
     this.telemetry = {
