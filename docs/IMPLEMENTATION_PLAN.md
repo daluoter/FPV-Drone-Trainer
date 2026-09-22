@@ -1,13 +1,13 @@
 # Implementation plan and ownership
 
-Initial inspection: main at 35c66d2 contained only README.md and MIT LICENSE. Phase 0 foundation completed in 49ca30d; Phase 1 Controller Lab completed in a70e907 plus safety fixes; Phase 2 deterministic dynamics is now complete in this checkpoint.
+Initial inspection: main at 35c66d2 contained only README.md and MIT LICENSE. Phase 0 foundation completed in 49ca30d; Phase 1 Controller Lab completed in a70e907 plus safety fixes; Phase 2 deterministic dynamics and Phase 3 flight-controller integration are complete in this checkpoint.
 
 ## Architecture decisions
 
 - Vite, strict TypeScript, React application shell, direct Three.js renderer, Vitest and ESLint.
 - Pure controller processing and calibration; no hardware assumptions. Poll fresh Gamepad snapshots outside React. Reject incompatible profiles, duplicate mappings, invalid endpoints and unstable neutral. Disconnect, blur and invalid input disarm.
 - Pure SI-unit simulation state with quaternion orientation; fixed 240 Hz accumulator independent of React and render FPS.
-- Pipeline: device -> calibration -> normalization -> deadband/filter -> Actual Rates -> rate controller -> Quad-X allocation -> motor response -> force/torque -> rigid body -> renderer.
+- Pipeline: device -> calibration -> normalization -> deadband/filter -> Actual Rates -> SI angular-rate PID -> Quad-X allocation -> motor response -> force/torque -> rigid body -> renderer.
 - Coordinate and mixer signs documented and tested before flight integration. Canonical Betaflight sources must support Actual Rates implementation.
 - Renderer owns presentation only. Training consumes state and trajectory, never directly moves the player. Replay snapshots are independent of player dynamics.
 - Local versioned storage only. No backend, accounts, multiplayer or decorative scope.
@@ -21,7 +21,7 @@ This is multi-seam work. Exclusive ownership passes serially in /workspaces/FPV-
 | 0 Foundation (complete) | package/config, shell, architecture docs | startup, test, typecheck, lint, build; commit 49ca30d |
 | 1 Controller (complete) | src/controller, Controller Lab UI, controller docs/tests | synthetic device calibration and neutral regression; commits a70e907, f8771a8, 8b2188b |
 | 2 Dynamics (complete) | src/simulation, src/drone, math and coordinate/physics docs/tests | gravity, thrust, torque signs, quaternion, timestep; commit f8f9f7b |
-| 3 Flight controller | src/rates, src/flight-controller, pipeline integration | canonical rates, stability and neutral no-spin; commit |
+| 3 Flight controller | src/rates, src/flight-controller, pipeline integration | canonical rates, SI rate PID/antiwindup, fixed-step neutral and hover integration; commit |
 | 4 Free-flight integration | src/rendering, runtime and flight UI | safe arm, cameras, telemetry, browser smoke; commit |
 | 5 Tuning | settings UI, validated configuration/persistence | bounded settings, defaults, documentation; commit |
 | 6 Training framework | src/training contracts/state machine, menu/results/sticks | state transitions and progress; commit |

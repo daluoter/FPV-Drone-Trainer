@@ -2,7 +2,7 @@
 
 A browser-based FPV flight school and freestyle trick trainer focused on trustworthy transmitter input, believable Acro / Rate flight, and measurable feedback.
 
-> **Status: Phase 2 — deterministic simulation core implemented.** The current build includes the Controller Lab safety boundary and a dependency-light quaternion rigid-body core with explicit Quad-X motors, forces, torques, ground contact and a fixed 240 Hz accumulator. It does not yet connect rates, a flight controller, Three.js Free Flight or training lessons.
+> **Status: Phase 3 — deterministic flight-control integration implemented.** The current build includes the Controller Lab safety boundary, canonical Actual Rates, a modular SI angular-rate PID with antiwindup, explicit Quad-X motors, forces, torques, ground contact, telemetry and a fixed 240 Hz controller/simulation runtime. It does not yet include an arm UI, Three.js Free Flight or training lessons.
 
 ## Implemented
 
@@ -16,11 +16,12 @@ A browser-based FPV flight school and freestyle trick trainer focused on trustwo
 - Versioned local controller profiles with compatibility checks
 - Mandatory processed neutral-stability test and future-flight eligibility gate
 - Deterministic 5-inch quad dynamics: validated configuration, exact motor lag, Quad-X allocation, `r × F` moments, gravity, drag, quaternion integration, safety resets and fixed-step timing
+- Betaflight Actual Rates to explicit pilot/body SI angular targets, bounded rate PID with antiwindup and derivative-on-measurement, fixed-step flight runtime, motor telemetry and safe reset/disarm
 - Architecture, controller and physics documentation in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/CONTROLLER_SYSTEM.md`](docs/CONTROLLER_SYSTEM.md), [`docs/COORDINATE_SYSTEM.md`](docs/COORDINATE_SYSTEM.md), [`docs/PHYSICS.md`](docs/PHYSICS.md), and [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)
 
 ## In progress / next
 
-Phase 3 connects Betaflight-style Actual Rates, angular-rate control and mixer commands to the validated simulation core. Phase 4 will add the Three.js Free Flight scene and developer HUD. The current core has no hardware-realism claim and remains independent of React and rendering.
+Phase 4 will add the Three.js Free Flight scene, application arm gate and developer HUD. The current core has no hardware-realism claim and remains independent of React and rendering.
 
 ## Planned
 
@@ -49,7 +50,7 @@ npm run preview      # serve the production build locally
 
 Desktop Chrome and Edge are the initial targets because the lab uses the browser Gamepad API. The lab deliberately does not assume `Axis 0 = Roll`, `Axis 1 = Pitch`, `Axis 2 = Throttle` or any other transmitter layout. It discovers the device, samples fresh state outside React, measures centers and real endpoints, rejects ambiguous/duplicate/invalid mappings, and requires a hands-off processed neutral test before a profile is eligible for future flight.
 
-See [`docs/CONTROLLER_SYSTEM.md`](docs/CONTROLLER_SYSTEM.md) for the processing contract and authoritative browser references. Follow [`docs/CONTROLLER_TESTING.md`](docs/CONTROLLER_TESTING.md) for physical transmitter validation.
+See [`docs/CONTROLLER_SYSTEM.md`](docs/CONTROLLER_SYSTEM.md) for the processing contract and authoritative browser references. See [`docs/FLIGHT_CONTROLLER.md`](docs/FLIGHT_CONTROLLER.md) for SI gains, signs, runtime and telemetry. Follow [`docs/CONTROLLER_TESTING.md`](docs/CONTROLLER_TESTING.md) for physical transmitter validation.
 
 ## Evidence status
 

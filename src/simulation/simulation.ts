@@ -50,6 +50,19 @@ export class DroneSimulation {
     return this.state
   }
 
+  /** Clear desired motor commands without changing physical state or time. */
+  public disarm(): DroneState {
+    this.state = {
+      ...this.state,
+      motors: this.state.motors.map((motor) => ({
+        ...motor,
+        command: 0,
+        targetThrustN: 0,
+      })) as unknown as DroneState['motors'],
+    }
+    return this.state
+  }
+
   public step(motorCommands: readonly number[], deltaSeconds = DEFAULT_FIXED_STEP_SECONDS): DroneStepResult {
     const result = stepDroneState(this.state, motorCommands, this.config, deltaSeconds)
     this.state = result.state
