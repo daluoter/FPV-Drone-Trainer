@@ -2,7 +2,7 @@
 
 ## Current scope
 
-Phase 0 establishes the application boundary and delivery tooling. The React shell is intentionally a safe, non-flight state: no browser Gamepad polling, Three.js scene, physics, controller calibration, or lesson logic is implemented yet. Keeping those capabilities absent is preferable to presenting an untrusted input path as flight-ready.
+Phase 1 implements the controller boundary and Controller Lab on top of the Phase 0 foundation. The React shell remains intentionally non-flight: browser Gamepad polling, calibration, profile compatibility, signal diagnostics, disconnect handling and neutral safety evaluation exist, but no Three.js scene, rates, physics, flight controller or lesson logic is enabled. Keeping flight absent is preferable to presenting an untrusted input path as flight-ready.
 
 The phase contract is tracked in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Each later phase must preserve the boundaries below and pass the phase gate before the next seam is started.
 
@@ -30,7 +30,7 @@ Config domain persists versioned settings and controller profiles locally.
 ### Ownership rules
 
 - **React/UI** owns presentation and low-frequency application state. It must not contain flight physics or direct controller-to-object rotation.
-- **Controller** owns fresh Gamepad snapshots, device selection, calibration, normalization, inversion, deadband, filtering, profile compatibility, and safety status. It must not know about Three.js.
+- **Controller** owns fresh Gamepad snapshots, device selection, calibration, normalization, inversion, deadband, filtering, profile compatibility, disconnect handling and safety status. `GamepadPoller` runs outside React; the Controller Lab subscribes only to a throttled presentation view. It must not know about Three.js.
 - **Rates and flight controller** convert normalized channels into desired angular rates and motor corrections. Acro mode never self-levels when the roll or pitch stick is released.
 - **Simulation** owns the authoritative SI-unit state: position, velocity, quaternion orientation, angular velocity, mass, inertia, forces, torques, motor response, and fixed-step integration.
 - **Renderer** consumes simulation snapshots and owns Three.js objects, cameras, and visual environment. It does not perform calibration or flight dynamics.
@@ -76,8 +76,8 @@ Normal flight is unavailable until the controller contract can prove:
 - centered roll, pitch, and yaw are stable after processing; and
 - all processed values are finite.
 
-The Phase 0 shell displays this boundary but cannot evaluate it yet. Phase 1 owns the implementation and regression tests for this gate.
+The Controller Lab evaluates this boundary, displays each failure reason and deliberately leaves flight unavailable in Phase 1. Future flight phases must consume this gate rather than bypassing it.
 
 ## Testing strategy
 
-Pure controller transforms, rates, mixer behavior, quaternion operations, fixed-step determinism, and lesson evaluators will be tested with deterministic inputs. UI tests cover only application state and accessibility-facing behavior. Browser smoke tests and real transmitter checks remain separate evidence; passing unit tests never claims hardware validation.
+Pure controller transforms, calibration statistics, profile compatibility, poller disconnect behavior and the safety gate are tested with deterministic inputs. Later phases will add rates, mixer, quaternion, fixed-step and lesson tests. UI tests cover application state and accessibility-facing behavior. Browser smoke tests and real transmitter checks remain separate evidence; passing unit tests never claims hardware validation.

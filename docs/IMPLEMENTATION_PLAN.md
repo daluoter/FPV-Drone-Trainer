@@ -1,6 +1,6 @@
 # Implementation plan and ownership
 
-Initial inspection: main at 35c66d2; clean checkout containing README.md and MIT LICENSE only.
+Initial inspection: main at 35c66d2 contained only README.md and MIT LICENSE. Phase 0 foundation completed in 49ca30d; Phase 1 Controller Lab is now the active implementation checkpoint.
 
 ## Architecture decisions
 
@@ -18,8 +18,8 @@ This is multi-seam work. Exclusive ownership passes serially in /workspaces/FPV-
 
 | Phase / owner seam | Files or contract | Gate / handoff |
 | --- | --- | --- |
-| 0 Foundation | package/config, shell, architecture docs | startup, test, typecheck, lint, build; commit |
-| 1 Controller | src/controller, Controller Lab UI, controller docs/tests | synthetic device calibration and neutral regression; commit |
+| 0 Foundation (complete) | package/config, shell, architecture docs | startup, test, typecheck, lint, build; commit 49ca30d |
+| 1 Controller (active) | src/controller, Controller Lab UI, controller docs/tests | synthetic device calibration and neutral regression; commit |
 | 2 Dynamics | src/simulation, src/drone, math and coordinate docs/tests | gravity, thrust, torque signs, quaternion, timestep; commit |
 | 3 Flight controller | src/rates, src/flight-controller, pipeline integration | canonical rates, stability and neutral no-spin; commit |
 | 4 Free-flight integration | src/rendering, runtime and flight UI | safe arm, cameras, telemetry, browser smoke; commit |

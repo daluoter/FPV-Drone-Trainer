@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Open the Vite URL shown in the terminal. The Phase 0 shell is safe UI-only scaffolding; controller and flight controls are intentionally disabled.
+Open the Vite URL shown in the terminal. Phase 1 exposes the Controller Lab, but flight controls remain intentionally disabled until later simulation phases.
 
 ## Required checks
 
@@ -30,7 +30,7 @@ npm run build
 - **Browser:** a developer opens the Vite app and checks the rendered shell and browser console.
 - **Hardware:** a physical RC transmitter is connected and tested through the browser Gamepad API. Hardware evidence must never be inferred from unit tests or a browser shell check.
 
-Phase 0 has automated foundation coverage only. It has no Gamepad API path and therefore has no hardware evidence.
+Phase 1 has automated controller transform/calibration coverage and a browser Controller Lab. No physical transmitter was available during implementation, so endpoint, direction, neutral and no-spontaneous-rotation hardware evidence remains outstanding.
 
 ## Source boundaries
 

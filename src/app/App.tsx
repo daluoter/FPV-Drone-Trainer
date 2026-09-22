@@ -1,4 +1,6 @@
-type RoadmapStatus = 'active' | 'next' | 'planned'
+import ControllerLab from '../controller/ControllerLab'
+
+type RoadmapStatus = 'active' | 'next' | 'planned' | 'complete'
 
 type RoadmapItem = {
   title: string
@@ -10,12 +12,12 @@ const roadmap: RoadmapItem[] = [
   {
     title: 'Foundation',
     description: 'Strict TypeScript shell, build tooling, and documented boundaries.',
-    status: 'active',
+    status: 'complete',
   },
   {
     title: 'Controller Lab',
     description: 'Discover, calibrate, inspect, and safely validate transmitter input.',
-    status: 'next',
+    status: 'active',
   },
   {
     title: 'Acro flight core',
@@ -43,6 +45,7 @@ const pipeline = [
 function statusLabel(status: RoadmapStatus): string {
   if (status === 'active') return 'Building now'
   if (status === 'next') return 'Next gate'
+  if (status === 'complete') return 'Complete'
   return 'Planned'
 }
 
@@ -61,9 +64,9 @@ export default function App() {
         </a>
         <div className="topbar-status" aria-label="Application status">
           <span className="status-light" aria-hidden="true" />
-          <span>Foundation build</span>
+          <span>Controller Lab build</span>
           <span className="status-divider" aria-hidden="true" />
-          <span className="muted">Phase 0 / UI only</span>
+          <span className="muted">Phase 1 / no flight</span>
         </div>
       </header>
 
@@ -84,9 +87,9 @@ export default function App() {
               flight, and feedback that makes every correction measurable.
             </p>
             <div className="hero-actions">
-              <button className="button button-primary" type="button" disabled>
+              <button className="button button-primary" type="button" onClick={() => document.getElementById('controller-lab')?.scrollIntoView({ behavior: 'smooth' })}>
                 Controller Lab
-                <span className="button-meta">Phase 1</span>
+                <span className="button-meta">Open lab</span>
               </button>
               <button className="button button-secondary" type="button" disabled>
                 Free Flight
@@ -101,7 +104,7 @@ export default function App() {
             </p>
           </div>
 
-          <aside className="status-card" aria-label="Foundation status">
+          <aside className="status-card" aria-label="Controller Lab status">
             <div className="card-heading">
               <span>System status</span>
               <span className="safe-badge">SAFE / UI ONLY</span>
@@ -109,11 +112,11 @@ export default function App() {
             <div className="status-readout">
               <div className="readout-row">
                 <span>Current phase</span>
-                <strong>Foundation</strong>
+                <strong>Controller Lab</strong>
               </div>
               <div className="readout-row">
                 <span>Controller</span>
-                <strong className="readout-muted">Not connected</strong>
+                <strong className="readout-muted">Gamepad monitor active</strong>
               </div>
               <div className="readout-row">
                 <span>Simulation</span>
@@ -121,15 +124,17 @@ export default function App() {
               </div>
               <div className="readout-row">
                 <span>Safety gate</span>
-                <strong className="readout-safe">Locked by design</strong>
+                <strong className="readout-safe">Locked until verified</strong>
               </div>
             </div>
             <div className="card-note">
               <span className="note-indicator" aria-hidden="true" />
-              No transmitter data is read or acted on in this build.
+              Controller Lab reads only raw input until calibration proves it safe.
             </div>
           </aside>
         </section>
+
+        <ControllerLab />
 
         <section className="workspace-grid" aria-label="Application preview and roadmap">
           <article className="viewport-card panel-card">
@@ -216,7 +221,7 @@ export default function App() {
       <footer className="app-footer">
         <span>FPV Drone Trainer</span>
         <span>Built for measurable flight feel.</span>
-        <span className="footer-version">v0.1.0 / foundation</span>
+        <span className="footer-version">v0.1.0 / controller lab</span>
       </footer>
     </div>
   )
