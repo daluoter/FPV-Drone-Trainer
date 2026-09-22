@@ -28,6 +28,19 @@ describe('GamepadPoller', () => {
     expect(poller.selectDevice(1)).toBe(true)
   })
 
+  it('assigns a new connection session after a disconnect and reconnect', () => {
+    let pads: readonly (GamepadLike | null)[] = [gamepad()]
+    const poller = new GamepadPoller({ provider: () => pads, supported: true })
+    const first = poller.poll().devices[0].connectionSession
+    pads = []
+    poller.poll()
+    pads = [gamepad({ timestamp: 2 })]
+    const reconnected = poller.poll().devices[0].connectionSession
+    expect(first).toBeTruthy()
+    expect(reconnected).toBeTruthy()
+    expect(reconnected).not.toBe(first)
+  })
+
   it('marks a vanished selected device disconnected instead of silently switching', () => {
     let pads: readonly (GamepadLike | null)[] = [gamepad()]
     const poller = new GamepadPoller({ provider: () => pads, supported: true })

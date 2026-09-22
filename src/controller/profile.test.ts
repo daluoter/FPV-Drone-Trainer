@@ -49,7 +49,7 @@ const profile = createControllerProfile(device, {
 const report: NeutralStabilityReport = {
   sampleCount: 100,
   durationMs: 3_000,
-  threshold: 0.05,
+  threshold: 0.02,
   maxAbsolute: { roll: 0.01, pitch: 0.01, yaw: 0.01 },
   mean: { roll: 0, pitch: 0, yaw: 0 },
   standardDeviation: { roll: 0.005, pitch: 0.005, yaw: 0.005 },
@@ -83,7 +83,7 @@ describe('controller profile safety and persistence', () => {
   })
 
   it('invalidates both verification gates whenever calibration is edited', () => {
-    const verified = markNeutralVerified(markDirectionsVerified(profile), report)
+    const verified = markNeutralVerified(markDirectionsVerified(profile), report, '2026-01-01T00:00:00.000Z', 'test-connection')
     expect(verified.directionVerifiedAt).not.toBeNull()
     expect(verified.neutralVerifiedAt).not.toBeNull()
 
@@ -92,6 +92,35 @@ describe('controller profile safety and persistence', () => {
     expect(edited.neutralVerifiedAt).toBeNull()
     expect(edited.neutralStability).toBeNull()
     expect(invalidateProfileVerification(verified).neutralVerifiedAt).toBeNull()
+  })
+
+  it('requires a connection-bound neutral approval', () => {
+    const directions = markDirectionsVerified(profile)
+    expect(markNeutralVerified(directions, report).neutralVerifiedAt).toBeNull()
+    const verified = markNeutralVerified(directions, report, '2026-01-01T00:00:00.000Z', 'connection-a')
+    expect(verified.neutralVerificationSession).toBe('connection-a')
+  })
+
+  it('rejects malformed neutral evidence from parsing and persistence', () => {
+    const malformed = {
+      ...profile,
+      neutralStability: {
+        ...report,
+        sampleCount: 0,
+        durationMs: 0,
+        stable: true,
+      },
+      neutralVerifiedAt: '2026-01-01T00:00:00.000Z',
+      neutralVerificationSession: 'old-connection',
+    }
+    expect(parseControllerProfile(malformed)).toBeNull()
+
+    const storage = new MemoryStorage()
+    storage.setItem(
+      'fpv-drone-trainer.controller-profile.v1.RadioMaster%20test',
+      JSON.stringify(malformed),
+    )
+    expect(new ControllerProfileStore(storage).loadCompatible(device)).toBeNull()
   })
 
   it('parses only the supported versioned profile shape', () => {

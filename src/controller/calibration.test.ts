@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   calculateSampleStatistics,
   evaluateNeutralStability,
+  validateNeutralStabilityReport,
   identifyAxisByMovement,
   isCenterStable,
   summarizeEndpointRange,
@@ -58,6 +59,33 @@ describe('controller calibration analysis', () => {
     expect(summarizeEndpointRange([0.1, 0.3], 'centered', 0.1).valid).toBe(false)
     expect(summarizeEndpointRange([-0.8, 0.7], 'single-ended').valid).toBe(true)
     expect(summarizeEndpointRange([-0.1, 0.1], 'single-ended').valid).toBe(false)
+  })
+
+  it('rejects malformed neutral evidence instead of treating NaN as stable', () => {
+    const malformed = {
+      sampleCount: 0,
+      durationMs: 0,
+      threshold: 0.02,
+      maxAbsolute: { roll: 0, pitch: 0, yaw: 0 },
+      mean: { roll: 0, pitch: 0, yaw: 0 },
+      standardDeviation: { roll: 0, pitch: 0, yaw: 0 },
+      stable: true,
+    }
+    expect(validateNeutralStabilityReport(malformed).valid).toBe(false)
+    expect(validateNeutralStabilityReport({
+      ...malformed,
+      sampleCount: 100,
+      durationMs: 3_000,
+      maxAbsolute: { roll: Number.NaN, pitch: 0, yaw: 0 },
+      stable: false,
+    }).valid).toBe(false)
+    expect(validateNeutralStabilityReport({
+      ...malformed,
+      sampleCount: 100,
+      durationMs: 3_000,
+      threshold: 0.05,
+      stable: false,
+    }).valid).toBe(false)
   })
 
   it('passes only a hands-off neutral window with enough time and samples', () => {

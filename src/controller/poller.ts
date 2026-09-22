@@ -46,6 +46,7 @@ function deviceFromSnapshot(snapshot: RawGamepadSnapshot): ControllerDevice {
     axisCount: snapshot.axisCount,
     buttonCount: snapshot.buttonCount,
     connected: snapshot.connected,
+    connectionSession: snapshot.connectionSession,
   }
 }
 
@@ -81,6 +82,8 @@ export class GamepadPoller {
   private readonly listeners = new Set<PollerListener>()
   private readonly knownDevices = new Map<number, ControllerDevice>()
   private readonly latestSnapshots = new Map<number, RawGamepadSnapshot>()
+  private readonly sessionPrefix = `poller-${Math.random().toString(36).slice(2)}`
+  private connectionCounter = 0
   private frameHandle: number | null = null
   private running = false
   private state: PollerState
@@ -128,7 +131,14 @@ export class GamepadPoller {
     for (const gamepad of this.provider()) {
       if (!gamepad) continue
       seenIndices.add(gamepad.index)
-      const snapshot = snapshotGamepad(gamepad)
+      const rawSnapshot = snapshotGamepad(gamepad)
+      const previousDevice = this.knownDevices.get(gamepad.index)
+      const connectionSession = gamepad.connected
+        ? previousDevice?.connected && previousDevice.connectionSession
+          ? previousDevice.connectionSession
+          : `${this.sessionPrefix}:${gamepad.index}:${++this.connectionCounter}`
+        : previousDevice?.connectionSession
+      const snapshot = { ...rawSnapshot, connectionSession }
       const device = deviceFromSnapshot(snapshot)
       this.knownDevices.set(gamepad.index, device)
       if (gamepad.connected) {

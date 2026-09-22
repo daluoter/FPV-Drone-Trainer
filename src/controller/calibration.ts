@@ -9,8 +9,16 @@ import type {
 export const MIN_CENTER_SAMPLES = 30
 export const DEFAULT_CENTER_MAX_JITTER = 0.08
 export const DEFAULT_CENTER_MAX_STANDARD_DEVIATION = 0.025
-export const DEFAULT_NEUTRAL_THRESHOLD = 0.05
-export const DEFAULT_NEUTRAL_MAX_STANDARD_DEVIATION = 0.02
+/**
+ * Neutral is intentionally tighter than a useful rate command. A five percent
+ * allowance can hide a meaningful input, so persisted evidence may not widen
+ * this policy beyond the documented upper bound.
+ */
+export const DEFAULT_NEUTRAL_THRESHOLD = 0.02
+export const MIN_NEUTRAL_THRESHOLD = 0.005
+export const MAX_NEUTRAL_THRESHOLD = 0.02
+export const DEFAULT_NEUTRAL_MAX_STANDARD_DEVIATION = 0.01
+export const MAX_NEUTRAL_STANDARD_DEVIATION = 0.02
 export const MIN_NEUTRAL_SAMPLES = 30
 export const MIN_NEUTRAL_DURATION_MS = 2_000
 export const MIN_AXIS_MOVEMENT = 0.25
@@ -279,7 +287,113 @@ function channelFinalValue(
 }
 
 function emptyStickRecord(): Record<StickChannel, number> {
-  return { roll: Number.NaN, pitch: Number.NaN, yaw: Number.NaN }
+  return { roll: 0, pitch: 0, yaw: 0 }
+}
+
+export interface NeutralReportValidationResult {
+  readonly valid: boolean
+  readonly errors: readonly string[]
+}
+
+/**
+ * Validates both the shape and the meaning of persisted neutral evidence.
+ * Failed evidence may be retained for diagnostics, but a passing report must
+ * satisfy the complete capture window and the same limits used by the gate.
+ */
+export function validateNeutralStabilityReport(
+  report: NeutralStabilityReport,
+): NeutralReportValidationResult {
+  const errors: string[] = []
+  if (!report || typeof report !== 'object') {
+    return { valid: false, errors: ['Neutral stability report is missing.'] }
+  }
+
+  if (!Number.isFinite(report.sampleCount) || !Number.isInteger(report.sampleCount) || report.sampleCount < 0) {
+    errors.push('Neutral sample count must be a finite non-negative integer.')
+  }
+  if (!Number.isFinite(report.durationMs) || report.durationMs < 0) {
+    errors.push('Neutral capture duration must be a finite non-negative number.')
+  }
+  if (
+    !Number.isFinite(report.threshold) ||
+    report.threshold < MIN_NEUTRAL_THRESHOLD ||
+    report.threshold > MAX_NEUTRAL_THRESHOLD
+  ) {
+    errors.push(`Neutral threshold must be between ${MIN_NEUTRAL_THRESHOLD} and ${MAX_NEUTRAL_THRESHOLD}.`)
+  }
+
+  for (const channel of STICK_CHANNELS) {
+    const maxAbsolute = report.maxAbsolute?.[channel]
+    const average = report.mean?.[channel]
+    const deviation = report.standardDeviation?.[channel]
+    if (!Number.isFinite(maxAbsolute) || maxAbsolute < 0) {
+      errors.push(`${channel} maximum neutral output must be finite and non-negative.`)
+    }
+    if (!Number.isFinite(average)) {
+      errors.push(`${channel} neutral mean must be finite.`)
+    }
+    if (!Number.isFinite(deviation) || deviation < 0) {
+      errors.push(`${channel} neutral standard deviation must be finite and non-negative.`)
+    }
+    if (
+      Number.isFinite(maxAbsolute) &&
+      Number.isFinite(average) &&
+      Math.abs(average) > maxAbsolute + Number.EPSILON
+    ) {
+      errors.push(`${channel} neutral mean exceeds its maximum absolute output.`)
+    }
+    if (
+      Number.isFinite(maxAbsolute) &&
+      Number.isFinite(deviation) &&
+      deviation > maxAbsolute + Number.EPSILON
+    ) {
+      errors.push(`${channel} neutral deviation exceeds its maximum absolute output.`)
+    }
+  }
+
+  if (errors.length > 0) return { valid: false, errors }
+
+  const hasCaptureWindow =
+    report.sampleCount >= MIN_NEUTRAL_SAMPLES &&
+    report.durationMs >= MIN_NEUTRAL_DURATION_MS
+  const metricsStable = STICK_CHANNELS.every((channel) =>
+    report.maxAbsolute[channel] <= report.threshold &&
+    report.standardDeviation[channel] <= DEFAULT_NEUTRAL_MAX_STANDARD_DEVIATION,
+  )
+  const expectedStable = hasCaptureWindow && metricsStable
+  if (report.stable !== expectedStable) {
+    errors.push(
+      `Neutral stable status is inconsistent with its capture window and metrics (expected ${expectedStable}).`,
+    )
+  }
+
+  return { valid: errors.length === 0, errors }
+}
+
+function neutralOptionFailures(
+  threshold: number,
+  maxStandardDeviation: number,
+  minSamples: number,
+  minDurationMs: number,
+): string[] {
+  const failures: string[] = []
+  if (!Number.isFinite(threshold) || threshold < MIN_NEUTRAL_THRESHOLD || threshold > MAX_NEUTRAL_THRESHOLD) {
+    failures.push(`threshold must be between ${MIN_NEUTRAL_THRESHOLD} and ${MAX_NEUTRAL_THRESHOLD}`)
+  }
+  if (
+    !Number.isFinite(maxStandardDeviation) ||
+    maxStandardDeviation < 0 ||
+    maxStandardDeviation > MAX_NEUTRAL_STANDARD_DEVIATION
+  ) {
+    failures.push(`standard deviation limit must be between 0 and ${MAX_NEUTRAL_STANDARD_DEVIATION}`)
+  }
+  if (!Number.isFinite(minSamples) || !Number.isInteger(minSamples) || minSamples < MIN_NEUTRAL_SAMPLES) {
+    failures.push(`sample count policy must be at least ${MIN_NEUTRAL_SAMPLES}`)
+  }
+  if (!Number.isFinite(minDurationMs) || minDurationMs < MIN_NEUTRAL_DURATION_MS) {
+    failures.push(`duration policy must be at least ${MIN_NEUTRAL_DURATION_MS} ms`)
+  }
+  return failures
 }
 
 export function evaluateNeutralStability(
@@ -295,21 +409,14 @@ export function evaluateNeutralStability(
   const averages = emptyStickRecord()
   const standardDeviations = emptyStickRecord()
   const valuesByChannel: Record<StickChannel, number[]> = { roll: [], pitch: [], yaw: [] }
+  const failures = neutralOptionFailures(threshold, maxStandardDeviation, minSamples, minDurationMs)
 
   for (const channels of samples) {
     for (const channel of STICK_CHANNELS) {
       const value = channelFinalValue(channels, channel)
       if (!Number.isFinite(value)) {
-        return {
-          sampleCount: samples.length,
-          durationMs,
-          threshold,
-          maxAbsolute,
-          mean: averages,
-          standardDeviation: standardDeviations,
-          stable: false,
-          reason: `${channel} contains a non-finite processed value.`,
-        }
+        failures.push(`${channel} contains a non-finite processed value`)
+        continue
       }
       valuesByChannel[channel].push(value)
     }
@@ -325,9 +432,12 @@ export function evaluateNeutralStability(
     }
   }
 
-  const failures: string[] = []
   if (samples.length < minSamples) failures.push(`only ${samples.length} samples; need ${minSamples}`)
-  if (durationMs < minDurationMs) failures.push(`only ${durationMs} ms; need ${minDurationMs} ms`)
+  if (!Number.isFinite(durationMs)) {
+    failures.push('capture duration is not finite')
+  } else if (durationMs < minDurationMs) {
+    failures.push(`only ${durationMs} ms; need ${minDurationMs} ms`)
+  }
   for (const channel of STICK_CHANNELS) {
     if (maxAbsolute[channel] > threshold) {
       failures.push(`${channel} reached ${maxAbsolute[channel].toFixed(3)} (limit ${threshold.toFixed(3)})`)

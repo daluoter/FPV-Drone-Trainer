@@ -13,6 +13,7 @@ import {
   isCenterStable,
   markDirectionsVerified,
   markNeutralVerified,
+  ControllerSignalHistory,
   processControllerSnapshot,
   summarizeEndpointRange,
   updateChannelCalibration,
@@ -24,6 +25,7 @@ import {
   type ControllerProfile,
   type NeutralStabilityReport,
   type PollerState,
+  type ProcessedControllerState,
   type RawGamepadSnapshot,
 } from './index'
 
@@ -75,12 +77,19 @@ function copySnapshot(snapshot: RawGamepadSnapshot): RawGamepadSnapshot {
 }
 
 function selectedDeviceKey(device: ControllerDevice | null): string | null {
-  return device ? `${device.id}:${device.index}:${device.mapping}:${device.axisCount}:${device.buttonCount}` : null
+  return device
+    ? `${device.id}:${device.index}:${device.mapping}:${device.axisCount}:${device.buttonCount}:${device.connectionSession ?? 'unknown'}`
+    : null
 }
 
-function initialStep(profile: ControllerProfile | null): WizardStep {
+function initialStep(profile: ControllerProfile | null, connectionSession: string | null): WizardStep {
   if (!profile) return 'center'
-  if (profile.neutralVerifiedAt) return 'ready'
+  if (
+    profile.neutralVerifiedAt &&
+    profile.neutralStability?.stable &&
+    profile.neutralVerificationSession &&
+    profile.neutralVerificationSession === connectionSession
+  ) return 'ready'
   if (profile.directionVerifiedAt) return 'neutral'
   return 'direction'
 }
@@ -97,17 +106,29 @@ export default function ControllerLab() {
   const [captureError, setCaptureError] = useState<string | null>(null)
   const [captureLabel, setCaptureLabel] = useState<string | null>(null)
   const [capturing, setCapturing] = useState(false)
+  const [processed, setProcessed] = useState<ProcessedControllerState | null>(null)
   const latestPollState = useRef(poller.getState())
+  const latestProcessed = useRef<ProcessedControllerState | null>(null)
+  const activeProfile = useRef<ControllerProfile | null>(null)
+  const signalHistory = useRef(new ControllerSignalHistory())
   const previousDeviceKey = useRef<string | null>(null)
 
   useEffect(() => {
     let updateTimer: number | null = null
     const unsubscribe = poller.subscribe((next) => {
       latestPollState.current = next
+      const snapshot = next.snapshots.find((candidate) => candidate.index === next.selectedDeviceIndex) ?? null
+      if (activeProfile.current && snapshot) {
+        latestProcessed.current = signalHistory.current.process(snapshot, activeProfile.current)
+      } else {
+        signalHistory.current.reset()
+        latestProcessed.current = null
+      }
       if (updateTimer !== null) return
       updateTimer = window.setTimeout(() => {
         updateTimer = null
         setPollState(latestPollState.current)
+        setProcessed(latestProcessed.current)
       }, 100)
     })
     poller.start()
@@ -121,10 +142,15 @@ export default function ControllerLab() {
   const selectedDevice = pollState.devices.find((device) => device.index === pollState.selectedDeviceIndex) ?? null
   const selectedSnapshot = pollState.snapshots.find((snapshot) => snapshot.index === pollState.selectedDeviceIndex) ?? null
   const deviceKey = selectedDeviceKey(selectedDevice)
+  const connectionSession = selectedDevice?.connectionSession ?? deviceKey
 
   useEffect(() => {
     if (deviceKey === previousDeviceKey.current) return
     previousDeviceKey.current = deviceKey
+    signalHistory.current.reset()
+    latestProcessed.current = null
+    activeProfile.current = null
+    setProcessed(null)
     setCaptureError(null)
     setNeutralReport(null)
     setCenterSummary(null)
@@ -136,52 +162,99 @@ export default function ControllerLab() {
     }
     const loaded = profileStore.loadCompatible(selectedDevice)
     setProfile(loaded)
-    setWizardStep(initialStep(loaded))
-  }, [deviceKey, profileStore])
+    setWizardStep(initialStep(loaded, selectedDevice.connectionSession ?? deviceKey))
+  }, [deviceKey, profileStore, selectedDevice])
+
+  useEffect(() => {
+    activeProfile.current = profile
+    signalHistory.current.reset()
+    latestProcessed.current = null
+    if (profile) {
+      const snapshot = latestPollState.current.snapshots.find(
+        (candidate) => candidate.index === latestPollState.current.selectedDeviceIndex,
+      ) ?? null
+      if (snapshot) latestProcessed.current = signalHistory.current.process(snapshot, profile)
+    }
+    setProcessed(latestProcessed.current)
+  }, [profile])
 
   useEffect(() => {
     if (profile) profileStore.save(profile)
   }, [profile, profileStore])
 
-  const processed = useMemo(() => {
-    if (!profile || !selectedSnapshot) return null
-    return processControllerSnapshot(selectedSnapshot, profile)
-  }, [profile, selectedSnapshot])
-
   const eligibility = useMemo(
-    () => evaluateFlightEligibility(selectedDevice, profile, processed),
-    [processed, profile, selectedDevice],
+    () => evaluateFlightEligibility(selectedDevice, profile, processed, { connectionSession }),
+    [connectionSession, processed, profile, selectedDevice],
   )
 
   const selectDevice = (index: number) => {
     if (poller.selectDevice(index)) setPollState(poller.getState())
   }
 
-  const captureSamples = useCallback(async (durationMs: number): Promise<{ samples: RawGamepadSnapshot[]; elapsedMs: number }> => {
+  const captureSamples = useCallback(async (durationMs: number): Promise<{
+    samples: RawGamepadSnapshot[]
+    elapsedMs: number
+    completed: boolean
+  }> => {
     const selectedIndex = poller.getState().selectedDeviceIndex
-    if (selectedIndex === null) return { samples: [], elapsedMs: 0 }
+    const initialSnapshot = poller.getSelectedSnapshot()
+    if (selectedIndex === null || !initialSnapshot || initialSnapshot.index !== selectedIndex) {
+      return { samples: [], elapsedMs: 0, completed: false }
+    }
+    const connectionSession = initialSnapshot.connectionSession ?? null
 
     setCapturing(true)
     setCaptureError(null)
     setCaptureLabel(`Collecting fresh Gamepad samples for ${Math.round(durationMs / 100) / 10} seconds…`)
     const samples: RawGamepadSnapshot[] = []
     const startedAt = performance.now()
-    const sampleTimer = window.setInterval(() => {
+    let sampleTimer: number | null = null
+    let completionTimer: number | null = null
+    let resolveCapture: ((completed: boolean) => void) | null = null
+    const captureResult = new Promise<boolean>((resolve) => {
+      resolveCapture = resolve
+    })
+    const finish = (completed: boolean) => {
+      if (sampleTimer !== null) window.clearInterval(sampleTimer)
+      if (completionTimer !== null) window.clearTimeout(completionTimer)
+      sampleTimer = null
+      completionTimer = null
+      setCapturing(false)
+      setCaptureLabel(null)
+      resolveCapture?.(completed)
+      resolveCapture = null
+    }
+    const sample = () => {
       const snapshot = poller.getSelectedSnapshot()
-      if (snapshot && snapshot.index === selectedIndex) samples.push(copySnapshot(snapshot))
-    }, 50)
+      if (
+        !snapshot ||
+        snapshot.index !== selectedIndex ||
+        !snapshot.connected ||
+        (connectionSession !== null && snapshot.connectionSession !== connectionSession)
+      ) {
+        finish(false)
+        return
+      }
+      samples.push(copySnapshot(snapshot))
+    }
 
-    await new Promise<void>((resolve) => window.setTimeout(resolve, durationMs))
-    window.clearInterval(sampleTimer)
-    const elapsedMs = performance.now() - startedAt
-    setCapturing(false)
-    setCaptureLabel(null)
-    return { samples, elapsedMs }
+    sample()
+    if (resolveCapture === null) {
+      return { samples, elapsedMs: performance.now() - startedAt, completed: false }
+    }
+    sampleTimer = window.setInterval(sample, 50)
+    completionTimer = window.setTimeout(() => finish(true), durationMs)
+    const completed = await captureResult
+    return { samples, elapsedMs: performance.now() - startedAt, completed }
   }, [poller])
 
   const runCenterCapture = async () => {
     if (!selectedDevice) return
     const result = await captureSamples(CAPTURE_DURATION_MS)
+    if (!result.completed) {
+      setCaptureError('Controller disconnected during capture. Reconnect it and restart this step.')
+      return
+    }
     const summary = calculateSampleSummary(result.samples)
     if (!summary.valid || summary.sampleCount < 30) {
       setCaptureError(summary.reason ?? 'Not enough center samples were collected.')
@@ -195,6 +268,10 @@ export default function ControllerLab() {
   const runMovementCapture = async (channel: ControlChannel) => {
     if (!selectedDevice || !centerSummary?.valid) return
     const result = await captureSamples(CAPTURE_DURATION_MS)
+    if (!result.completed) {
+      setCaptureError('Controller disconnected during capture. Reconnect it and restart this step.')
+      return
+    }
     const movement: AxisMovementResult = identifyAxisByMovement(
       centerSummary.axes.map((axis) => axis.center),
       result.samples.map((sample) => sample.axes),
@@ -281,26 +358,52 @@ export default function ControllerLab() {
   const runNeutralCapture = async () => {
     if (!profile || !selectedDevice) return
     const result = await captureSamples(NEUTRAL_CAPTURE_DURATION_MS)
-    let previous: Partial<Record<ControlChannel, number>> = {}
-    const processedSamples = result.samples.map((sample) => {
-      const state = processControllerSnapshot(sample, profile, previous, 1 / 20)
-      previous = {
-        roll: state.channels.roll.final,
-        pitch: state.channels.pitch.final,
-        yaw: state.channels.yaw.final,
-        throttle: state.channels.throttle.final,
-      }
-      return state.channels
-    })
-    const report = evaluateNeutralStability(processedSamples, result.elapsedMs)
+    if (!result.completed) {
+      setCaptureError('Controller disconnected during capture. Neutral approval was not granted.')
+      return
+    }
+
+    const captureHistory = new ControllerSignalHistory()
+    const processedStates = result.samples.map((sample) => captureHistory.process(sample, profile))
+    if (processedStates.some((state) => !state.valid)) {
+      setNeutralReport(null)
+      setProfile((current) => current ? {
+        ...current,
+        neutralVerifiedAt: null,
+        neutralVerificationSession: null,
+      } : current)
+      setCaptureError('Neutral capture contained invalid axis or button input. Approval was not granted.')
+      setWizardStep('neutral')
+      return
+    }
+
+    const report = evaluateNeutralStability(
+      processedStates.map((state) => state.channels),
+      result.elapsedMs,
+    )
     setNeutralReport(report)
     if (!report.stable) {
-      setProfile((current) => current ? { ...current, neutralVerifiedAt: null, neutralStability: report } : current)
+      setProfile((current) => current ? {
+        ...current,
+        neutralVerifiedAt: null,
+        neutralStability: report,
+        neutralVerificationSession: null,
+      } : current)
       setCaptureError(report.reason ?? 'Neutral stability failed. Recalibrate and repeat hands-off.')
       setWizardStep('neutral')
       return
     }
-    setProfile((current) => current ? markNeutralVerified(current, report) : current)
+
+    const session = selectedDevice.connectionSession ?? deviceKey
+    const verified = session
+      ? markNeutralVerified(profile, report, new Date().toISOString(), session)
+      : null
+    if (!verified?.neutralVerificationSession) {
+      setCaptureError('Controller connection identity was unavailable. Run the neutral test again.')
+      setWizardStep('neutral')
+      return
+    }
+    setProfile(verified)
     setCaptureError(null)
     setWizardStep('ready')
   }
@@ -412,7 +515,7 @@ export default function ControllerLab() {
             )}
             {selectedDevice && wizardStep === 'neutral' && profile && (
               <div className="wizard-instruction">
-                <p>Do not touch the transmitter. The processed Roll, Pitch and Yaw outputs must remain near zero for three seconds. An unstable result blocks the safety gate and explains the offending channel.</p>
+                <p>Do not touch the transmitter. The processed Roll, Pitch and Yaw outputs must remain within the documented 0.02 normalized-output threshold for three seconds. An unstable result blocks the safety gate and explains the offending channel; reloads and reconnects require a fresh timed run.</p>
                 <button className="lab-button lab-button-primary" type="button" disabled={capturing} onClick={() => void runNeutralCapture()}>
                   {capturing ? 'Testing neutral…' : 'Run 3-second neutral test'}
                 </button>
@@ -421,7 +524,7 @@ export default function ControllerLab() {
             {selectedDevice && wizardStep === 'ready' && (
               <div className="lab-success-message">
                 <span aria-hidden="true">✓</span>
-                Neutral output is verified. This Phase 1 build still has no flight mode; future flight must consume this gate.
+                Fresh neutral output is verified for this connection. This Phase 1 build still has no flight mode; future flight must consume this gate.
               </div>
             )}
             {captureLabel && <p className="capture-status" role="status">{captureLabel}</p>}
@@ -454,7 +557,15 @@ export default function ControllerLab() {
           </section>
 
           {profile && <DirectionPanel profile={profile} processed={processed} onUpdate={updateProfileChannel} />}
-          {profile && <NeutralReport report={neutralReport ?? profile.neutralStability} />}
+          {profile && <NeutralReport
+            report={neutralReport ?? profile.neutralStability}
+            fresh={Boolean(
+              profile.neutralVerifiedAt &&
+              profile.neutralVerificationSession &&
+              connectionSession &&
+              profile.neutralVerificationSession === connectionSession,
+            )}
+          />}
 
           <section className="lab-card profile-card" aria-labelledby="profile-title">
             <div className="lab-card-heading">
@@ -465,7 +576,7 @@ export default function ControllerLab() {
               <span className="profile-version">v{profile?.schemaVersion ?? 1}</span>
             </div>
             <p>{profile ? `Saved for ${profile.deviceId}. Profiles are loaded only when ID, mapping, axis count and button count match.` : 'A profile is created after all four channels pass endpoint calibration.'}</p>
-            {profile && <dl className="profile-details"><div><dt>Calibrated</dt><dd>{profile.calibrationTimestamp}</dd></div><div><dt>Axes</dt><dd>{profile.axisCount}</dd></div><div><dt>Neutral</dt><dd>{profile.neutralVerifiedAt ? 'Verified' : 'Unverified'}</dd></div></dl>}
+            {profile && <dl className="profile-details"><div><dt>Calibrated</dt><dd>{profile.calibrationTimestamp}</dd></div><div><dt>Axes</dt><dd>{profile.axisCount}</dd></div><div><dt>Neutral</dt><dd>{profile.neutralVerifiedAt && profile.neutralVerificationSession === connectionSession ? 'Verified this connection' : 'Fresh test required'}</dd></div></dl>}
           </section>
         </aside>
       </div>
@@ -521,11 +632,12 @@ function DirectionPanel({ profile, processed, onUpdate }: { profile: ControllerP
   )
 }
 
-function NeutralReport({ report }: { report: NeutralStabilityReport | null }) {
+function NeutralReport({ report, fresh }: { report: NeutralStabilityReport | null; fresh: boolean }) {
+  const passingNow = Boolean(report?.stable && fresh)
   return (
     <section className="lab-card neutral-card" aria-labelledby="neutral-report-title">
-      <div className="lab-card-heading"><div><p className="panel-kicker">08 / Stability evidence</p><h3 id="neutral-report-title">Hands-off report</h3></div><span className={`profile-version ${report?.stable ? 'report-pass' : ''}`}>{report ? (report.stable ? 'PASS' : 'FAIL') : 'NO RUN'}</span></div>
-      {!report ? <p>Run the neutral test after direction verification. The report records max absolute output, mean and standard deviation for each rotational channel.</p> : <><div className="neutral-metrics">{(['roll', 'pitch', 'yaw'] as const).map((channel) => <div key={channel}><strong>{channelLabel(channel)}</strong><span>max {formatValue(report.maxAbsolute[channel])}</span><span>σ {formatValue(report.standardDeviation[channel])}</span></div>)}</div><p className={report.stable ? 'report-pass' : 'report-fail'}>{report.reason}</p></>}
+      <div className="lab-card-heading"><div><p className="panel-kicker">08 / Stability evidence</p><h3 id="neutral-report-title">Hands-off report</h3></div><span className={`profile-version ${passingNow ? 'report-pass' : ''}`}>{!report ? 'NO RUN' : passingNow ? 'PASS' : report.stable ? 'RETEST' : 'FAIL'}</span></div>
+      {!report ? <p>Run the timed neutral test after direction verification. Reloading or reconnecting preserves calibration but requires a fresh hands-off capture.</p> : <><div className="neutral-metrics">{(['roll', 'pitch', 'yaw'] as const).map((channel) => <div key={channel}><strong>{channelLabel(channel)}</strong><span>max {formatValue(report.maxAbsolute[channel])}</span><span>σ {formatValue(report.standardDeviation[channel])}</span></div>)}</div><p className={passingNow ? 'report-pass' : 'report-fail'}>{report.stable && !fresh ? 'Historical pass; rerun the timed test for this connection.' : report.reason}</p></>}
     </section>
   )
 }

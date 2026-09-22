@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   applyRemappedDeadband,
+  ControllerSignalHistory,
   normalizeCentered,
   normalizeThrottle,
   processChannel,
@@ -87,6 +88,22 @@ describe('controller signal transforms', () => {
     expect(processed.channels.roll.final).toBe(0)
     expect(processed.channels.pitch.final).toBe(0)
     expect(processed.channels.yaw.final).toBe(0)
+  })
+
+  it('keeps filtering history live outside React and resets it for a new source', () => {
+    const history = new ControllerSignalHistory()
+    const first = history.process({ ...snapshot, timestamp: 100, connectionSession: 'session-a' }, profile)
+    const moved = history.process({ ...snapshot, axes: [0.7, 0.1, 0.1, -1], timestamp: 116, connectionSession: 'session-a' }, profile)
+    expect(first.channels.roll.filtered).toBe(0)
+    expect(moved.channels.roll.filtered).not.toBe(moved.channels.roll.deadband)
+
+    const fresh = history.process({ ...snapshot, timestamp: 132, connectionSession: 'session-b' }, profile)
+    expect(fresh.channels.roll.filtered).toBe(0)
+  })
+
+  it('preserves a measured full endpoint through the filter boundary', () => {
+    const endpoint = processChannel('roll', 0.9, centered, -0.5, 1 / 60)
+    expect(endpoint.final).toBe(1)
   })
 
   it('rejects non-finite raw input instead of hiding it in a deadband', () => {

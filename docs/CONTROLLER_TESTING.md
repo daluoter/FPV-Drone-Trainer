@@ -6,7 +6,7 @@ Phase 1 provides the Controller Lab and deterministic signal-processing tests. T
 
 1. Use desktop Chrome or Edge in a secure context and confirm the Gamepad API is available.
 2. Connect the transmitter over USB, open Controller Lab, and record browser, OS, transmitter ID, browser-reported index, mapping, axis count and button count.
-3. Verify the device appears/disappears in the discovery list when connected/disconnected. A disconnect must clear the selected live snapshot and keep the safety gate locked.
+3. Verify the device appears/disappears in the discovery list when connected/disconnected. A disconnect must clear the selected live snapshot, abort any capture without approval, start a new connection session on reconnect, and keep the safety gate locked.
 4. Inspect raw axes and buttons before calibration. Do not assume axis ordering or a standard Gamepad mapping.
 
 ## Calibration
@@ -18,14 +18,14 @@ Phase 1 provides the Controller Lab and deterministic signal-processing tests. T
 9. Move throttle from minimum to maximum. Confirm it is treated as single-ended and does not require a center.
 10. Move each control and verify the virtual channel direction. Toggle only the required inversion and repeat direction verification.
 11. Inspect Raw, Calibrated, Normalized, Deadband, Filtered and Final values. Confirm deadband is small and full-stick output remains available.
-12. Release the transmitter and run the mandatory three-second neutral stability test. Confirm Roll, Pitch and Yaw remain approximately zero and note the per-channel max/mean/jitter report.
-13. Reload the page and confirm a compatible profile loads. Change the device layout/mapping or select another device and confirm the profile is not loaded blindly.
+12. Release the transmitter and run the mandatory three-second neutral stability test. Confirm Roll, Pitch and Yaw remain within the documented 0.02 normalized-output threshold and note the per-channel max/mean/jitter report.
+13. Reload the page and confirm measured calibration loads but the historical neutral report is marked for retest. Reconnect the same device and confirm a new timed neutral test is required; changing the device layout/mapping or selecting another device must not load a profile blindly.
 14. Edit inversion/deadband or choose Recalibrate and confirm verification timestamps clear.
 
 ## Flight handoff (future phases)
 
-15. Verify the safety gate reports eligible only after device, mapping, endpoints, directions, current finite data and neutral stability all pass.
-16. With the transmitter at the documented safe throttle condition, enter Free Flight only after the gate allows it.
+15. Verify the continuous safety gate reports calibrated and eligible only after device, mapping, endpoints, directions, current finite data (including buttons) and a fresh connection-bound neutral report all pass. Verify the separate future arm handoff requires current rotational neutral and throttle <= 0.05.
+16. With the transmitter at the documented safe throttle condition, enter Free Flight only after the arm gate allows it. Once armed, intended stick movement must be accepted rather than continuously rejected by the pre-arm neutral check.
 17. Leave all sticks untouched and watch Roll/Pitch/Yaw commands for spontaneous increase. Stop immediately if an unexplained command or rotation appears.
 18. Move one physical control at a time and verify expected sign and independent response before combined flight.
 

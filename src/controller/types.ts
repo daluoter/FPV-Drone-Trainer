@@ -15,6 +15,8 @@ export interface ControllerDevice {
   readonly axisCount: number
   readonly buttonCount: number
   readonly connected: boolean
+  /** Runtime-only identity for this physical connection; never used for profile compatibility. */
+  readonly connectionSession?: string
 }
 
 export interface GamepadButtonLike {
@@ -83,6 +85,8 @@ export interface ControllerProfile {
   readonly directionVerifiedAt: string | null
   readonly neutralVerifiedAt: string | null
   readonly neutralStability: NeutralStabilityReport | null
+  /** Runtime connection binding persisted only as stale evidence, never as a portable approval. */
+  readonly neutralVerificationSession?: string | null
 }
 
 export interface ChannelPipelineValues {

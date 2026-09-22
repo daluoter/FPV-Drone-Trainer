@@ -1,4 +1,5 @@
-import { MAX_STICK_DEADBAND } from './signal'
+import { validateNeutralStabilityReport } from './calibration'
+import { DEFAULT_STICK_DEADBAND, MAX_STICK_DEADBAND } from './signal'
 import {
   CONTROLLER_PROFILE_VERSION,
   CONTROL_CHANNELS,
@@ -8,7 +9,6 @@ import {
   type ControllerProfile,
   type NeutralStabilityReport,
 } from './types'
-import { DEFAULT_STICK_DEADBAND } from './signal'
 
 export interface ProfileValidationResult {
   readonly valid: boolean
@@ -97,7 +97,7 @@ function parseNeutralStability(value: unknown): NeutralStabilityReport | null {
   const mean = parseNumberRecord(value.mean)
   const standardDeviation = parseNumberRecord(value.standardDeviation)
   if (!maxAbsolute || !mean || !standardDeviation) return null
-  return {
+  const report: NeutralStabilityReport = {
     sampleCount: value.sampleCount,
     durationMs: value.durationMs,
     threshold: value.threshold,
@@ -107,6 +107,7 @@ function parseNeutralStability(value: unknown): NeutralStabilityReport | null {
     stable: value.stable,
     reason: typeof value.reason === 'string' ? value.reason : undefined,
   }
+  return validateNeutralStabilityReport(report).valid ? report : null
 }
 
 /** Runtime schema guard for versioned local-storage data. */
@@ -122,6 +123,7 @@ export function parseControllerProfile(value: unknown): ControllerProfile | null
     typeof value.calibrationTimestamp !== 'string' ||
     !isNullableString(value.directionVerifiedAt) ||
     !isNullableString(value.neutralVerifiedAt) ||
+    (value.neutralVerificationSession !== undefined && !isNullableString(value.neutralVerificationSession)) ||
     !isRecord(value.channels)
   ) {
     return null
@@ -137,7 +139,7 @@ export function parseControllerProfile(value: unknown): ControllerProfile | null
   const neutralStability = parseNeutralStability(value.neutralStability)
   if (value.neutralStability !== null && neutralStability === null) return null
 
-  return {
+  const profile: ControllerProfile = {
     schemaVersion: CONTROLLER_PROFILE_VERSION,
     deviceId: value.deviceId,
     deviceMapping: value.deviceMapping,
@@ -149,7 +151,9 @@ export function parseControllerProfile(value: unknown): ControllerProfile | null
     directionVerifiedAt: value.directionVerifiedAt,
     neutralVerifiedAt: value.neutralVerifiedAt,
     neutralStability,
+    neutralVerificationSession: value.neutralVerificationSession ?? null,
   }
+  return validateControllerProfile(profile).valid ? profile : null
 }
 
 export function validateControllerProfile(
@@ -163,6 +167,29 @@ export function validateControllerProfile(
   if (!Number.isInteger(profile.buttonCount) || profile.buttonCount < 0) errors.push('Profile button count is invalid.')
   if (profile.throttleMode !== 'single-ended') errors.push('Throttle mode is unsupported.')
   if (!profile.calibrationTimestamp) errors.push('Calibration timestamp is missing.')
+  if (profile.directionVerifiedAt !== null && !profile.directionVerifiedAt) {
+    errors.push('Direction verification timestamp is malformed.')
+  }
+  if (profile.neutralVerifiedAt !== null && !profile.neutralVerifiedAt) {
+    errors.push('Neutral verification timestamp is malformed.')
+  }
+  if (
+    profile.neutralVerificationSession !== undefined &&
+    !isNullableString(profile.neutralVerificationSession)
+  ) {
+    errors.push('Neutral verification session is malformed.')
+  } else if (profile.neutralVerificationSession === '') {
+    errors.push('Neutral verification session is empty.')
+  }
+  if (profile.neutralStability !== null) {
+    const reportValidation = validateNeutralStabilityReport(profile.neutralStability)
+    if (!reportValidation.valid) errors.push(...reportValidation.errors)
+    if (profile.neutralVerifiedAt && !profile.neutralStability.stable) {
+      errors.push('A neutral verification timestamp requires stable neutral evidence.')
+    }
+  } else if (profile.neutralVerifiedAt) {
+    errors.push('A neutral verification timestamp requires a neutral report.')
+  }
 
   const usedAxes = new Set<number>()
   for (const channel of CONTROL_CHANNELS) {
@@ -239,6 +266,7 @@ export function createControllerProfile(
     directionVerifiedAt: null,
     neutralVerifiedAt: null,
     neutralStability: null,
+    neutralVerificationSession: null,
   }
 }
 
@@ -248,6 +276,7 @@ export function invalidateProfileVerification(profile: ControllerProfile): Contr
     directionVerifiedAt: null,
     neutralVerifiedAt: null,
     neutralStability: null,
+    neutralVerificationSession: null,
   }
 }
 
@@ -279,6 +308,7 @@ export function markDirectionsVerified(
     directionVerifiedAt: timestamp,
     neutralVerifiedAt: null,
     neutralStability: null,
+    neutralVerificationSession: null,
   }
 }
 
@@ -286,14 +316,23 @@ export function markNeutralVerified(
   profile: ControllerProfile,
   report: NeutralStabilityReport,
   timestamp = new Date().toISOString(),
+  verificationSession?: string | null,
 ): ControllerProfile {
-  if (!report.stable || !profile.directionVerifiedAt || !validateControllerProfile(profile).valid) {
+  const reportValidation = validateNeutralStabilityReport(report)
+  if (
+    !report.stable ||
+    !reportValidation.valid ||
+    !profile.directionVerifiedAt ||
+    !verificationSession ||
+    !validateControllerProfile(profile).valid
+  ) {
     return invalidateProfileVerification(profile)
   }
   return {
     ...profile,
     neutralVerifiedAt: timestamp,
     neutralStability: report,
+    neutralVerificationSession: verificationSession,
   }
 }
 

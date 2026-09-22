@@ -1,13 +1,15 @@
-import type {
-  ChannelCalibration,
-  ControlChannel,
-  ControllerProfile,
-  ProcessedChannels,
-  ProcessedControllerState,
-  RawGamepadSnapshot,
+import {
+  CONTROL_CHANNELS,
+  type ChannelCalibration,
+  type ControlChannel,
+  type ControllerProfile,
+  type ProcessedChannels,
+  type ProcessedControllerState,
+  type RawGamepadSnapshot,
 } from './types'
 
-export const DEFAULT_STICK_DEADBAND = 0.03
+/** Keep the neutral deadband below the 0.02 approval threshold. */
+export const DEFAULT_STICK_DEADBAND = 0.01
 export const MAX_STICK_DEADBAND = 0.2
 export const DEFAULT_FILTER_TIME_CONSTANT_SECONDS = 0.015
 
@@ -80,6 +82,9 @@ export function filterSignal(
   timeConstantSeconds = DEFAULT_FILTER_TIME_CONSTANT_SECONDS,
 ): number {
   if (!isFiniteNumber(input)) return INVALID_VALUE
+  // Measured endpoints are safety/calibration evidence, not values to attenuate
+  // into a permanently smaller command. The transient between them is filtered.
+  if (Math.abs(input) >= 1) return input
   if (previous === undefined || !isFiniteNumber(previous)) return input
   if (!isFiniteNumber(deltaSeconds) || deltaSeconds <= 0) return input
   if (!isFiniteNumber(timeConstantSeconds) || timeConstantSeconds <= 0) return input
@@ -180,7 +185,7 @@ export function processControllerSnapshot(
   const channels = {} as Record<ControlChannel, ReturnType<typeof processChannel>>
   const invalidChannels: ControlChannel[] = []
 
-  for (const channel of ['roll', 'pitch', 'yaw', 'throttle'] as const) {
+  for (const channel of CONTROL_CHANNELS) {
     const calibration = profile.channels[channel]
     const raw = snapshot.axes[calibration.axis] ?? INVALID_VALUE
     const processed = processChannel(
@@ -198,7 +203,87 @@ export function processControllerSnapshot(
     deviceIndex: snapshot.index,
     timestamp: snapshot.timestamp,
     channels: channels as ProcessedChannels,
-    valid: invalidChannels.length === 0 && snapshot.invalidAxisIndices.length === 0,
+    valid:
+      invalidChannels.length === 0 &&
+      snapshot.invalidAxisIndices.length === 0 &&
+      snapshot.invalidButtonIndices.length === 0,
     invalidChannels,
+  }
+}
+
+function profileFilterKey(profile: ControllerProfile): string {
+  return JSON.stringify([
+    profile.deviceId,
+    profile.deviceMapping,
+    profile.axisCount,
+    profile.buttonCount,
+    CONTROL_CHANNELS.map((channel) => {
+      const calibration = profile.channels[channel]
+      return [
+        channel,
+        calibration.axis,
+        calibration.center,
+        calibration.minimum,
+        calibration.maximum,
+        calibration.invert,
+        calibration.deadband,
+      ]
+    }),
+  ])
+}
+
+/**
+ * Owns the high-frequency filter tail outside React. A source/profile change,
+ * timestamp rewind, or invalid sample starts a fresh tail rather than allowing
+ * old neutral data to leak into a new capture or device connection.
+ */
+export class ControllerSignalHistory {
+  private sourceKey: string | null = null
+  private previousFiltered: PreviousFilteredValues = {}
+  private lastTimestamp: number | null = null
+
+  public reset(): void {
+    this.sourceKey = null
+    this.previousFiltered = {}
+    this.lastTimestamp = null
+  }
+
+  public process(snapshot: RawGamepadSnapshot, profile: ControllerProfile): ProcessedControllerState {
+    const nextSourceKey = JSON.stringify([
+      snapshot.id,
+      snapshot.index,
+      snapshot.mapping,
+      snapshot.axisCount,
+      snapshot.buttonCount,
+      snapshot.connectionSession ?? null,
+      profileFilterKey(profile),
+    ])
+    if (nextSourceKey !== this.sourceKey) {
+      this.reset()
+      this.sourceKey = nextSourceKey
+    }
+
+    let deltaSeconds = 1 / 60
+    const timestamp = snapshot.timestamp
+    if (Number.isFinite(timestamp) && this.lastTimestamp !== null) {
+      if (timestamp <= this.lastTimestamp) {
+        this.previousFiltered = {}
+        deltaSeconds = 1 / 60
+      } else {
+        deltaSeconds = (timestamp - this.lastTimestamp) / 1_000
+      }
+    }
+    this.lastTimestamp = Number.isFinite(timestamp) ? timestamp : null
+
+    const state = processControllerSnapshot(snapshot, profile, this.previousFiltered, deltaSeconds)
+    if (!state.valid) {
+      this.previousFiltered = {}
+      return state
+    }
+
+    this.previousFiltered = Object.fromEntries(
+      CONTROL_CHANNELS.map((channel) => [channel, state.channels[channel].final]),
+    ) as PreviousFilteredValues
+    return state
   }
 }
