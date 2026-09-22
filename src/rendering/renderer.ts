@@ -61,8 +61,10 @@ export class FlightRenderer {
   private readonly statusListener: ((status: FlightRendererStatus) => void) | null
   private status: FlightRendererStatus = { kind: 'ready' }
   private disposed = false
-  private readonly onContextLostBound = (): void => {
+  private readonly onContextLostBound = (event: Event): void => {
     if (this.disposed) return
+    // Opt in to browser restoration; flight remains disarmed after recovery.
+    event.preventDefault()
     this.setStatus({
       kind: 'context-lost',
       message: 'The WebGL context was lost. Flight has been disarmed; retry rendering to recover.',

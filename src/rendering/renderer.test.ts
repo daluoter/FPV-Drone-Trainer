@@ -57,7 +57,9 @@ describe('FlightRenderer lifecycle and failure contract', () => {
     })
 
     expect(statuses.at(-1)?.kind).toBe('ready')
-    canvas.dispatchEvent(new Event('webglcontextlost'))
+    const contextLost = new Event('webglcontextlost', { cancelable: true })
+    canvas.dispatchEvent(contextLost)
+    expect(contextLost.defaultPrevented).toBe(true)
     expect(statuses.at(-1)?.kind).toBe('context-lost')
     renderer.render(createInitialDroneState(DEFAULT_DRONE_CONFIG))
     expect(rendererStub.render).not.toHaveBeenCalled()
