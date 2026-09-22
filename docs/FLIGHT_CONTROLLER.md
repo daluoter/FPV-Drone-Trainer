@@ -68,11 +68,16 @@ realism claim. Independent settings are validated before use.
 `FlightSimulation` owns a fixed-step accumulator and calls the rate controller
 once per simulation step before `DroneSimulation.step`. Render FPS therefore
 does not choose the controller or motor timestep. `arm`, `disarm` and `reset`
-are explicit APIs for a later application arm gate; the runtime starts
-disarmed unless configured otherwise. Disarm clears PID history and emits zero
-motor commands while the existing motor model applies its independent lag.
-Invalid RC input, render delta, controller timestep, simulation state or
-controller result disarms/reset-safely rather than propagating stale commands.
+are explicit APIs; the Phase 4 `FlightRuntime` owns the requestAnimationFrame
+sample/sim/render loop and starts disarmed. Its RC arm handoff calls the
+Controller Lab safety gate with the current connection session plus current
+neutral/low-throttle checks. Those position checks run only at arm time;
+intended stick movement is not rejected after arming. Disarm clears PID history
+and emits zero motor commands while the existing motor model applies its
+independent lag. Invalid RC input, render delta, controller timestep,
+simulation state or controller result disarms/reset-safely rather than
+propagating stale commands. Device disconnect/session/profile/source changes,
+blur and hidden documents also require explicit rearm.
 
 Telemetry includes target and measured body rates, body-rate error, per-axis
 PID terms/integrals/output, pilot corrections, mixer saturation, each motor's

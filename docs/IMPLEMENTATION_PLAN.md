@@ -2,6 +2,10 @@
 
 Initial inspection: main at 35c66d2 contained only README.md and MIT LICENSE. Phase 0 foundation completed in 49ca30d; Phase 1 Controller Lab completed in a70e907 plus safety fixes; Phase 2 deterministic dynamics and Phase 3 flight-controller integration are complete in this checkpoint.
 
+## Current checkpoint
+
+Phase 4 Free Flight integration is complete in this checkpoint. It consumes the Phase 1 controller and Phase 2/3 simulation contracts without adding training or tuning scope. The durable phase evidence includes `src/runtime`, `src/rendering`, `src/free-flight`, runtime safety-transition tests and camera-transform contract tests. Browser smoke and physical transmitter evidence remain separate from automated gates.
+
 ## Architecture decisions
 
 - Vite, strict TypeScript, React application shell, direct Three.js renderer, Vitest and ESLint.
@@ -22,7 +26,7 @@ This is multi-seam work. Exclusive ownership passes serially in /workspaces/FPV-
 | 1 Controller (complete) | src/controller, Controller Lab UI, controller docs/tests | synthetic device calibration and neutral regression; commits a70e907, f8771a8, 8b2188b |
 | 2 Dynamics (complete) | src/simulation, src/drone, math and coordinate/physics docs/tests | gravity, thrust, torque signs, quaternion, timestep; commit f8f9f7b |
 | 3 Flight controller | src/rates, src/flight-controller, pipeline integration | canonical rates, SI rate PID/antiwindup, fixed-step neutral and hover integration; commit |
-| 4 Free-flight integration | src/rendering, runtime and flight UI | safe arm, cameras, telemetry, browser smoke; commit |
+| 4 Free-flight integration | src/rendering, runtime and flight UI | safe arm, cameras, telemetry, browser smoke; complete in this checkpoint |
 | 5 Tuning | settings UI, validated configuration/persistence | bounded settings, defaults, documentation; commit |
 | 6 Training framework | src/training contracts/state machine, menu/results/sticks | state transitions and progress; commit |
 | 7 Lessons | four geometric lesson evaluators and environment references | positive/negative maneuver traces; commit |

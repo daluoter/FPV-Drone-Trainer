@@ -65,7 +65,7 @@ A profile is loaded only when all identifying fields match the currently selecte
 
 ## Safety gate
 
-`evaluateFlightEligibility` requires a connected selected device, a compatible valid profile with four distinct axes and finite calibrated endpoints, explicit direction verification, a passing neutral report bound to the current connection session, a finite current processed snapshot, and finite button data. It is a continuously displayable calibration gate: intended stick movement does not revoke it. The separate `evaluateFlightArmEligibility` handoff adds current rotational neutral (`0.02`) and low throttle (`<= 0.05`) only when a future flight mode is armed; those conditions must not reject commands after arming. Phase 1 displays these contracts but deliberately has no Free Flight path. Later phases must call the arm gate before enabling RC-controlled flight.
+`evaluateFlightEligibility` requires a connected selected device, a compatible valid profile with four distinct axes and finite calibrated endpoints, explicit direction verification, a passing neutral report bound to the current connection session, a finite current processed snapshot, and finite button data. It is a continuously displayable calibration gate: intended stick movement does not revoke it. The separate `evaluateFlightArmEligibility` handoff adds current rotational neutral (`0.02`) and low throttle (`<= 0.05`) only when a flight mode is armed; those conditions must not reject commands after arming. Phase 4 `FlightRuntime` consumes this handoff with the current connection session before enabling RC-controlled flight. Disconnect, session/profile/source changes, invalid input, blur and hidden documents disarm and require explicit rearm.
 
 ## Hardware caveat
 

@@ -27,6 +27,7 @@ import {
   type PollerState,
   type ProcessedControllerState,
   type RawGamepadSnapshot,
+  type GamepadPoller,
 } from './index'
 
 const MOVEMENT_CHANNELS: readonly ControlChannel[] = ['roll', 'pitch', 'yaw', 'throttle']
@@ -43,6 +44,19 @@ type CalibrationDraft = Readonly<{
   invert: boolean
   deadband: number
 }>
+
+/** The explicit, low-frequency handoff from Controller Lab to Free Flight. */
+export interface ControllerLabFlightHandoff {
+  readonly device: ControllerDevice | null
+  readonly profile: ControllerProfile | null
+  readonly connectionSession: string | null
+}
+
+export interface ControllerLabProps {
+  /** An application-owned poller lets the runtime own the single fresh sample loop. */
+  readonly poller?: GamepadPoller
+  readonly onFlightHandoff?: (handoff: ControllerLabFlightHandoff) => void
+}
 
 function channelLabel(channel: ControlChannel): string {
   return channel.toUpperCase()
@@ -94,8 +108,9 @@ function initialStep(profile: ControllerProfile | null, connectionSession: strin
   return 'direction'
 }
 
-export default function ControllerLab() {
-  const poller = useMemo(() => createBrowserGamepadPoller(), [])
+export default function ControllerLab({ poller: providedPoller, onFlightHandoff }: ControllerLabProps = {}) {
+  const poller = useMemo(() => providedPoller ?? createBrowserGamepadPoller(), [providedPoller])
+  const ownsPoller = providedPoller === undefined
   const profileStore = useMemo(() => new ControllerProfileStore(), [])
   const [pollState, setPollState] = useState<PollerState>(() => poller.getState())
   const [profile, setProfile] = useState<ControllerProfile | null>(null)
@@ -131,13 +146,13 @@ export default function ControllerLab() {
         setProcessed(latestProcessed.current)
       }, 100)
     })
-    poller.start()
+    if (ownsPoller) poller.start()
     return () => {
       unsubscribe()
-      poller.stop()
+      if (ownsPoller) poller.stop()
       if (updateTimer !== null) window.clearTimeout(updateTimer)
     }
-  }, [poller])
+  }, [ownsPoller, poller])
 
   const selectedDevice = pollState.devices.find((device) => device.index === pollState.selectedDeviceIndex) ?? null
   const selectedSnapshot = pollState.snapshots.find((snapshot) => snapshot.index === pollState.selectedDeviceIndex) ?? null
@@ -163,7 +178,15 @@ export default function ControllerLab() {
     const loaded = profileStore.loadCompatible(selectedDevice)
     setProfile(loaded)
     setWizardStep(initialStep(loaded, selectedDevice.connectionSession ?? deviceKey))
-  }, [deviceKey, profileStore, selectedDevice])
+  }, [deviceKey, profileStore])
+
+  useEffect(() => {
+    onFlightHandoff?.({
+      device: selectedDevice,
+      profile,
+      connectionSession: selectedDevice?.connectionSession ?? deviceKey,
+    })
+  }, [deviceKey, onFlightHandoff, profile, selectedDevice])
 
   useEffect(() => {
     activeProfile.current = profile

@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Open the Vite URL shown in the terminal. Phase 1 exposes the Controller Lab, but flight controls remain intentionally disabled until later simulation phases.
+Open the Vite URL shown in the terminal. Phase 4 exposes the Controller Lab handoff and Free Flight screen. Use Developer keyboard fallback explicitly for a no-hardware smoke check; a calibrated physical controller remains required for RC evidence.
 
 ## Required checks
 
@@ -26,11 +26,11 @@ npm run build
 
 ## Evidence labels
 
-- **Automated:** commands and deterministic tests run in the repository.
-- **Browser:** a developer opens the Vite app and checks the rendered shell and browser console.
+- **Automated:** commands and deterministic tests run in the repository, including camera transforms and runtime safety transitions.
+- **Browser:** a developer opens the Vite app, checks the Three.js scene/camera modes/HUD and browser console, and can exercise the explicit keyboard fallback.
 - **Hardware:** a physical RC transmitter is connected and tested through the browser Gamepad API. Hardware evidence must never be inferred from unit tests or a browser shell check.
 
-Phase 1 has automated controller transform/calibration coverage and a browser Controller Lab. No physical transmitter was available during implementation, so endpoint, direction, neutral and no-spontaneous-rotation hardware evidence remains outstanding.
+Phase 4 has automated controller/runtime/camera coverage and a browser Free Flight screen. No physical transmitter was available during implementation, so endpoint, direction, neutral and no-spontaneous-rotation hardware evidence remains outstanding. Browser smoke does not claim real hardware or real flight.
 
 ## Source boundaries
 

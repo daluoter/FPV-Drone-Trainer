@@ -1,4 +1,8 @@
-import ControllerLab from '../controller/ControllerLab'
+import { useCallback, useMemo, useState } from 'react'
+
+import { createBrowserGamepadPoller } from '../controller'
+import ControllerLab, { type ControllerLabFlightHandoff } from '../controller/ControllerLab'
+import FreeFlight from '../free-flight/FreeFlight'
 
 type RoadmapStatus = 'active' | 'next' | 'planned' | 'complete'
 
@@ -17,12 +21,17 @@ const roadmap: RoadmapItem[] = [
   {
     title: 'Controller Lab',
     description: 'Discover, calibrate, inspect, and safely validate transmitter input.',
-    status: 'active',
+    status: 'complete',
   },
   {
     title: 'Acro flight core',
     description: 'Rates, motors, rigid-body dynamics, and a fixed-step simulation loop.',
-    status: 'planned',
+    status: 'complete',
+  },
+  {
+    title: 'Free Flight',
+    description: 'Safe arm handoff, Three.js field, camera modes, and developer telemetry.',
+    status: 'active',
   },
   {
     title: 'Flight school',
@@ -50,6 +59,12 @@ function statusLabel(status: RoadmapStatus): string {
 }
 
 export default function App() {
+  const poller = useMemo(() => createBrowserGamepadPoller(), [])
+  const [flightProfile, setFlightProfile] = useState<ControllerLabFlightHandoff['profile']>(null)
+  const onFlightHandoff = useCallback((handoff: ControllerLabFlightHandoff) => {
+    setFlightProfile(handoff.profile)
+  }, [])
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -64,9 +79,9 @@ export default function App() {
         </a>
         <div className="topbar-status" aria-label="Application status">
           <span className="status-light" aria-hidden="true" />
-          <span>Controller Lab build</span>
+          <span>Phase 4 / Free Flight build</span>
           <span className="status-divider" aria-hidden="true" />
-          <span className="muted">Phase 1 / no flight</span>
+          <span className="muted">RC gate + developer fallback</span>
         </div>
       </header>
 
@@ -91,9 +106,9 @@ export default function App() {
                 Controller Lab
                 <span className="button-meta">Open lab</span>
               </button>
-              <button className="button button-secondary" type="button" disabled>
+              <button className="button button-secondary" type="button" onClick={() => document.getElementById('free-flight')?.scrollIntoView({ behavior: 'smooth' })}>
                 Free Flight
-                <span className="button-meta">Locked</span>
+                <span className="button-meta">Open screen</span>
               </button>
             </div>
             <p className="safety-note">
@@ -104,7 +119,7 @@ export default function App() {
             </p>
           </div>
 
-          <aside className="status-card" aria-label="Controller Lab status">
+          <aside className="status-card" aria-label="Free Flight status">
             <div className="card-heading">
               <span>System status</span>
               <span className="safe-badge">SAFE / UI ONLY</span>
@@ -112,7 +127,7 @@ export default function App() {
             <div className="status-readout">
               <div className="readout-row">
                 <span>Current phase</span>
-                <strong>Controller Lab</strong>
+                <strong>Free Flight</strong>
               </div>
               <div className="readout-row">
                 <span>Controller</span>
@@ -120,11 +135,11 @@ export default function App() {
               </div>
               <div className="readout-row">
                 <span>Simulation</span>
-                <strong className="readout-muted">Not running</strong>
+                <strong className="readout-muted">Fixed-step runtime ready</strong>
               </div>
               <div className="readout-row">
                 <span>Safety gate</span>
-                <strong className="readout-safe">Locked until verified</strong>
+                <strong className="readout-safe">Explicit arm gate required</strong>
               </div>
             </div>
             <div className="card-note">
@@ -134,18 +149,20 @@ export default function App() {
           </aside>
         </section>
 
-        <ControllerLab />
+        <ControllerLab poller={poller} onFlightHandoff={onFlightHandoff} />
+
+        <FreeFlight poller={poller} profile={flightProfile} />
 
         <section className="workspace-grid" aria-label="Application preview and roadmap">
           <article className="viewport-card panel-card">
             <div className="panel-heading">
               <div>
-                <p className="panel-kicker">Training viewport</p>
+                <p className="panel-kicker">Integration map</p>
                 <h2>Clear geometry. Clear feedback.</h2>
               </div>
               <span className="panel-tag">Renderer contract</span>
             </div>
-            <div className="viewport-placeholder" role="img" aria-label="Reserved simulator viewport">
+            <div className="viewport-placeholder" role="img" aria-label="Free Flight integration preview">
               <div className="viewport-scanline" aria-hidden="true" />
               <div className="viewport-crosshair" aria-hidden="true">
                 <span />
@@ -155,8 +172,8 @@ export default function App() {
                 <span className="viewport-icon" aria-hidden="true">
                   ◇
                 </span>
-                <strong>Three.js scene reserved for Phase 4</strong>
-                <span>Simulation state will remain independent from this React shell.</span>
+                <strong>Live Three.js scene is in the Free Flight screen</strong>
+                <span>Simulation state remains independent from this React shell.</span>
               </div>
               <span className="viewport-corner viewport-corner-tl" aria-hidden="true" />
               <span className="viewport-corner viewport-corner-tr" aria-hidden="true" />
@@ -166,7 +183,7 @@ export default function App() {
             <div className="viewport-footer">
               <span>
                 <span className="footer-dot" aria-hidden="true" />
-                No flight simulation running
+                Free Flight runtime / scroll above
               </span>
               <span>Viewport / 01</span>
             </div>
