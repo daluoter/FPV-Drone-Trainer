@@ -204,6 +204,7 @@ export function processControllerSnapshot(
     timestamp: snapshot.timestamp,
     channels: channels as ProcessedChannels,
     valid:
+      isFiniteNumber(snapshot.timestamp) &&
       invalidChannels.length === 0 &&
       snapshot.invalidAxisIndices.length === 0 &&
       snapshot.invalidButtonIndices.length === 0,

@@ -101,6 +101,31 @@ describe('controller signal transforms', () => {
     expect(fresh.channels.roll.filtered).toBe(0)
   })
 
+  it.each([Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects non-finite timestamp %s and clears filtering history before the next valid sample',
+    (timestamp) => {
+      const nonFiniteSnapshot = { ...snapshot, timestamp }
+      expect(processControllerSnapshot(nonFiniteSnapshot, profile).valid).toBe(false)
+
+      const history = new ControllerSignalHistory()
+      history.process({ ...snapshot, timestamp: 100, connectionSession: 'session-a' }, profile)
+      const moved = history.process({
+        ...snapshot,
+        axes: [0.7, 0.1, 0.1, -1],
+        timestamp: 116,
+        connectionSession: 'session-a',
+      }, profile)
+      expect(moved.channels.roll.filtered).not.toBe(moved.channels.roll.deadband)
+
+      const invalid = history.process({ ...nonFiniteSnapshot, connectionSession: 'session-a' }, profile)
+      expect(invalid.valid).toBe(false)
+
+      const fresh = history.process({ ...snapshot, timestamp: 132, connectionSession: 'session-a' }, profile)
+      expect(fresh.valid).toBe(true)
+      expect(fresh.channels.roll.filtered).toBe(0)
+    },
+  )
+
   it('preserves a measured full endpoint through the filter boundary', () => {
     const endpoint = processChannel('roll', 0.9, centered, -0.5, 1 / 60)
     expect(endpoint.final).toBe(1)
