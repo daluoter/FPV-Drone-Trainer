@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Open the Vite URL shown in the terminal. Phase 6 exposes the Controller Lab handoff, Free Flight screen, training framework menu, fixed-step observer seam, and Mode 2 overlays. The four geometric lessons remain visibly unavailable until Phase 7. Use Developer keyboard fallback explicitly for a no-hardware smoke check; a calibrated physical controller remains required for RC evidence.
+Open the Vite URL shown in the terminal. Phase 7 exposes the Controller Lab handoff, Free Flight screen, four geometric lesson evaluators, fixed-step observer seam, live checkpoints/metrics, field references/path, and Mode 2 overlays. Use Developer keyboard fallback explicitly for a no-hardware smoke check; a calibrated physical controller remains required for RC evidence.
 
 ## Required checks
 
@@ -30,7 +30,7 @@ npm run build
 - **Browser:** a developer opens the Vite app, checks the Three.js scene/camera modes/HUD and browser console, and can exercise the explicit keyboard fallback.
 - **Hardware:** a physical RC transmitter is connected and tested through the browser Gamepad API. Hardware evidence must never be inferred from unit tests or a browser shell check.
 
-Phase 4/5/6 have automated controller/runtime/camera, tuning, training state/persistence, fixed-step hook, and scene-reference coverage with a browser Free Flight/training screen. No physical transmitter was available during implementation, so endpoint, direction, neutral and no-spontaneous-rotation hardware evidence remains outstanding. Browser smoke does not claim real hardware or real flight; maneuver evaluator evidence remains Phase 7 scope.
+Phase 4/5/6/7 have automated controller/runtime/camera, tuning, training state/persistence, fixed-step hook, scene-reference, and positive/negative maneuver-fixture coverage with a browser Free Flight/training screen. No physical transmitter was available during implementation, so endpoint, direction, neutral and no-spontaneous-rotation hardware evidence remains outstanding. Browser smoke does not claim real hardware or real flight; deterministic maneuver fixtures are not human-pilot validation.
 
 ## Source boundaries
 

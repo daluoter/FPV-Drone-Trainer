@@ -38,6 +38,11 @@ function activeElapsedSeconds(state: TrainingMachineState): number {
   return Math.max(0, state.lastTimestampSeconds - state.activeStartedAtSeconds)
 }
 
+function countdownRemainingSeconds(state: TrainingMachineState): number {
+  if (state.phase !== 'COUNTDOWN' || state.countdownEndsAtSeconds === null || state.lastTimestampSeconds === null) return 0
+  return Math.max(0, state.countdownEndsAtSeconds - state.lastTimestampSeconds)
+}
+
 export default function TrainingPanel({
   lessons = DEFAULT_LESSONS,
   state,
@@ -58,11 +63,11 @@ export default function TrainingPanel({
     <section className="training-section" id="training" aria-labelledby="training-title">
       <div className="training-heading">
         <div>
-          <p className="panel-kicker">Phase 6 / Training framework</p>
+          <p className="panel-kicker">Phase 7 / Flight school evaluators</p>
           <h2 id="training-title">Train the state, not a stick ritual.</h2>
           <p>
-            Lessons consume fixed-step drone state, trajectory, and normalized input. The four
-            geometric evaluators arrive in Phase 7; until then every lesson stays visibly unavailable.
+            Four lessons consume finite fixed-step drone state and trajectory geometry. Start applies a
+            disarmed reset; arm explicitly in Free Flight after the countdown, then use live checkpoints and diagnostics.
           </p>
         </div>
         <div className="training-phase-badge" aria-live="polite">
@@ -77,7 +82,7 @@ export default function TrainingPanel({
               <p className="panel-kicker">Lesson menu</p>
               <h3>Prioritized path</h3>
             </div>
-            <span className="panel-tag">No fake passes</span>
+            <span className="panel-tag">Geometry verified</span>
           </div>
           <div className="training-lesson-list">
             {lessons
@@ -108,7 +113,7 @@ export default function TrainingPanel({
               })}
           </div>
           <p className="training-menu-note">
-            Evaluator status is data-driven. A disabled lesson has no evaluator and cannot enter COUNTDOWN.
+            Results require actual state and trajectory evidence. Disarm, reset, focus loss, invalid telemetry, or retry stops an active attempt.
           </p>
           {progressNotice && <p className="training-error" role="status">{progressNotice}</p>}
         </div>
@@ -135,6 +140,13 @@ export default function TrainingPanel({
                   return <span className={checkpointState?.completed ? 'training-checkpoint-done' : ''} key={checkpoint.id}>{checkpointState?.completed ? '✓ ' : '○ '}{checkpoint.title}</span>
                 })}</div>
               </div>
+              {state.phase === 'COUNTDOWN' && (
+                <div className="training-live-metrics" aria-live="polite">
+                  <strong>Countdown</strong>
+                  <span>{countdownRemainingSeconds(state).toFixed(1)} s · reset while disarmed</span>
+                  <span>Arm in Free Flight during countdown / before Active</span>
+                </div>
+              )}
               {state.phase === 'ACTIVE' && (
                 <div className="training-live-metrics" aria-live="polite">
                   <strong>Live metrics</strong>
@@ -154,7 +166,7 @@ export default function TrainingPanel({
               )}
               <div className="training-actions">
                 <button className="lab-button lab-button-primary" type="button" onClick={onStart} disabled={!canStart}>
-                  {canStart ? 'Start countdown' : 'Evaluator pending'}
+                  {canStart ? 'Start countdown / reset' : 'Evaluator pending'}
                 </button>
                 <button className="lab-button" type="button" onClick={onRetry} disabled={!canRetry}>Retry</button>
                 <button className="lab-button" type="button" onClick={onReset} disabled={state.phase === 'READY'}>Reset</button>
@@ -170,6 +182,10 @@ export default function TrainingPanel({
                     <span>Active {state.result.elapsedSeconds.toFixed(2)} s</span>
                     <span>{state.result.sampleCount} samples</span>
                     <span>{state.result.completedCheckpoints} / {state.result.totalCheckpoints} checkpoints</span>
+                    {Object.entries(state.result.metrics)
+                      .filter(([metric]) => !['elapsedSeconds', 'sampleCount', 'completedCheckpoints', 'totalCheckpoints'].includes(metric))
+                      .slice(0, 8)
+                      .map(([metric, value]) => <span key={metric}>{metric} {value.toFixed(2)}</span>)}
                   </div>
                   {state.result.hint && <p className="training-result-hint">Hint: {state.result.hint}</p>}
                 </div>

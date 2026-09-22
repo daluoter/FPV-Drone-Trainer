@@ -1,66 +1,76 @@
-# Training system (Phase 6)
+# Training system (Phase 7)
 
-Phase 6 provides the lesson framework and runtime seam. It does **not** claim
-that a maneuver is learned: all four menu lessons remain unavailable until the
-Phase 7 geometric evaluators are implemented.
+Phase 7 enables exactly four state/trajectory lessons: **Hover**, **Coordinated
+Turn**, **Split-S**, and **Orbit / 刷鍋**. Straight-line, box-pattern, and
+figure-eight replacements are not part of this catalog.
+
+The evaluator result is based on finite fixed-step drone state and geometry. A
+stick sequence cannot pass a lesson. Synthetic fixture success is deterministic
+software evidence only; it is not browser pilot, WebGL, transmitter, or
+flight-worthiness validation.
 
 ## Ownership and data flow
 
 ```text
 FlightRuntime fixed step
-  -> timestamp + DroneState + normalized RC input
+  -> timestamp + DroneState + normalized RC input + armed telemetry
   -> TrainingSession / pure evaluator contract
-  -> state machine + immutable trajectory
+  -> checkpoints + immutable trajectory + incremental evaluator metrics
   -> results/progress store
-  -> React menu, result card, and Mode 2 presentation
+  -> React menu, live metrics, result card, and field path
 ```
 
 `FlightRuntime` owns the only requestAnimationFrame loop. Its optional
-`onFixedStep` listener runs once after each completed fixed simulation step;
-it is not a second simulation loop. The callback is observational. Training
-never rotates the Three.js drone, writes a motor command, or changes physics.
-A lesson setup is a request with `requiresDisarmed: true` and
-`resetSimulation: true`; an integration caller must honor it through the
-runtime's explicit disarmed `reset()` boundary.
+`onFixedStep` listener runs once after each completed fixed simulation step; it
+is observational. Training never rotates the Three.js drone, writes a motor
+command, or changes physics. A lesson setup is a request with
+`requiresDisarmed: true` and `resetSimulation: true`; `FreeFlight` honors it
+through `FlightRuntime.resetForTraining` during COUNTDOWN. ACTIVE evaluator
+callbacks cannot teleport or reset the player.
 
-## State machine
+The runtime fixed-step sample carries explicit `armed` telemetry into the
+training sample. Disarm, invalid telemetry, runtime reset/rewind, focus loss,
+or a disconnected controller cannot create a pass. An active attempt records a
+clear failure on disarm/reset and offers retry; the runtime itself still
+requires an explicit re-arm after focus or safety transitions.
+
+## State machine and flow
 
 `TrainingSession` is a small stateful adapter over the pure
-`reduceTrainingState` reducer. Its explicit phases are:
+`reduceTrainingState` reducer:
 
 ```text
 READY -> COUNTDOWN -> ACTIVE -> SUCCESS/FAILED -> RESULT
 ```
 
-- `READY` has a selected lesson but no session or trajectory.
-- `COUNTDOWN` records the session identity and setup request. Samples crossing
-  this boundary are not evaluated.
-- `ACTIVE` accepts strictly increasing simulation timestamps and stores samples.
-  A non-finite, backwards, or duplicate sample is rejected without appending.
-- `SUCCESS` and `FAILED` contain a terminal `TrainingResult`.
-- `RESULT` is the presentation state after `SHOW_RESULT`.
-- `RETRY` and `RESET` clear trajectory, checkpoints, result, and timestamps.
-  They advance the session sequence so an old result cannot be attributed to a
-  new attempt.
+- `READY` has a selected available lesson but no session or trajectory.
+- `COUNTDOWN` records the session identity and disarmed setup request. Samples
+  crossing this boundary are not evaluated. The UI tells the pilot to arm in
+  Free Flight during the countdown or before ACTIVE.
+- `ACTIVE` accepts strictly increasing simulation timestamps and finite state.
+  It waits visibly for the first armed sample if the pilot has not armed by the
+  countdown boundary; disarm after an armed sample stops the attempt. Evaluators
+  receive the current sample, scene references, checkpoints, and O(1)
+  `previousSample` / `previousEvaluation` seams.
+- `SUCCESS` and `FAILED` contain a terminal `TrainingResult`; `RESULT` is the
+  presentation state after `SHOW_RESULT`.
+- `RETRY` and `RESET` clear trajectory, checkpoints, result, and timestamps,
+  advance session identity, and clear the field path. A reset/rewind observed
+  during ACTIVE fails the current attempt rather than silently continuing it.
 
-A lesson cannot start unless it is registered, marked available, and has an
-evaluator. Elapsed time, controller stick values, and UI actions never create
-a result on their own.
+The evaluator metrics are carried forward from the preceding evaluation. This
+lets dwell timers, route phases, unwrapped orbit angle, direction reversals,
+path length, and diagnostics update incrementally without rescanning the full
+240 Hz trajectory on every sample. Trajectory data remains immutable for
+results and diagnostics; the rendered path is bounded to a practical number of
+points.
 
-## Lesson and evaluator API for Phase 7
+## Lesson and evaluator API
 
-A data-driven `LessonDefinition` contains:
-
-- `id`, `priority`, `title`, `description`, and `objectives`;
-- disarmed `setup` and stable `sceneReferenceIds`;
-- ordered `checkpoints`;
-- declarative `success` and `failure` descriptions;
-- `scoring` (`maxScore`, minimum pass score, minimum active duration, and
-  metric labels);
-- `hints`; and
-- `evaluator`, currently `null` for the four Phase 6 catalog entries.
-
-An evaluator is either a function or an object with `evaluate`:
+A data-driven `LessonDefinition` contains IDs, objectives, disarmed setup,
+stable scene references, ordered checkpoints, success/failure copy, scoring,
+hints, and an evaluator. The evaluator contract remains pure with respect to
+physics and scene:
 
 ```ts
 interface LessonEvaluatorContract {
@@ -69,103 +79,84 @@ interface LessonEvaluatorContract {
     context: TrainingEvaluationContext,
   ): TrainingEvaluation
 }
-
-interface TrainingSample {
-  timestampSeconds: number
-  state: DroneState
-  normalizedInput: NormalizedRcInput | null
-}
-
-interface TrainingEvaluationContext {
-  lesson: LessonDefinition
-  elapsedSeconds: number
-  trajectory: readonly TrainingSample[]
-  checkpoints: Readonly<Record<string, TrainingCheckpointState>>
-  sceneReferences: readonly TrainingSceneReference[]
-}
-
-interface TrainingSceneReference {
-  id: string
-  kind: string
-  positionM: Vector3
-  sizeM?: Vector3
-}
-
-type TrainingEvaluation = {
-  status: 'continue' | 'success' | 'failure'
-  checkpointIds?: readonly string[]
-  score?: number
-  metrics?: Readonly<Record<string, number>>
-  message?: string
-  hint?: string
-}
 ```
 
-The evaluator must be pure with respect to the simulation and scene. It may
-inspect the current state and the prior trajectory, then report checkpoint IDs,
-finite meaningful metrics, score, and an outcome. It must not pass from a
-stick sequence alone. The machine enforces timestamp order, minimum active
-duration, score bounds, and configured minimum pass score; an evaluator
-exception becomes a safe failed attempt rather than a fake pass.
+`TrainingEvaluationContext` includes the current immutable trajectory for
+inspection plus `previousSample` and `previousEvaluation` for bounded
+incremental calculations. `TrainingSample.armed` is supplied by the runtime
+integration for Phase 7 evaluators; the machine waits for the first true arm
+sample and rejects a later false sample. Legacy custom tests may omit it, but
+the shipped four evaluators never pass without `armed === true`.
 
-### Phase 7 lesson handoff
+## Geometric lessons
 
-The Phase 6 catalog contains exactly these unavailable evaluator slots:
+### Hover
 
-| ID | Title | Setup references | Checkpoints |
-| --- | --- | --- | --- |
-| `hover` | Hover | `takeoff-pad`, `hover-zone` | `enter-hover-zone`, `hold-hover`, `settle-hover` |
-| `coordinated-turn` | Coordinated Turn | `takeoff-pad`, `turn-entry`, `turn-apex`, `turn-exit` | `turn-entry`, `turn-apex`, `turn-exit` |
-| `split-s` | Split-S | `split-s-reference` | `entry`, `inverted`, `descent`, `reversed`, `recovered` |
-| `orbit` | Orbit / 刷鍋 | `takeoff-pad`, `orbit-poi` | `orbit-entry`, `orbit-lap`, `orbit-exit` |
+The hover target is the elevated `hover-zone` reference above the takeoff pad.
+The evaluator requires a contiguous in-zone dwell (horizontal radius and
+altitude tolerance), bounded horizontal/vertical velocity, and realistic tilt
+limits. It records altitude error, horizontal drift, speed, tilt, contiguous
+dwell, and stick smoothness diagnostics. Leaving the zone resets the contiguous
+dwell; elapsed time or input movement alone cannot pass it.
 
-All four entries remain `available: false` with `evaluator: null`. The Split-S
-setup requests a disarmed reset at `{ x: 0, y: 25, z: 0 }` with an explicit
-identity spawn orientation so the evaluator can start from sufficient altitude.
-The other lessons use the ground takeoff spawn. These are setup requests only;
-the application honors them through `FlightRuntime.resetForTraining` during
-COUNTDOWN and never mutates the player from an ACTIVE evaluator callback.
+### Coordinated Turn
 
-`FlightScene.sceneReferences` exposes immutable, renderer-independent handoff
-snapshots for the IDs above: `takeoff-pad` at the configured spawn, `hover-zone`
-three metres above the pad, ordered `turn-entry`/`turn-apex`/`turn-exit`
-markers, the `split-s-reference` gate at `{ x: 0, y: 0.9, z: -5 }` with size
-`{ x: 5.12, y: 1.8, z: 0.12 }`, and the `orbit-poi` tower at its copied anchor.
-The reference object is presentation-only; geometric checks must use copied
-positions/dimensions and must not mutate Three.js objects. Thresholds and
-positive/negative traces belong to the Phase 7 evaluator owner.
+The route is ordered `turn-entry -> turn-apex -> turn-exit`. Position and
+altitude gates use the copied semantic references and a route corridor. The
+apex and exit require a measured heading change from actual trajectory motion
+and aligned route legs; an exact roll/yaw stick sequence is never checked.
+Position jumps, timestamp gaps, out-of-order gates, and corridor/energy
+excursions fail the attempt. Metrics include gate errors, corridor error,
+heading change/alignment, and speed.
 
-Each evaluator should use those semantic stable IDs rather than generic marker
-names. The Phase 7 owner must cover both successful and false-positive traces
-for altitude, attitude, route/corridor, heading, radial and speed limits as
-appropriate to the lesson.
+### Split-S
 
-## Progress persistence
+The setup requests an explicit disarmed reset at `{ x: 0, y: 25, z: 0 }` with
+identity orientation. The evaluator orders `entry -> inverted -> descent ->
+reversed -> recovered`. It requires sufficient entry altitude and speed, an
+upright-to-inverted attitude transition, descending motion while inverted, an
+actual heading reversal, then upright recovery with bounded altitude, speed,
+and position. The inverted checkpoint must precede reversal, so an upright
+U-turn is not a pass.
+
+### Orbit / 刷鍋
+
+The orbit point of interest is the `orbit-poi` tower. The evaluator requires
+real horizontal motion in the radius/height/speed envelope and tangent camera
+heading. It unwraps directed POI angle incrementally and requires a full
+`2π` geometric lap followed by a valid exit sample. It rejects yaw-in-place,
+teleport/path gaps, sustained invalid envelope, and oscillatory direction
+reversals. Metrics include radius, altitude, speed, radial rate, tangent/camera
+heading error, direction, unwrapped progress, reverse radians, path length, and
+reversal count.
+
+## Scene references and visualization
+
+`FlightScene.sceneReferences` exposes immutable renderer-independent snapshots
+for `takeoff-pad`, `hover-zone`, ordered turn markers, `split-s-reference`, and
+`orbit-poi`. The renderer presents the hover target, turn gate/poles, Split-S
+gate, orbit tower/circle, and a bounded training path trace. These objects are
+presentation-only; evaluators use copied positions/dimensions and never mutate
+Three.js objects.
+
+## Progress persistence and result feedback
 
 `TrainingProgressStore` writes schema version `1` to
-`fpv-drone-trainer.training-progress.v1`. Each lesson has `recent`, `best`,
-`completed`, and `attempts`. Attempts retain score, elapsed seconds, sample
-count, completed/total checkpoints, completion timestamp, and evaluator
-metrics. JSON, schema, timestamps, finite numeric ranges, and checkpoint
-relationships are validated before use; malformed data falls back to empty
-progress and never reaches the runtime. The schema version is retained for
-this catalog correction, but load merges only current lesson IDs. Legacy
-placeholder keys such as `stable-hover`, `straight-line`, `box-pattern`, and
-`figure-eight` are ignored rather than relabeled as completions for the new
-curriculum; no shipped Phase 6 evaluator can create an actual completion.
+`fpv-drone-trainer.training-progress.v1`. Attempts retain score, elapsed time,
+sample count, checkpoint counts, completion time, and finite evaluator metrics.
+Malformed JSON, schema, timestamps, or numeric values fall back to empty
+progress. Only current lesson IDs are merged; legacy placeholder IDs are not
+relabelled as completions. The Phase 7 panel exposes live metrics, checkpoint
+progress, failure hints, retry/reset controls, and persisted recent/best
+attempt status.
 
-## Presentation
+## Evidence boundaries
 
-`Mode2StickOverlay` is reusable and presentation-only. In live mode it consumes
-throttled normalized runtime input; in demonstration mode it shows a fixed
-example. Mode 2 is explicit: left stick is throttle + yaw, right stick is
-pitch + roll. It does not arm, reset, evaluate, or mutate the simulator.
-
-## Known Phase 6 gaps
-
-- The four evaluator slots and geometric positive/negative trace fixtures are
-  intentionally deferred to Phase 7.
-- Scene references provide stable semantic IDs, copied anchor positions and
-  dimensions; richer corridors and thresholds belong with the evaluator owner.
-- Browser WebGL, transmitter, and aerodynamic realism evidence remain separate
-  from deterministic framework tests.
+Automated evaluator fixtures cover positive and negative traces for all four
+lessons, retry isolation, disarmed telemetry, upright Split-S U-turns,
+yaw-in-place/oscillatory orbit behavior, and path gaps/teleports. They do not
+prove that a human can pilot the maneuver in a browser or that the simplified
+physics model is realistic. Browser WebGL and physical transmitter checks
+remain separate evidence gates. On the current verification host, Chromium
+smoke testing is blocked unless the missing `libnspr4.so` dependency is
+resolved without unrelated system changes.

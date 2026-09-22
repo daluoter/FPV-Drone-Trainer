@@ -70,6 +70,11 @@ export class FlightRenderer {
     this.renderer?.render(this.flightScene.scene, this.camera)
   }
 
+  public setTrainingPath(path: readonly { readonly x: number; readonly y: number; readonly z: number }[]): void {
+    if (this.disposed) return
+    this.flightScene.setTrainingPath(path)
+  }
+
   public dispose(): void {
     if (this.disposed) return
     this.disposed = true

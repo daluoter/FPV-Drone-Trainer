@@ -1,13 +1,13 @@
-# Free Flight integration (Phase 4/6)
+# Free Flight integration (Phase 4/7)
 
-Phase 4 connects the completed controller, rates, flight-controller and rigid-body simulation contracts to a direct Three.js presentation. Phase 5 tuning remains a separate UI and Phase 6 training observes the runtime through a fixed-step hook; evaluators and replay remain separate seams and no hardware-realism claim is made.
+Phase 4 connects the completed controller, rates, flight-controller and rigid-body simulation contracts to a direct Three.js presentation. Phase 5 tuning and Phase 7 training remain separate UI/domain seams; training observes the runtime through one fixed-step hook, draws semantic references/path data, and makes no hardware-realism claim.
 
 ## Ownership
 
 - `FlightRuntime` owns one `requestAnimationFrame` loop. Each frame polls a fresh selected Gamepad snapshot, processes the handed-off profile, advances `FlightSimulation` through its fixed 240 Hz accumulator, updates the Three.js scene and publishes only a throttled telemetry snapshot to React. The optional `onFixedStep` observer receives one timestamped state/input sample per completed fixed step for training; it cannot run or mutate physics.
 - Phase 5 tuning is handed to the runtime as a complete validated simulation configuration. `FlightRuntime.reconfigure` disarms, clears history and replaces the simulation from a safe initial state; it is never a silent in-flight mutation.
 - `ControllerLab` and `FlightRuntime` share the application-owned `GamepadPoller`. The Lab subscribes to a throttled presentation view; it does not start a second polling loop in the Phase 4 shell.
-- `FlightRenderer` owns the scene, visual quad, ground/grid, takeoff pad, semantic `sceneReferences` (`takeoff-pad`, `hover-zone`, `turn-entry`, `turn-apex`, `turn-exit`, `split-s-reference`, `orbit-poi`), cameras, resize and disposal. It consumes `DroneState` and never edits flight state. Training receives copied reference IDs/positions/dimensions as a read-only contract.
+- `FlightRenderer` owns the scene, visual quad, ground/grid, takeoff pad, hover target, turn gates/poles, Split-S gate, orbit tower/circle, semantic `sceneReferences` (`takeoff-pad`, `hover-zone`, `turn-entry`, `turn-apex`, `turn-exit`, `split-s-reference`, `orbit-poi`), cameras, bounded training path, resize and disposal. It consumes `DroneState` and never edits flight state. Training receives copied reference IDs/positions/dimensions as a read-only contract.
 
 ## Scene and cameras
 
@@ -45,4 +45,4 @@ npm run lint
 npm run build
 ```
 
-For a no-hardware browser smoke check, run `npm run dev`, open the printed local URL in a desktop browser, select Developer keyboard fallback explicitly, switch FPV/Chase/Free cameras, toggle the HUD, press Arm, exercise the reset/disarm controls, and check that blur/hidden transitions return to SAFE. A physical transmitter remains required for endpoint, direction, neutral and spontaneous-rotation validation; no real hardware evidence is implied by synthetic tests or browser smoke. Three.js disposal and actual WebGL context/resource release remain browser-only evidence; jsdom contract tests cannot prove GPU cleanup.
+For a no-hardware browser smoke check, run `npm run dev`, open the printed local URL in a desktop browser, select Developer keyboard fallback explicitly, switch FPV/Chase/Free cameras, toggle the HUD, select a lesson, start its disarmed countdown, arm after the countdown, and exercise reset/disarm/retry controls. The current verification host cannot run Chromium because `libnspr4.so` is missing, so browser pilot/WebGL smoke remains blocked unless that dependency is resolved without unrelated system changes. A physical transmitter remains required for endpoint, direction, neutral and spontaneous-rotation validation; deterministic fixtures and browser shell checks are not real-flight evidence. Three.js disposal and actual WebGL context/resource release remain browser-only evidence; jsdom contract tests cannot prove GPU cleanup.

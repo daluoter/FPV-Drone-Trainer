@@ -22,6 +22,13 @@ describe('flight scene reference contract', () => {
       expect(scene.getReference('split-s-reference')?.positionM).toEqual({ x: 0, y: 0.9, z: -5 })
       expect(scene.getReference('split-s-reference')?.sizeM).toEqual({ x: 5.12, y: 1.8, z: 0.12 })
       expect(scene.getReference('unknown')).toBeNull()
+      scene.setTrainingPath([
+        { x: 0, y: 1, z: 0 },
+        { x: 1, y: 1, z: 0 },
+      ])
+      expect(scene.scene.getObjectByName('training-path')?.visible).toBe(true)
+      scene.setTrainingPath([])
+      expect(scene.scene.getObjectByName('training-path')?.visible).toBe(false)
     } finally {
       scene.dispose()
     }

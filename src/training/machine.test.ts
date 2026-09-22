@@ -60,6 +60,18 @@ describe('training state machine', () => {
     expect(session.consumeSample(sample(3))).toBe(success)
   })
 
+  it('allows the explicit first arm at the countdown boundary without evaluating disarmed state', () => {
+    const session = new TrainingSession({ lessons: [testLesson], initialLessonId: testLesson.id, countdownDurationSeconds: 2 })
+    session.start(0)
+    expect(session.tick(2).phase).toBe('ACTIVE')
+    const disarmed = session.consumeSample({ ...sample(2.1), armed: false })
+    expect(disarmed.phase).toBe('ACTIVE')
+    expect(disarmed.lastError).toMatch(/arm/i)
+    expect(disarmed.sampleCount).toBe(0)
+    expect(session.consumeSample({ ...sample(2.2), armed: true }).phase).toBe('ACTIVE')
+    expect(session.consumeSample({ ...sample(2.7), armed: true }).phase).toBe('SUCCESS')
+  })
+
   it('guards countdown timing and only evaluates ACTIVE samples', () => {
     const session = new TrainingSession({ lessons: [testLesson], initialLessonId: testLesson.id, countdownDurationSeconds: 2 })
     expect(session.getState().phase).toBe('READY')
@@ -126,6 +138,17 @@ describe('training state machine', () => {
     expect(next.phase).toBe('READY')
     expect(next.result).toBeNull()
     expect(next.lastError).toMatch(/select|available/i)
+  })
+
+  it('stops an active session immediately on runtime safety telemetry', () => {
+    const session = new TrainingSession({ lessons: [testLesson], initialLessonId: testLesson.id, countdownDurationSeconds: 0 })
+    session.start(0)
+    session.tick(0)
+    session.consumeSample(sample(1))
+    const failed = session.abort('Window focus was lost; explicit rearm is required.', 1)
+    expect(failed.phase).toBe('FAILED')
+    expect(failed.result?.message).toMatch(/focus|rearm/i)
+    expect(failed.result?.outcome).toBe('FAILED')
   })
 
   it('clears trajectory and changes session identity on retry', () => {

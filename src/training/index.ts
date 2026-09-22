@@ -1,4 +1,6 @@
 export * from './lessons'
+export * from './evaluators'
+export * from './fixtures'
 export * from './machine'
 export * from './progress'
 export * from './StickOverlay'

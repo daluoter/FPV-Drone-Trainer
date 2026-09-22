@@ -26,6 +26,8 @@ export interface FlightScene {
   readonly sceneReferences: readonly FlightSceneReference[]
   getReference(id: string): FlightSceneReference | null
   applyState(state: DroneState): void
+  /** Presentation-only bounded path trace; evaluators remain renderer-independent. */
+  setTrainingPath(path: readonly Vector3[]): void
   dispose(): void
 }
 
@@ -128,16 +130,35 @@ function createReferenceObjects(spawnPositionM: Vector3): {
     { id: 'orbit-poi', name: 'reference-orbit-poi', position: { x: 4, y: 2.5, z: 4 } },
   ] as const
   for (const [index, markerDefinition] of markers.entries()) {
-    const marker = new THREE.Mesh(
-      new THREE.ConeGeometry(0.18, markerDefinition.id === 'orbit-poi' ? 4 : 0.9, 6),
-      material(colors[index], 0.65, 0.1),
-    )
+    const markerMaterial = material(colors[index], 0.65, 0.1)
+    const marker = new THREE.Group()
     marker.name = markerDefinition.name
     marker.position.set(
       markerDefinition.position.x,
       markerDefinition.position.y,
       markerDefinition.position.z,
     )
+    if (markerDefinition.id === 'orbit-poi') {
+      const tower = new THREE.Mesh(new THREE.ConeGeometry(0.18, 4, 6), markerMaterial)
+      tower.position.y = 0
+      marker.add(tower)
+      const orbitCircle = new THREE.Mesh(
+        new THREE.RingGeometry(9.7, 10.1, 96),
+        new THREE.MeshBasicMaterial({ color: colors[index], transparent: true, opacity: 0.5, side: THREE.DoubleSide }),
+      )
+      orbitCircle.name = 'reference-orbit-circle'
+      orbitCircle.rotation.x = -Math.PI / 2
+      orbitCircle.position.y = -markerDefinition.position.y + 0.02
+      marker.add(orbitCircle)
+    } else {
+      const leftPost = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.9, 10), markerMaterial)
+      const rightPost = leftPost.clone()
+      leftPost.position.set(-1.3, -0.0, 0)
+      rightPost.position.set(1.3, -0.0, 0)
+      const crossbar = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.08, 0.08), markerMaterial)
+      crossbar.position.y = 0.4
+      marker.add(leftPost, rightPost, crossbar)
+    }
     references.push(marker)
     contract.push({
       id: markerDefinition.id,
@@ -266,6 +287,14 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   const drone = createQuadVisual()
   scene.add(drone)
 
+  const trainingPath = new THREE.Line(
+    new THREE.BufferGeometry(),
+    new THREE.LineBasicMaterial({ color: 0xb8f36b, transparent: true, opacity: 0.8 }),
+  )
+  trainingPath.name = 'training-path'
+  trainingPath.visible = false
+  scene.add(trainingPath)
+
   const applyState = (state: DroneState): void => {
     drone.position.set(state.positionM.x, state.positionM.y, state.positionM.z)
     drone.quaternion.set(
@@ -274,6 +303,24 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
       state.orientation.z,
       state.orientation.w,
     ).normalize()
+  }
+
+  const setTrainingPath = (path: readonly Vector3[]): void => {
+    const maximumPoints = 1_200
+    const stride = Math.max(1, Math.ceil(path.length / maximumPoints))
+    const points: THREE.Vector3[] = []
+    for (let index = 0; index < path.length; index += stride) {
+      const position = path[index]
+      if (!position) continue
+      points.push(new THREE.Vector3(position.x, position.y + 0.04, position.z))
+    }
+    const last = path[path.length - 1]
+    if (last && (points.length === 0 || points[points.length - 1].x !== last.x || points[points.length - 1].y !== last.y || points[points.length - 1].z !== last.z)) {
+      points.push(new THREE.Vector3(last.x, last.y + 0.04, last.z))
+    }
+    trainingPath.geometry.dispose()
+    trainingPath.geometry = new THREE.BufferGeometry().setFromPoints(points)
+    trainingPath.visible = points.length >= 2
   }
 
   return {
@@ -286,6 +333,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     sceneReferences,
     getReference: (id: string): FlightSceneReference | null => referenceById.get(id) ?? null,
     applyState,
+    setTrainingPath,
     dispose: () => disposeFlightScene(scene),
   }
 }

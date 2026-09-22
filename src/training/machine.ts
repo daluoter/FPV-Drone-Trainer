@@ -63,6 +63,7 @@ function copySample(sample: TrainingSample): TrainingSample {
     timestampSeconds: sample.timestampSeconds,
     state: copyState(sample.state),
     normalizedInput: copyInput(sample.normalizedInput),
+    ...(sample.armed === undefined ? {} : { armed: sample.armed }),
   }
 }
 
@@ -115,6 +116,7 @@ function clearSession(
     lastEvaluation: null,
     result: null,
     setupRequest: null,
+    armedAtLeastOnce: false,
     lastError: null,
   }
 }
@@ -134,6 +136,7 @@ function validTimestamp(value: number): boolean {
 function validSample(sample: TrainingSample): boolean {
   if (!validTimestamp(sample.timestampSeconds) || !isFiniteDroneState(sample.state)) return false
   if (sample.normalizedInput !== null && !isFiniteNormalizedRcInput(sample.normalizedInput)) return false
+  if (sample.armed !== undefined && typeof sample.armed !== 'boolean') return false
   return true
 }
 
@@ -219,6 +222,33 @@ function createResult(
   }
 }
 
+function abortSession(
+  state: TrainingMachineState,
+  lessons: readonly LessonDefinition[],
+  timestampSeconds: number,
+  reason = 'The flight was disarmed, reset, or focus was lost; the attempt was stopped safely.',
+): TrainingMachineState {
+  if (state.phase !== 'ACTIVE') return stateError(state, 'Only an ACTIVE lesson can be stopped by runtime safety telemetry.')
+  const lesson = state.lessonId ? lessons.find((candidate) => candidate.id === state.lessonId) ?? null : null
+  if (!lesson) return stateError(state, 'The active lesson is no longer registered.')
+  const safeTimestamp = validTimestamp(timestampSeconds)
+    ? timestampSeconds
+    : state.lastTimestampSeconds ?? state.activeStartedAtSeconds ?? 0
+  const failure: TrainingEvaluation = {
+    status: 'failure',
+    message: reason,
+    hint: 'Retry to apply the lesson setup while disarmed, then arm explicitly after the countdown.',
+  }
+  return {
+    ...state,
+    phase: 'FAILED',
+    lastEvaluation: failure,
+    result: createResult(state, lesson, 'FAILED', safeTimestamp, failure, state.checkpoints),
+    setupRequest: null,
+    lastError: reason,
+  }
+}
+
 function startSession(state: TrainingMachineState, lesson: LessonDefinition, timestampSeconds: number): TrainingMachineState {
   const sessionNumber = state.sessionNumber + 1
   const sessionId = nextSessionId(lesson.id, sessionNumber)
@@ -239,6 +269,7 @@ function startSession(state: TrainingMachineState, lesson: LessonDefinition, tim
     activeStartedAtSeconds: null,
     lastTimestampSeconds: timestampSeconds,
     lastSampleTimestampSeconds: null,
+    armedAtLeastOnce: false,
     sampleCount: 0,
     trajectory: [],
     checkpoints: initialCheckpoints(lesson),
@@ -283,6 +314,40 @@ function sampleActiveState(
   if (state.activeStartedAtSeconds === null || sample.timestampSeconds < state.activeStartedAtSeconds) {
     return stateError(state, 'Training samples are not accepted before ACTIVE begins.')
   }
+  if (sample.armed === false && state.armedAtLeastOnce !== true) {
+    return {
+      ...state,
+      lastTimestampSeconds: sample.timestampSeconds,
+      lastError: 'Waiting for explicit arm telemetry before the lesson can evaluate.',
+    }
+  }
+  if (sample.armed === false) {
+    return abortSession(
+      state,
+      [lesson],
+      sample.timestampSeconds,
+      'Attempt stopped: the flight was disarmed or focus was lost.',
+    )
+  }
+  const previousSample = state.trajectory[state.trajectory.length - 1]
+  if (
+    previousSample && sample.state.stepIndex < previousSample.state.stepIndex
+  ) {
+    const failure: TrainingEvaluation = {
+      status: 'failure',
+      message: 'The flight runtime reset or rewound during the attempt; the lesson was stopped safely.',
+      hint: 'Retry to apply the lesson setup while disarmed, then arm explicitly after the countdown.',
+    }
+    const result = createResult(state, lesson, 'FAILED', sample.timestampSeconds, failure, state.checkpoints)
+    return {
+      ...state,
+      phase: 'FAILED',
+      lastEvaluation: failure,
+      result,
+      setupRequest: null,
+      lastError: failure.message ?? null,
+    }
+  }
   if (
     state.lastSampleTimestampSeconds !== null &&
     sample.timestampSeconds <= state.lastSampleTimestampSeconds
@@ -297,6 +362,7 @@ function sampleActiveState(
     ...state,
     lastTimestampSeconds: sample.timestampSeconds,
     lastSampleTimestampSeconds: sample.timestampSeconds,
+    armedAtLeastOnce: state.armedAtLeastOnce === true || sample.armed === true,
     sampleCount,
     trajectory,
     lastError: null,
@@ -311,6 +377,8 @@ function sampleActiveState(
     trajectory,
     checkpoints: state.checkpoints,
     sceneReferences: state.sceneReferences,
+    previousSample,
+    previousEvaluation: state.lastEvaluation,
   }
   let evaluation: TrainingEvaluation
   try {
@@ -396,6 +464,7 @@ export function createTrainingMachineState(
     result: null,
     setupRequest: null,
     sceneReferences: copySceneReferences(options.sceneReferences ?? []),
+    armedAtLeastOnce: false,
     lastError: null,
   }
 }
@@ -441,6 +510,8 @@ export function reduceTrainingState(
     }
     case 'TICK':
       return tick(state, action.timestampSeconds)
+    case 'ABORT':
+      return abortSession(state, lessons, action.timestampSeconds, action.reason)
     case 'SAMPLE': {
       if (state.phase === 'READY' || state.phase === 'SUCCESS' || state.phase === 'FAILED' || state.phase === 'RESULT') {
         // The runtime observer remains attached outside a lesson session. Idle
@@ -528,6 +599,10 @@ export class TrainingSession {
 
   public consumeSample(sample: TrainingSample): TrainingMachineState {
     return this.dispatch({ type: 'SAMPLE', sample })
+  }
+
+  public abort(reason?: string, timestampSeconds = this.state.lastTimestampSeconds ?? 0): TrainingMachineState {
+    return this.dispatch({ type: 'ABORT', timestampSeconds, reason })
   }
 
   public ingestSample(sample: TrainingSample): TrainingMachineState {

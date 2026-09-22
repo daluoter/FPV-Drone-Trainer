@@ -26,6 +26,8 @@ export interface TrainingSample {
   readonly timestampSeconds: number
   readonly state: DroneState
   readonly normalizedInput: NormalizedRcInput | null
+  /** Runtime arm state. Legacy synthetic callers may omit it; Phase 7 evaluators never pass without true telemetry. */
+  readonly armed?: boolean
 }
 
 export interface TrainingCheckpointDefinition {
@@ -83,6 +85,9 @@ export interface TrainingEvaluationContext {
   readonly trajectory: readonly TrainingSample[]
   readonly checkpoints: Readonly<Record<string, TrainingCheckpointState>>
   readonly sceneReferences: readonly TrainingSceneReference[]
+  /** O(1) incremental seam for evaluators; avoids rescanning the full 240 Hz trajectory. */
+  readonly previousSample?: TrainingSample
+  readonly previousEvaluation?: TrainingEvaluation | null
 }
 
 export interface TrainingEvaluation {
@@ -159,6 +164,8 @@ export interface TrainingMachineState {
   readonly activeStartedAtSeconds: number | null
   readonly lastTimestampSeconds: number | null
   readonly lastSampleTimestampSeconds: number | null
+  /** True once the pilot has supplied an armed fixed-step sample in this attempt. */
+  readonly armedAtLeastOnce?: boolean
   readonly sampleCount: number
   readonly trajectory: readonly TrainingSample[]
   readonly checkpoints: Readonly<Record<string, TrainingCheckpointState>>
@@ -175,6 +182,7 @@ export type TrainingAction =
   | { readonly type: 'START'; readonly timestampSeconds: number }
   | { readonly type: 'TICK'; readonly timestampSeconds: number }
   | { readonly type: 'SAMPLE'; readonly sample: TrainingSample }
+  | { readonly type: 'ABORT'; readonly timestampSeconds: number; readonly reason?: string }
   | { readonly type: 'SHOW_RESULT' }
   | { readonly type: 'RETRY' }
   | { readonly type: 'RESET' }

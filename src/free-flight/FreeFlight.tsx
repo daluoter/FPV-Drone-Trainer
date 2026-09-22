@@ -9,7 +9,7 @@ import {
   type FlightRuntimeTelemetry,
 } from '../runtime'
 import Mode2StickOverlay from '../training/StickOverlay'
-import type { TrainingSceneReference, TrainingSetupRequest } from '../training/types'
+import type { TrainingSample, TrainingSceneReference, TrainingSetupRequest } from '../training/types'
 import { flightSimulationConfigFromTuning, type TuningSettings } from '../tuning'
 
 export interface FreeFlightProps {
@@ -18,6 +18,7 @@ export interface FreeFlightProps {
   readonly settings: TuningSettings
   readonly trainingResetKey?: number
   readonly trainingSetupRequest?: TrainingSetupRequest | null
+  readonly trainingPath?: readonly TrainingSample[]
   readonly onSceneReferences?: (references: readonly TrainingSceneReference[]) => void
   readonly onFixedStep?: (sample: FlightRuntimeFixedStepSample) => void
   readonly onTelemetry?: (telemetry: FlightRuntimeTelemetry) => void
@@ -54,6 +55,7 @@ export default function FreeFlight({
   settings,
   trainingResetKey = 0,
   trainingSetupRequest = null,
+  trainingPath = [],
   onSceneReferences,
   onFixedStep,
   onTelemetry,
@@ -161,6 +163,10 @@ export default function FreeFlight({
     runtime.reset()
     setTelemetry(runtime.getTelemetry())
   }, [trainingResetKey])
+
+  useEffect(() => {
+    rendererRef.current?.setTrainingPath(trainingPath.map((sample) => sample.state.positionM))
+  }, [trainingPath])
 
   useEffect(() => {
     runtimeRef.current?.setControllerProfile(profile)

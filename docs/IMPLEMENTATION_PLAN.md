@@ -4,7 +4,7 @@ Initial inspection: main at 35c66d2 contained only README.md and MIT LICENSE. Ph
 
 ## Current checkpoint
 
-Phase 6 training framework is complete in this checkpoint. It consumes the Phase 5 controller/simulation contracts through one fixed-step runtime sample hook, adds the explicit training machine, data-driven lesson catalog, defensive progress persistence, menu/results/retry presentation, scene reference IDs, and reusable Mode 2 sticks. The four geometric evaluators remain deliberately unavailable for Phase 7. Browser smoke, WebGL disposal, physical transmitter evidence, and maneuver evidence remain separate from automated gates.
+Phase 7 lessons are complete in this checkpoint. It consumes the Phase 6 controller/simulation contracts through one fixed-step runtime sample hook, adds armed/disarmed telemetry safety, pure incremental evaluators for Hover, Coordinated Turn, Split-S, and Orbit / 刷鍋, positive/negative deterministic fixtures, visible reference geometry/path, live metrics/results/retry, and current progress persistence. Straight-line, box-pattern, and figure-eight replacements are intentionally not included. Browser smoke, WebGL disposal, physical transmitter evidence, and human maneuver evidence remain separate from automated gates.
 
 ## Architecture decisions
 
@@ -29,7 +29,7 @@ This is multi-seam work. Exclusive ownership passes serially in /workspaces/FPV-
 | 4 Free-flight integration | src/rendering, runtime and flight UI | safe arm, cameras, telemetry, browser smoke; complete |
 | 5 Tuning | src/tuning, settings UI, validated configuration/persistence and runtime boundary | bounded settings, defaults, persistence rejection, reset safety and documentation; complete |
 | 6 Training framework | src/training contracts/state machine, menu/results/sticks, fixed-step sample hook and scene reference IDs | state transitions, progress, reset/session isolation and truthful unavailable lessons; complete in this checkpoint |
-| 7 Lessons | four geometric lesson evaluators and environment references | positive/negative maneuver traces; next owner |
+| 7 Lessons | four geometric lesson evaluators, armed telemetry safety, fixtures, and reference/path presentation | positive/negative maneuver traces; complete in this checkpoint |
 | 8 Replay | src/replay and playback/path integration | bounded recorder, immutable snapshots/playback; commit |
 | 9 Verification/polish | integration fixes, accessibility and truthful docs | independent review, all commands, browser checks; commit |
 

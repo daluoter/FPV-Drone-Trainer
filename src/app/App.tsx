@@ -57,8 +57,8 @@ const roadmap: RoadmapItem[] = [
   },
   {
     title: 'Flight school evaluators',
-    description: 'Four geometric lesson evaluators and environment references.',
-    status: 'next',
+    description: 'Hover, coordinated turn, Split-S, and Orbit / 刷鍋 state/trajectory checks.',
+    status: 'complete',
   },
 ]
 
@@ -127,6 +127,7 @@ export default function App() {
       timestampSeconds: sample.timestampSeconds,
       state: sample.state,
       normalizedInput: sample.normalizedInput,
+      armed: sample.armed,
     })
     if (next === previous) return
 
@@ -148,7 +149,15 @@ export default function App() {
   }, [syncTrainingState])
   const onTrainingTelemetry = useCallback((telemetry: FlightRuntimeTelemetry) => {
     setTrainingLiveInput(telemetry.normalizedInput)
-  }, [])
+    const session = trainingSessionRef.current
+    if (!session || telemetry.armed) return
+    if (session.getState().phase === 'ACTIVE' && session.getState().armedAtLeastOnce === true) {
+      syncTrainingState(session.abort(
+        telemetry.safetyReasons[0] ?? 'The flight was disarmed, reset, or focus was lost; the attempt was stopped safely.',
+        telemetry.state.timeSeconds,
+      ))
+    }
+  }, [syncTrainingState])
   const selectTrainingLesson = useCallback((lessonId: string) => {
     const session = trainingSessionRef.current
     if (!session) return
@@ -203,9 +212,9 @@ export default function App() {
         </a>
         <div className="topbar-status" aria-label="Application status">
           <span className="status-light" aria-hidden="true" />
-          <span>Phase 6 / Training framework build</span>
+          <span>Phase 7 / Flight school build</span>
           <span className="status-divider" aria-hidden="true" />
-          <span className="muted">Phase 5 / Tuning + Free Flight build</span>
+          <span className="muted">Phase 6 / Training framework complete</span>
         </div>
       </header>
 
@@ -255,7 +264,7 @@ export default function App() {
             <div className="status-readout">
               <div className="readout-row">
                 <span>Current phase</span>
-                <strong>Training framework</strong>
+                <strong>Flight school evaluators</strong>
               </div>
               <div className="readout-row">
                 <span>Controller</span>
@@ -298,6 +307,7 @@ export default function App() {
           settings={tuningSettings}
           trainingResetKey={trainingResetKey}
           trainingSetupRequest={trainingState.phase === 'COUNTDOWN' ? trainingState.setupRequest : null}
+          trainingPath={trainingState.trajectory}
           onSceneReferences={onTrainingSceneReferences}
           onFixedStep={onTrainingFixedStep}
           onTelemetry={onTrainingTelemetry}
@@ -345,7 +355,7 @@ export default function App() {
                 <p className="panel-kicker">Build sequence</p>
                 <h2>Trust, then tune.</h2>
               </div>
-              <span className="progress-count">06 / 09</span>
+              <span className="progress-count">07 / 09</span>
             </div>
             <div className="roadmap-list">
               {roadmap.map((item, index) => (
@@ -388,7 +398,7 @@ export default function App() {
       <footer className="app-footer">
         <span>FPV Drone Trainer</span>
         <span>Built for measurable flight feel.</span>
-        <span className="footer-version">v0.1.0 / phase 6 training</span>
+        <span className="footer-version">v0.1.0 / phase 7 training</span>
       </footer>
     </div>
   )

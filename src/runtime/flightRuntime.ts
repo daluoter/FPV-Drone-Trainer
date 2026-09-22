@@ -43,6 +43,8 @@ export interface FlightRuntimeFixedStepSample {
   readonly timestampSeconds: number
   readonly state: DroneState
   readonly normalizedInput: NormalizedRcInput | null
+  /** Explicit arm state prevents disarmed/reset telemetry from producing a pass. */
+  readonly armed: boolean
   readonly telemetry: FlightTelemetry
 }
 
@@ -386,6 +388,7 @@ export class FlightRuntime {
         timestampSeconds: step.state.timeSeconds,
         state: copyDroneState(step.state),
         normalizedInput: copyNormalizedInput(sample.input),
+        armed: step.telemetry.armed,
         telemetry: step.telemetry,
       })
     })
