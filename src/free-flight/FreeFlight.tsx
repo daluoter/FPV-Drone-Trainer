@@ -17,6 +17,8 @@ export interface FreeFlightProps {
   readonly profile: ControllerProfile | null
   readonly settings: TuningSettings
   readonly trainingResetKey?: number
+  readonly trainingDisarmKey?: number
+  readonly trainingSettingsLocked?: boolean
   readonly trainingSetupRequest?: TrainingSetupRequest | null
   readonly trainingPath?: readonly TrainingSample[]
   readonly onSceneReferences?: (references: readonly TrainingSceneReference[]) => void
@@ -54,6 +56,8 @@ export default function FreeFlight({
   profile,
   settings,
   trainingResetKey = 0,
+  trainingDisarmKey = 0,
+  trainingSettingsLocked = false,
   trainingSetupRequest = null,
   trainingPath = [],
   onSceneReferences,
@@ -103,6 +107,7 @@ export default function FreeFlight({
     })
     runtime.setInputSource(source)
     runtime.setCameraMode(cameraMode)
+    runtime.setTuningLocked(trainingSettingsLocked)
     runtimeRef.current = runtime
     rendererRef.current = renderer
     sceneReferencesListenerRef.current?.(renderer.flightScene.sceneReferences.map((reference) => ({
@@ -143,12 +148,17 @@ export default function FreeFlight({
 
   useEffect(() => {
     const runtime = runtimeRef.current
-    if (!runtime || appliedSettingsRef.current === settings) return
-    runtime.reconfigure(flightSimulationConfigFromTuning(settings))
+    runtime?.setTuningLocked(trainingSettingsLocked)
+  }, [trainingSettingsLocked])
+
+  useEffect(() => {
+    const runtime = runtimeRef.current
+    if (!runtime || trainingSettingsLocked || appliedSettingsRef.current === settings) return
+    if (runtime.reconfigure(flightSimulationConfigFromTuning(settings)) === false) return
     rendererRef.current?.setCameraOptions(settings.camera)
     appliedSettingsRef.current = settings
     setTelemetry(runtime.getTelemetry())
-  }, [settings])
+  }, [settings, trainingSettingsLocked])
 
   useEffect(() => {
     const runtime = runtimeRef.current
@@ -163,6 +173,13 @@ export default function FreeFlight({
     runtime.reset()
     setTelemetry(runtime.getTelemetry())
   }, [trainingResetKey])
+
+  useEffect(() => {
+    const runtime = runtimeRef.current
+    if (!runtime || trainingDisarmKey <= 0) return
+    runtime.disarm('Training attempt reset; explicit rearm is required.')
+    setTelemetry(runtime.getTelemetry())
+  }, [trainingDisarmKey])
 
   useEffect(() => {
     rendererRef.current?.setTrainingPath(trainingPath.map((sample) => sample.state.positionM))

@@ -12,7 +12,12 @@ import {
   type TrainingSceneReference,
 } from '../training'
 import TuningPanel from '../tuning/TuningPanel'
-import { copyTuningSettings, TuningSettingsStore, type TuningSettings } from '../tuning'
+import {
+  copyTuningSettings,
+  TuningSettingsStore,
+  type TuningPersistenceResult,
+  type TuningSettings,
+} from '../tuning'
 import type { FlightRuntimeFixedStepSample, FlightRuntimeTelemetry } from '../runtime'
 import type { NormalizedRcInput } from '../flight-controller'
 
@@ -101,6 +106,7 @@ export default function App() {
   const [trainingProgress, setTrainingProgress] = useState(initialProgressLoad.progress)
   const [trainingLiveInput, setTrainingLiveInput] = useState<NormalizedRcInput | null>(null)
   const [trainingResetKey, setTrainingResetKey] = useState(0)
+  const [trainingDisarmKey, setTrainingDisarmKey] = useState(0)
   const recordedTrainingSessionRef = useRef<string | null>(null)
   const trainingUiLastPublishedSecondsRef = useRef<number | null>(null)
   const trainingUiCheckpointKeyRef = useRef('')
@@ -187,16 +193,27 @@ export default function App() {
     trainingUiLastPublishedSecondsRef.current = null
     trainingUiCheckpointKeyRef.current = ''
     syncTrainingState(session.reset())
-    // An ACTIVE attempt is reset in the training domain only. The player is
-    // never moved by a React state update while ACTIVE; the next START applies
-    // its setup through the explicit disarmed runtime API.
-    if (previousPhase !== 'ACTIVE') setTrainingResetKey((key) => key + 1)
+    if (previousPhase === 'ACTIVE') {
+      // ACTIVE reset must stop motor output without applying a spawn reset. The
+      // runtime disarm boundary preserves the current pose and requires an
+      // explicit arm action before flight can continue.
+      setTrainingDisarmKey((key) => key + 1)
+    } else {
+      setTrainingResetKey((key) => key + 1)
+    }
   }, [syncTrainingState])
-  const onTuningApply = useCallback((next: TuningSettings) => {
+  const trainingSettingsLocked = trainingState.phase === 'COUNTDOWN' || trainingState.phase === 'ACTIVE'
+  const onTuningApply = useCallback((next: TuningSettings): TuningPersistenceResult => {
+    if (trainingSettingsLocked) {
+      return {
+        saved: false,
+        errors: ['Tuning changes are disabled while a lesson is counting down or active. Reset or end the lesson first.'],
+      }
+    }
     const result = tuningStore.save(next)
     if (result.saved) setTuningSettings(copyTuningSettings(next))
     return result
-  }, [tuningStore])
+  }, [trainingSettingsLocked, tuningStore])
 
   return (
     <div className="app-shell">
@@ -288,7 +305,12 @@ export default function App() {
 
         <ControllerLab poller={poller} onFlightHandoff={onFlightHandoff} />
 
-        <TuningPanel settings={tuningSettings} notice={tuningNotice} onApply={onTuningApply} />
+        <TuningPanel
+          settings={tuningSettings}
+          notice={tuningNotice}
+          disabled={trainingSettingsLocked}
+          onApply={onTuningApply}
+        />
 
         <TrainingPanel
           state={trainingState}
@@ -306,6 +328,8 @@ export default function App() {
           profile={flightProfile}
           settings={tuningSettings}
           trainingResetKey={trainingResetKey}
+          trainingDisarmKey={trainingDisarmKey}
+          trainingSettingsLocked={trainingSettingsLocked}
           trainingSetupRequest={trainingState.phase === 'COUNTDOWN' ? trainingState.setupRequest : null}
           trainingPath={trainingState.trajectory}
           onSceneReferences={onTrainingSceneReferences}

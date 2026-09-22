@@ -20,6 +20,7 @@ import { RATE_AXES, type RateAxis } from '../rates'
 export interface TuningPanelProps {
   readonly settings: TuningSettings
   readonly notice?: string | null
+  readonly disabled?: boolean
   readonly onApply: (settings: TuningSettings) => TuningPersistenceResult
 }
 
@@ -32,7 +33,7 @@ function finiteInput(event: ChangeEvent<HTMLInputElement>): number | null {
   return Number.isFinite(value) ? value : null
 }
 
-export default function TuningPanel({ settings, notice, onApply }: TuningPanelProps) {
+export default function TuningPanel({ settings, notice, disabled = false, onApply }: TuningPanelProps) {
   const [draft, setDraft] = useState(() => copyTuningSettings(settings))
   const [curveAxis, setCurveAxis] = useState<RateAxis>('roll')
   const [error, setError] = useState<string | null>(null)
@@ -44,6 +45,11 @@ export default function TuningPanel({ settings, notice, onApply }: TuningPanelPr
   }, [settings])
 
   const apply = (next: TuningSettings): void => {
+    if (disabled) {
+      setError('Tuning changes are disabled while a lesson is counting down or active. Reset or end the lesson first.')
+      setStatus(null)
+      return
+    }
     const validation = validateTuningSettings(next)
     if (!validation.valid) {
       setError(validation.errors.join(' '))
@@ -100,14 +106,14 @@ export default function TuningPanel({ settings, notice, onApply }: TuningPanelPr
           </p>
         </div>
         <div className="tuning-actions">
-          <button className="lab-button lab-button-primary" type="button" onClick={() => apply(draft)}>Apply + reset</button>
-          <button className="lab-button" type="button" onClick={reset}>Reset defaults</button>
+          <button className="lab-button lab-button-primary" type="button" onClick={() => apply(draft)} disabled={disabled}>Apply + reset</button>
+          <button className="lab-button" type="button" onClick={reset} disabled={disabled}>Reset defaults</button>
         </div>
       </div>
 
-      {(notice || error || status) && (
+      {(notice || error || status || disabled) && (
         <div className={`tuning-notice ${error ? 'tuning-notice-error' : ''}`} role={error ? 'alert' : 'status'}>
-          {error ?? status ?? notice}
+          {error ?? status ?? (disabled ? 'Tuning changes are locked while a lesson is counting down or active.' : notice)}
         </div>
       )}
 

@@ -235,12 +235,46 @@ describe('Free Flight runtime safety transitions', () => {
         },
       },
     }
-    runtime.reconfigure({ controller })
+    const simulationBeforeLock = runtime.simulation
+    const stateBeforeLock = runtime.simulation.getState()
+    runtime.setTuningLocked(true)
+    expect(runtime.reconfigure({ controller })).toBe(false)
+    expect(runtime.simulation).toBe(simulationBeforeLock)
+    expect(runtime.getTelemetry().armed).toBe(true)
+    expect(runtime.simulation.getState()).toEqual(stateBeforeLock)
 
+    runtime.setTuningLocked(false)
+    expect(runtime.reconfigure({ controller })).toBe(true)
     expect(runtime.getTelemetry().armed).toBe(false)
     expect(runtime.getTelemetry().warnings.join(' ')).toMatch(/settings|reset|disarmed/i)
     expect(runtime.simulation.getState().stepIndex).toBe(0)
     expect(runtime.simulation.controller.config.rates.axes.roll.centerRateDegPerSec).toBe(120)
+    runtime.dispose()
+  })
+
+  it('disarms an active training reset without resetting pose and requires explicit rearm', () => {
+    const frames = nextFrameRunner()
+    const runtime = new FlightRuntime({
+      scheduleFrame: frames.schedule,
+      cancelFrame: frames.cancel,
+      now: () => 100,
+    })
+    runtime.setInputSource('keyboard')
+    runtime.start()
+    frames.run(0)
+    expect(runtime.arm()).toBe(true)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd' }))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'r' }))
+    frames.run(100)
+
+    const poseBeforeReset = runtime.simulation.getState()
+    runtime.disarm('Training attempt reset; explicit rearm is required.')
+    const poseAfterReset = runtime.simulation.getState()
+    expect(runtime.getTelemetry().armed).toBe(false)
+    expect(poseAfterReset.positionM).toEqual(poseBeforeReset.positionM)
+    expect(poseAfterReset.orientation).toEqual(poseBeforeReset.orientation)
+    expect(poseAfterReset.timeSeconds).toBe(poseBeforeReset.timeSeconds)
+    expect(runtime.arm()).toBe(true)
     runtime.dispose()
   })
 

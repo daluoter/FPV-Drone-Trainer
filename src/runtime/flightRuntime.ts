@@ -152,6 +152,7 @@ export class FlightRuntime {
   private readonly telemetryListener: ((telemetry: FlightRuntimeTelemetry) => void) | null
   private readonly fixedStepListener: ((sample: FlightRuntimeFixedStepSample) => void) | null
   private controllerProfile: ControllerProfile | null
+  private tuningLocked = false
   private source: FlightInputSource = 'controller'
   private cameraMode: FlightRuntimeTelemetry['cameraMode'] = DEFAULT_CAMERA_MODE
   private running = false
@@ -270,6 +271,15 @@ export class FlightRuntime {
     this.emitTelemetry(true)
   }
 
+  /** Prevent tuning from rebuilding the simulation during a lesson attempt. */
+  public setTuningLocked(locked: boolean): void {
+    this.tuningLocked = locked
+  }
+
+  public isTuningLocked(): boolean {
+    return this.tuningLocked
+  }
+
   public arm(): boolean {
     const sample = this.sampleInput()
     this.lastSample = sample
@@ -351,7 +361,8 @@ export class FlightRuntime {
    * This always disarms first, clears controller/input history, and starts the
    * replacement simulation from its safe initial state.
    */
-  public reconfigure(config: FlightSimulationConfig): void {
+  public reconfigure(config: FlightSimulationConfig): boolean {
+    if (this.tuningLocked) return false
     this.keyboard.releaseKeys()
     this.simulation.disarm('Flight settings changed; runtime was reset and disarmed.')
     this.simulation = new FlightSimulation(config)
@@ -365,6 +376,7 @@ export class FlightRuntime {
     }
     this.lastSafetyReasons = ['Flight settings applied; runtime was reset and disarmed.']
     this.emitTelemetry(true)
+    return true
   }
 
   private frame(time: number): void {
