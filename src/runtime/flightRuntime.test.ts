@@ -11,6 +11,7 @@ import {
   type RawGamepadSnapshot,
 } from '../controller'
 import { createDefaultFlightControllerConfig, FlightSimulation } from '../flight-controller'
+import { DEFAULT_LESSONS, TRAINING_SCENE_REFERENCES, TrainingSession } from '../training'
 import type { LessonSetup } from '../training/types'
 import { FlightRuntime } from './flightRuntime'
 
@@ -177,6 +178,54 @@ describe('Free Flight runtime safety transitions', () => {
 
     expect(runtime.getTelemetry().armed).toBe(false)
     expect(runtime.getTelemetry().warnings.join(' ')).toMatch(/session|device|rearm/i)
+    runtime.dispose()
+  })
+
+  it('publishes a latched crash, blocks re-arm, and clears the latch only through reset', () => {
+    const runner = nextFrameRunner()
+    let currentTime = 0
+    const training = new TrainingSession({
+      lessons: DEFAULT_LESSONS.map((lesson) => lesson.id === 'hover'
+        ? { ...lesson, evaluator: () => ({ status: 'continue' as const }) }
+        : lesson),
+      initialLessonId: 'hover',
+      countdownDurationSeconds: 0,
+      sceneReferences: TRAINING_SCENE_REFERENCES,
+    })
+    training.start(0)
+    training.tick(0)
+    const runtime = new FlightRuntime({
+      scheduleFrame: runner.schedule,
+      cancelFrame: runner.cancel,
+      now: () => currentTime,
+      onFixedStep: (sample) => training.consumeSample({
+        timestampSeconds: sample.timestampSeconds,
+        state: sample.state,
+        normalizedInput: sample.normalizedInput,
+        armed: sample.armed,
+      }),
+    })
+    runtime.setInputSource('keyboard')
+    runtime.start()
+    runner.run(0)
+    expect(runtime.arm()).toBe(true)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'w' }))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd' }))
+
+    for (let time = 100; time <= 3_000 && !runtime.getTelemetry().state.crashed; time += 100) {
+      currentTime = time
+      runner.run(time)
+    }
+    expect(runtime.getTelemetry().state.crashed).toBe(true)
+    expect(runtime.getTelemetry().armed).toBe(false)
+    expect(runtime.getTelemetry().safetyReasons.join(' ')).toMatch(/crash|tip-over/i)
+    expect(runtime.arm()).toBe(false)
+    expect(training.getState().phase).toBe('FAILED')
+    expect(training.getState().result?.message).toMatch(/crashed/i)
+
+    runtime.reset()
+    expect(runtime.getTelemetry().state.crashed).toBe(false)
+    expect(runtime.arm()).toBe(true)
     runtime.dispose()
   })
 

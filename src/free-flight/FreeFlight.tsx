@@ -62,6 +62,7 @@ function fallbackTelemetryLabel(
   if (renderingState !== 'ready') return 'SAFE / rendering unavailable'
   if (!telemetry) return 'Starting runtime…'
   if (telemetry.replay.active) return telemetry.replay.playing ? 'PLAYBACK / playing ghost' : 'PLAYBACK / paused ghost'
+  if (telemetry.state.crashed) return 'CRASHED / reset required'
   return telemetry.armed ? 'ARMED / simulation running' : 'SAFE / disarmed'
 }
 
@@ -366,7 +367,11 @@ export default function FreeFlight({
                 )}
               </div>
             )}
-            {renderingState === 'ready' && !telemetry?.armed && !telemetry?.replay.active && <div className="flight-safe-overlay">SAFE / explicit arm required</div>}
+            {renderingState === 'ready' && !telemetry?.armed && !telemetry?.replay.active && (
+              <div className="flight-safe-overlay">
+                {telemetry?.state.crashed ? 'CRASHED / reset required before re-arming' : 'SAFE / explicit arm required'}
+              </div>
+            )}
             {renderingState === 'ready' && telemetry?.replay.active && <div className="flight-safe-overlay">PLAYBACK / live arm blocked</div>}
           </div>
           <div className="flight-controls" aria-label="Flight controls">
@@ -396,14 +401,14 @@ export default function FreeFlight({
               ))}
             </div>
             <div className="flight-action-group">
-              <button className="lab-button lab-button-primary" type="button" onClick={arm} disabled={Boolean(renderingState !== 'ready' || telemetry?.armed || telemetry?.replay.active)}>
+              <button className="lab-button lab-button-primary" type="button" onClick={arm} disabled={Boolean(renderingState !== 'ready' || telemetry?.armed || telemetry?.state.crashed || telemetry?.replay.active)}>
                 Arm
               </button>
               <button className="lab-button" type="button" onClick={disarm} disabled={!telemetry?.armed || Boolean(telemetry?.replay.active)}>
                 Disarm
               </button>
               <button className="lab-button" type="button" onClick={reset}>
-                Reset
+                {telemetry?.state.crashed ? 'Reset crashed drone' : 'Reset'}
               </button>
             </div>
           </div>
@@ -517,7 +522,7 @@ function FlightHud({
           <p className="panel-kicker">Developer HUD</p>
           <h3 id="flight-hud-title">Runtime telemetry</h3>
         </div>
-        <span>{telemetry?.armed ? 'ARMED' : 'DISARMED'}</span>
+        <span>{telemetry?.state.crashed ? 'CRASHED' : telemetry?.armed ? 'ARMED' : 'DISARMED'}</span>
       </div>
       <div className="flight-hud-grid">
         <TelemetryCard title="Loop">

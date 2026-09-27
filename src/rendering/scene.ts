@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 
 import type { DroneConfig, DroneState } from '../drone'
-import { DEFAULT_DRONE_CONFIG } from '../drone'
+import { DEFAULT_DRONE_CONFIG, DRONE_GEOMETRY } from '../drone'
 import type { Vector3 } from '../math/vector'
 import type { ReplayGhostState } from '../replay'
 
@@ -46,19 +46,19 @@ function createQuadVisual(): THREE.Group {
   quad.name = 'quad'
 
   const body = new THREE.Mesh(
-    new THREE.BoxGeometry(0.3, 0.09, 0.24),
+    new THREE.BoxGeometry(DRONE_GEOMETRY.body.sizeM.x, DRONE_GEOMETRY.body.sizeM.y, DRONE_GEOMETRY.body.sizeM.z),
     material(0x26343a, 0.5, 0.4),
   )
   body.name = 'quad-body'
   quad.add(body)
 
   const nose = new THREE.Mesh(
-    new THREE.ConeGeometry(0.055, 0.16, 4),
+    new THREE.ConeGeometry(DRONE_GEOMETRY.nose.sizeM.x / 2, DRONE_GEOMETRY.nose.sizeM.z, 4),
     material(0xb8f36b, 0.55, 0.2),
   )
   nose.name = 'quad-nose'
   nose.rotation.x = -Math.PI / 2
-  nose.position.set(0, 0.02, -0.17)
+  nose.position.set(DRONE_GEOMETRY.nose.centerM.x, DRONE_GEOMETRY.nose.centerM.y, DRONE_GEOMETRY.nose.centerM.z)
   quad.add(nose)
 
   const armMaterial = material(0x71909b, 0.58, 0.28)
@@ -69,28 +69,27 @@ function createQuadVisual(): THREE.Group {
     opacity: 0.45,
     roughness: 0.7,
   })
-  const motorPositions = [
-    [-0.12, -0.12],
-    [0.12, -0.12],
-    [-0.12, 0.12],
-    [0.12, 0.12],
-  ] as const
-
-  for (const [index, [x, z]] of motorPositions.entries()) {
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.045, 0.38), armMaterial)
+  for (const [index, motorPosition] of DRONE_GEOMETRY.motors.positionsM.entries()) {
+    const armGeometry = DRONE_GEOMETRY.arms
+    const armPlacement = armGeometry.placements[index]
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(armGeometry.sizeM.x, armGeometry.sizeM.y, armGeometry.sizeM.z), armMaterial)
     arm.name = `quad-arm-${index}`
-    arm.position.set(x * 0.5, 0, z * 0.5)
-    arm.rotation.y = index % 2 === 0 ? Math.atan2(x, z) : -Math.atan2(x, z)
+    arm.position.set(armPlacement.centerM.x, armPlacement.centerM.y, armPlacement.centerM.z)
+    arm.rotation.y = armPlacement.rotationYRad
     quad.add(arm)
 
-    const motor = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.042, 0.045, 12), motorMaterial)
+    const motor = new THREE.Mesh(
+      new THREE.CylinderGeometry(DRONE_GEOMETRY.motors.radiusM, DRONE_GEOMETRY.motors.radiusM, DRONE_GEOMETRY.motors.heightM, 12),
+      motorMaterial,
+    )
     motor.name = `quad-motor-${index}`
-    motor.position.set(x, 0.035, z)
+    motor.position.set(motorPosition.x, motorPosition.y, motorPosition.z)
     quad.add(motor)
 
-    const prop = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.008, 0.018), propMaterial)
+    const propSize = DRONE_GEOMETRY.propellers.sizeM
+    const prop = new THREE.Mesh(new THREE.BoxGeometry(propSize.x, propSize.y, propSize.z), propMaterial)
     prop.name = `quad-prop-${index}`
-    prop.position.set(x, 0.065, z)
+    prop.position.set(motorPosition.x, motorPosition.y + DRONE_GEOMETRY.propellers.centerYFromMotorM, motorPosition.z)
     prop.rotation.y = index % 2 === 0 ? Math.PI / 4 : -Math.PI / 4
     quad.add(prop)
   }

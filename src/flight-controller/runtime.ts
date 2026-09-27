@@ -104,6 +104,13 @@ export class FlightSimulation {
 
   /** Explicit handoff for a later application arm gate. */
   public arm(): void {
+    if (this.state.crashed) {
+      const reason = 'Drone crashed; reset is required before re-arming.'
+      this.armed = false
+      this.controller.disarm()
+      this.telemetry = this.makeTelemetry(this.controller.safeOutput([reason]), this.state, [reason])
+      return
+    }
     if (this.configurationWarnings.length > 0) {
       this.disarm('Flight runtime cannot arm with an invalid configuration.')
       return
@@ -245,6 +252,11 @@ export class FlightSimulation {
     const simulationResult = this.simulation.step(output.motorCommands, deltaSeconds)
     this.state = simulationResult.state
     const warnings = [...output.warnings, ...simulationResult.warnings]
+    if (this.state.crashed) {
+      this.armed = false
+      this.controller.reset()
+      output = this.controller.safeOutput([...output.warnings, ...simulationResult.warnings])
+    }
     if (simulationResult.reset) {
       this.armed = false
       this.controller.reset()

@@ -82,6 +82,21 @@ describe('training state machine', () => {
     expect(session.consumeSample({ ...sample(2.7), armed: true }).phase).toBe('SUCCESS')
   })
 
+  it('fails an ACTIVE attempt immediately on a latched crash, even before the first armed sample', () => {
+    const session = new TrainingSession({ lessons: [testLesson], initialLessonId: testLesson.id, countdownDurationSeconds: 0 })
+    session.start(0)
+    session.tick(0)
+    const source = sample(0.1)
+    const crashedState = { ...source.state, crashed: true }
+    const result = session.consumeSample({ ...source, state: crashedState, armed: false })
+
+    expect(result.phase).toBe('FAILED')
+    expect(result.result?.outcome).toBe('FAILED')
+    expect(result.result?.message).toMatch(/crashed/i)
+    expect(source.state.crashed).toBe(false)
+    expect(crashedState.crashed).toBe(true)
+  })
+
   it('guards countdown timing and only evaluates ACTIVE samples', () => {
     const session = new TrainingSession({ lessons: [testLesson], initialLessonId: testLesson.id, countdownDurationSeconds: 2 })
     expect(session.getState().phase).toBe('READY')

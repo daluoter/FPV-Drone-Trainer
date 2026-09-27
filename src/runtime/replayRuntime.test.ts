@@ -38,10 +38,12 @@ describe('runtime replay isolation', () => {
     expect(runtime.isReplayActive()).toBe(true)
     expect(runtime.getTelemetry().replay.label).toBe('PLAYBACK')
     expect(runtime.arm()).toBe(false)
+    const liveStateAtReplayEntry = runtime.simulation.getState()
 
     runtime.playReplay()
     frames.run(200)
     expect(fixedStepCount).toBe(liveStepCount)
+    expect(runtime.simulation.getState()).toEqual(liveStateAtReplayEntry)
     expect(runtime.simulation.getState().stepIndex).toBeGreaterThan(0)
     expect(runtime.getTelemetry().replay.active).toBe(true)
 

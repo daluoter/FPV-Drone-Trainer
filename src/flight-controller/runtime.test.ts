@@ -171,6 +171,37 @@ describe('flight simulation integration', () => {
     expect(runtime.getTelemetry().warnings.filter((warning) => /non-finite|invalid/i.test(warning))).toHaveLength(0)
   })
 
+  it('disarms and latches a ground crash until explicit reset before re-arming', () => {
+    const drone = {
+      ...DEFAULT_DRONE_CONFIG,
+      spawnPositionM: { x: 0, y: DEFAULT_DRONE_CONFIG.ground.heightM, z: 0 },
+    }
+    const runtime = new FlightSimulation({ drone, armed: true })
+    const input = { roll: 1, pitch: 1, yaw: 0, throttle: 0 }
+    let result = runtime.step(input)
+    for (let index = 0; index < 2_000 && !result.state.crashed; index += 1) result = runtime.step(input)
+
+    expect(result.state.crashed).toBe(true)
+    expect(runtime.isArmed()).toBe(false)
+    expect(result.telemetry.armed).toBe(false)
+    expect(result.telemetry.mixer.commands).toEqual([0, 0, 0, 0])
+    expect(result.state.motors.every((motor) => motor.command === 0 && motor.targetThrustN === 0 && motor.actualThrustN === 0)).toBe(true)
+    expect(result.warnings.join(' ')).toMatch(/crash|tip-over/i)
+
+    const crashedPose = { ...result.state.positionM }
+    runtime.arm()
+    expect(runtime.isArmed()).toBe(false)
+    for (let index = 0; index < 240; index += 1) result = runtime.step(input)
+    expect(result.state.crashed).toBe(true)
+    expect(result.state.positionM).toEqual(crashedPose)
+    expect(result.state.motors.every((motor) => motor.actualThrustN === 0)).toBe(true)
+
+    runtime.reset()
+    expect(runtime.getState().crashed).toBe(false)
+    runtime.arm()
+    expect(runtime.isArmed()).toBe(true)
+  })
+
   it('disarms and zeroes commands on invalid input instead of retaining a stale command', () => {
     const runtime = new FlightSimulation({ controller: lowRateControllerConfig(), armed: true })
     runtime.step({ roll: 1, pitch: 0, yaw: 0, throttle: hoverThrottle() })

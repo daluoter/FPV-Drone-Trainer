@@ -8,13 +8,13 @@ import {
   type Quaternion,
 } from '../math/quaternion'
 import type { Vector3 } from '../math/vector'
-import type { DroneState } from '../drone'
+import { DEFAULT_FPV_MOUNT_POSITION_M, type DroneState } from '../drone'
+export { DEFAULT_FPV_MOUNT_POSITION_M } from '../drone'
 
 export type CameraMode = 'fpv' | 'chase' | 'free'
 
 export const DEFAULT_FPV_FOV_DEGREES = 90
 export const DEFAULT_FPV_MOUNT_ANGLE_DEGREES = 20
-export const DEFAULT_FPV_MOUNT_POSITION_M: Vector3 = Object.freeze({ x: 0, y: 0.08, z: -0.11 })
 export const DEFAULT_CHASE_OFFSET_M: Vector3 = Object.freeze({ x: 0, y: 1.8, z: 4.2 })
 export const DEFAULT_CHASE_LOOK_AT_OFFSET_M: Vector3 = Object.freeze({ x: 0, y: 0.25, z: 0 })
 

@@ -1,6 +1,7 @@
 import { IDENTITY_QUATERNION, isFiniteQuaternion, normalizeQuaternion, quaternionNorm, type Quaternion } from '../math/quaternion'
 import { isFiniteVector3, vector3, type Vector3 } from '../math/vector'
 import { createMotorState } from './motor'
+import { droneGroundSupport, DRONE_GROUND_CLEARANCE_M } from './geometry'
 import type { DroneConfig, DroneState, QuadMotorState } from './types'
 
 export function createInitialMotorStates(): QuadMotorState {
@@ -12,14 +13,20 @@ export function createInitialDroneState(
   positionM: Vector3 = config.spawnPositionM,
   orientation: Quaternion = IDENTITY_QUATERNION,
 ): DroneState {
+  const normalizedOrientation = normalizeQuaternion(orientation)
+  const support = droneGroundSupport(config, normalizedOrientation)
   return {
-    positionM: { ...positionM },
+    positionM: {
+      ...positionM,
+      y: Math.max(positionM.y, config.ground.heightM + support.supportOffsetM + DRONE_GROUND_CLEARANCE_M),
+    },
     velocityMps: vector3(),
-    orientation: normalizeQuaternion(orientation),
+    orientation: normalizedOrientation,
     angularVelocityBodyRadPerSec: vector3(),
     motors: createInitialMotorStates(),
     timeSeconds: 0,
     stepIndex: 0,
+    crashed: false,
     warnings: [],
   }
 }
@@ -33,7 +40,8 @@ export function isFiniteDroneState(state: DroneState): boolean {
     !Number.isFinite(state.timeSeconds) ||
     state.timeSeconds < 0 ||
     !Number.isInteger(state.stepIndex) ||
-    state.stepIndex < 0
+    state.stepIndex < 0 ||
+    typeof state.crashed !== 'boolean'
   ) return false
   const orientationNorm = quaternionNorm(state.orientation)
   if (!Number.isFinite(orientationNorm) || orientationNorm <= 1e-8) return false

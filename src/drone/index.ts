@@ -1,5 +1,6 @@
 export * from './config'
 export * from './forces'
+export * from './geometry'
 export * from './mixer'
 export * from './motor'
 export * from './state'

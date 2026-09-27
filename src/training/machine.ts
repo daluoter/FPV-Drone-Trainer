@@ -334,6 +334,15 @@ function sampleActiveState(
   if (state.activeStartedAtSeconds === null || sample.timestampSeconds < state.activeStartedAtSeconds) {
     return stateError(state, 'Training samples are not accepted before ACTIVE begins.')
   }
+  if (sample.state.crashed) {
+    return abortSession(
+      state,
+      [lesson],
+      sample.timestampSeconds,
+      'Attempt stopped: the drone crashed; reset and retry the lesson.',
+      trajectoryBuffer,
+    )
+  }
   if (sample.armed === false && state.armedAtLeastOnce !== true) {
     return {
       ...state,

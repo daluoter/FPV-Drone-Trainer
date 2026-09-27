@@ -407,6 +407,11 @@ export class FlightRuntime {
   }
 
   public arm(): boolean {
+    if (this.simulation.getState().crashed) {
+      this.lastSafetyReasons = ['Drone crashed; reset is required before re-arming.']
+      this.emitTelemetry(true)
+      return false
+    }
     if (this.replayPlayback) {
       this.lastSafetyReasons = ['Exit replay playback before explicitly rearming the live flight.']
       this.emitTelemetry(true)
@@ -564,6 +569,7 @@ export class FlightRuntime {
     this.lastSafetyReasons = sample.safetyReasons.length > 0
       ? sample.safetyReasons
       : result.warnings
+    if (result.state.crashed) this.replayRecorder.endFlight()
     this.renderer?.render(result.state)
     this.refreshTelemetry(
       result.droppedSteps,

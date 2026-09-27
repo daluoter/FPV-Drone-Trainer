@@ -26,7 +26,7 @@ I * omega_dot = torque - omega x (I * omega)
 omega_next = omega + omega_dot * dt
 ```
 
-Angular drag is a configurable body-axis damping torque. The model intentionally omits propwash, blade-element aerodynamics, battery sag, ground effect and collision geometry beyond the training-field ground plane.
+Angular drag is a configurable body-axis damping torque. The model intentionally omits propwash, blade-element aerodynamics, battery sag and ground effect. Ground contact uses a small finite-size support model described below; it is not a general-purpose rigid-body engine.
 
 ## Motors and forces
 
@@ -44,7 +44,9 @@ The mixer adds pilot-positive roll/pitch/yaw differentials to collective in the 
 
 ## Ground contact and safety
 
-Ground contact clamps position to the configured plane. A downward normal velocity is reflected with restitution, while tangential velocity is multiplied by the configured contact retention. This is a minimal collision response, not an artificial hover force.
+The ground is a plane at the configured `ground.heightM`. `src/drone/geometry.ts` is the shared source for the visual body/arms/motors/props, FPV mount and contact features. At each near-ground step the solver rotates those finite support points into world space and moves the COM only enough to keep the lowest feature 1 mm above the plane. The feature set includes body/nose/arm bounds, motor hubs, a 16-point propeller perimeter with a small conservative radius margin, and an 8 cm half-extent envelope around the rigid FPV mount. That camera envelope contains the supported maximum 120° FOV near plane at the renderer's 1 cm near distance for viewport aspects up to 4:1; mount-angle tuning does not change its bound. New/reset poses, including training spawns, are raised to the same support height, so nonzero ground levels and initially tilted bodies use the same geometry.
+
+This is a deliberately small ground-contact model, not a general-purpose rigid-body engine. A 2 mm contact slop keeps resting contact stable. Gentle downward contact uses the configured normal restitution and tangential retention; impacts below 0.5 m/s settle, and grounded angular rates receive 8 s⁻¹ contact damping. A downward contact-point normal speed of 4 m/s or faster, or a supported body tilt of 50° or more, latches a crash. The solver first resolves the pose to its supported contact height, then zeros linear/angular velocity and all motor command/target/actual thrust. The crashed pose remains fixed while simulation time advances; no automatic reset, teleport, or re-arm occurs. Runtime/training report the crash as disarmed/failure, and only explicit Reset clears the latch. Upright gentle landing and subsequent thrust takeoff remain possible; airborne Acro, including inverted flight, is not constrained by this ground model. These thresholds and geometry are transparent trainer assumptions, not damage estimates or claims of full airframe realism.
 
 Invalid configuration, timestep, command, non-finite state, negative simulation time, excessive speed or distance causes a safe reset to the validated spawn state and returns a warning. The fixed-step accumulator also reports invalid frame deltas and dropped catch-up steps. Warnings are surfaced to callers for developer HUDs; numerical failure is never silently propagated.
 

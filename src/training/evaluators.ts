@@ -115,6 +115,12 @@ function safeEvaluation(
 }
 
 function guardSample(sample: TrainingSample, context: TrainingEvaluationContext, referenceId: string): TrainingEvaluation | null {
+  if (sample.state.crashed) {
+    return safeEvaluation('failure', { elapsedSeconds: context.elapsedSeconds }, {
+      message: 'Attempt stopped: the drone crashed; reset and retry the lesson.',
+      hint: 'Retry to apply the lesson setup while disarmed, then arm explicitly after the countdown.',
+    })
+  }
   if (sample.armed === false) {
     return safeEvaluation('failure', { elapsedSeconds: context.elapsedSeconds }, {
       message: 'Attempt stopped: the flight was disarmed or focus was lost.',
