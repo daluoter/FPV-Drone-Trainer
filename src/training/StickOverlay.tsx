@@ -4,13 +4,6 @@ import type { NormalizedRcInput } from '../flight-controller'
 
 export type StickOverlayMode = 'live' | 'demonstration'
 
-export const DEMONSTRATION_MODE2_INPUT: NormalizedRcInput = {
-  roll: 0.2,
-  pitch: -0.16,
-  yaw: 0.14,
-  throttle: 0.58,
-}
-
 export interface Mode2StickOverlayProps {
   readonly input?: NormalizedRcInput | null
   readonly mode?: StickOverlayMode
@@ -102,7 +95,7 @@ export default function Mode2StickOverlay({
   className = '',
   compact = false,
 }: Mode2StickOverlayProps) {
-  const values = mode === 'demonstration' ? input ?? DEMONSTRATION_MODE2_INPUT : input
+  const values = input
   const live = values ?? { roll: 0, pitch: 0, yaw: 0, throttle: 0 }
   const rootClassName = ['mode2-stick-overlay', compact ? 'mode2-stick-overlay-compact' : '', className]
     .filter(Boolean)
@@ -138,7 +131,7 @@ export default function Mode2StickOverlay({
           verticalInverted={false}
         />
       </div>
-      {!values && mode === 'live' && <p className="mode2-stick-empty">Waiting for a normalized runtime sample.</p>}
+      {!values && <p className="mode2-stick-empty">{mode === 'demonstration' ? '等待示範時間軸資料。' : '等待有效操控資料。'}</p>}
     </section>
   )
 }

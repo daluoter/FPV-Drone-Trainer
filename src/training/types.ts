@@ -2,10 +2,12 @@ import type { DroneState } from '../drone'
 import type { Quaternion } from '../math/quaternion'
 import type { Vector3 } from '../math/vector'
 import type { NormalizedRcInput } from '../flight-controller'
+import type { TrainingAttemptContext } from './attempt'
 
 export const TRAINING_PHASES = [
   'READY',
   'COUNTDOWN',
+  'WAITING_FOR_ARM',
   'ACTIVE',
   'SUCCESS',
   'FAILED',
@@ -26,7 +28,7 @@ export interface TrainingSample {
   readonly timestampSeconds: number
   readonly state: DroneState
   readonly normalizedInput: NormalizedRcInput | null
-  /** Runtime arm state. Legacy synthetic callers may omit it; Phase 7 evaluators never pass without true telemetry. */
+  /** Runtime arm state. Missing legacy telemetry never starts or scores a session. */
   readonly armed?: boolean
 }
 
@@ -135,6 +137,7 @@ export interface LessonDefinition {
 }
 
 export interface TrainingResult {
+  readonly attemptContext?: TrainingAttemptContext
   readonly lessonId: string
   readonly sessionId: string
   readonly outcome: TrainingOutcome
@@ -157,6 +160,7 @@ export interface TrainingSetupRequest {
 }
 
 export interface TrainingMachineState {
+  readonly attemptContext?: TrainingAttemptContext
   readonly phase: TrainingPhase
   readonly lessonId: string | null
   readonly sessionId: string | null
@@ -165,6 +169,8 @@ export interface TrainingMachineState {
   readonly countdownStartedAtSeconds: number | null
   readonly countdownEndsAtSeconds: number | null
   readonly activeStartedAtSeconds: number | null
+  /** Early arm telemetry requires an observed disarm before a fresh arm can start this attempt. */
+  readonly requiresDisarmBeforeArm?: boolean
   readonly lastTimestampSeconds: number | null
   readonly lastSampleTimestampSeconds: number | null
   /** True once the pilot has supplied an armed fixed-step sample in this attempt. */
@@ -185,7 +191,7 @@ export interface TrainingMachineState {
 export type TrainingAction =
   | { readonly type: 'SELECT_LESSON'; readonly lessonId: string }
   | { readonly type: 'SET_SCENE_REFERENCES'; readonly sceneReferences: readonly TrainingSceneReference[] }
-  | { readonly type: 'START'; readonly timestampSeconds: number }
+  | { readonly type: 'START'; readonly timestampSeconds: number; readonly attemptContext?: TrainingAttemptContext }
   | { readonly type: 'TICK'; readonly timestampSeconds: number }
   | { readonly type: 'SAMPLE'; readonly sample: TrainingSample }
   | { readonly type: 'ABORT'; readonly timestampSeconds: number; readonly reason?: string }
@@ -194,6 +200,7 @@ export type TrainingAction =
   | { readonly type: 'RESET' }
 
 export interface TrainingMachineOptions {
+  readonly attemptContext?: TrainingAttemptContext
   readonly countdownDurationSeconds?: number
   readonly initialLessonId?: string | null
   readonly sceneReferences?: readonly TrainingSceneReference[]

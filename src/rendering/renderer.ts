@@ -111,6 +111,12 @@ export class FlightRenderer {
     this.cameraRig.mode = mode
   }
 
+  /** Update guidance without recreating the scene or changing simulation state. */
+  public setLessonTarget(lessonId: string | null): void {
+    if (this.disposed) return
+    this.flightScene.setLessonTarget(lessonId)
+  }
+
   /** Apply camera presentation settings only when the owning runtime is reset. */
   public setCameraOptions(options: Pick<CameraRigOptions, 'fpvFovDegrees' | 'fpvMountAngleDegrees'>): void {
     updateCameraRigOptions(this.cameraRig, options)

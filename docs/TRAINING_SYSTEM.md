@@ -1,8 +1,10 @@
-# Training system (Phase 7)
+# Training system
 
-Phase 7 enables exactly four state/trajectory lessons: **Hover**, **Coordinated
-Turn**, **Split-S**, and **Orbit / 刷鍋**. Straight-line, box-pattern, and
-figure-eight replacements are not part of this catalog.
+The catalog now includes **Takeoff**, **Hover**, **Coordinated Turn**, **Split-S**,
+and **Orbit / 刷鍋**. The original four stable lesson IDs remain unchanged; takeoff
+is presented first by priority. Landing, straight-line, box-pattern and
+figure-eight lessons remain planned. See [the learning contracts](LEARNING_CONTRACT.md)
+for current beginner workflow and [the roadmap](LEARNING_ROADMAP.md) for remaining work.
 
 The evaluator result is based on finite fixed-step drone state and geometry. A
 stick sequence cannot pass a lesson. Synthetic fixture success is deterministic
@@ -40,18 +42,18 @@ requires an explicit re-arm after focus or safety transitions.
 `reduceTrainingState` reducer:
 
 ```text
-READY -> COUNTDOWN -> ACTIVE -> SUCCESS/FAILED -> RESULT
+READY -> COUNTDOWN -> WAITING_FOR_ARM -> ACTIVE -> SUCCESS/FAILED -> RESULT
 ```
 
 - `READY` has a selected available lesson but no session or trajectory.
-- `COUNTDOWN` records the session identity and disarmed setup request. Samples
-  crossing this boundary are not evaluated. The UI tells the pilot to arm in
-  Free Flight during the countdown or before ACTIVE.
-- `ACTIVE` accepts strictly increasing simulation timestamps and finite state.
-  It waits visibly for the first armed sample if the pilot has not armed by the
-  countdown boundary; disarm after an armed sample stops the attempt. Evaluators
-  receive the current sample, scene references, checkpoints, and O(1)
-  `previousSample` / `previousEvaluation` seams.
+- `COUNTDOWN` records session identity and a disarmed setup request. Runtime and UI
+  block arming; countdown samples cannot evaluate the lesson.
+- `WAITING_FOR_ARM` begins after countdown with no active clock. It accepts the
+  first valid explicitly armed sample as elapsed zero. An early-armed countdown
+  sample requires a disarmed sample and fresh explicit arm before activation.
+- `ACTIVE` requires strictly increasing finite samples with `armed === true`.
+  Disarm, reset, crash, or runtime safety ends the attempt. Countdown and waiting
+  do not consume challenge time; pending keyboard/runtime resets clear the session.
 - `SUCCESS` and `FAILED` contain a terminal `TrainingResult`; `RESULT` is the
   presentation state after `SHOW_RESULT`.
 - `RETRY` and `RESET` clear trajectory, checkpoints, result, and timestamps,
@@ -94,6 +96,15 @@ custom tests may omit it, but the shipped four evaluators never pass without
 `armed === true`.
 
 ## Geometric lessons
+
+### Takeoff
+
+The target is two metres above the `takeoff-pad` reference, which is the spawn
+anchor (default world Y=0.5), not the physical pad surface. The prototype evaluator
+requires a low, level start, actual liftoff and 1.5 seconds of continuous settled
+flight near the target. It rejects crash/disarm, inconsistent position jumps,
+telemetry gaps and excessive drift/speed/tilt. Thresholds require human trial
+calibration. The amber presentation target matches the reference-relative height.
 
 ### Hover
 
@@ -168,3 +179,17 @@ prove that a human can pilot the maneuver in a browser or that the simplified
 physics model is realistic. A local headless Chromium smoke run covered the
 Free Flight renderer and context-loss safety path; physical-browser/GPU,
 physical transmitter, and human-pilot checks remain separate evidence gates.
+
+
+## Contextual progress and demonstrations
+
+New attempts snapshot rules/physics versions, full settings identity, preset,
+input source, challenge/practice label and assistance state. Contextual progress
+uses separate validated envelopes, preserving the original v1 document. Result
+and best-score views remain bound to the result context after changing settings;
+failed writes are visible and malformed history is not automatically overwritten.
+
+Four-axis and takeoff examples are bounded recordings generated through the real
+240 Hz simulator. They play through the existing independent ghost mechanism;
+pose, normalized input and captions share its timeline. They never feed training,
+never grant progress and remain labeled as simulated pending pilot review.

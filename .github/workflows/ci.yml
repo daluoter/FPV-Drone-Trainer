@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run tests
+        run: npm test
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck and build for the project URL
+        run: npm run build -- --base=/FPV-Drone-Trainer/
+      - name: Install browser test tools
+        run: |
+          python3 -m venv "$RUNNER_TEMP/fpv-browser-venv"
+          "$RUNNER_TEMP/fpv-browser-venv/bin/python" -m pip install -r scripts/browser-requirements.txt
+          "$RUNNER_TEMP/fpv-browser-venv/bin/python" -m playwright install --with-deps chromium
+      - name: Production browser smoke
+        run: >-
+          "$RUNNER_TEMP/fpv-browser-venv/bin/python" scripts/browser_smoke.py
+          --artifact-dir "$RUNNER_TEMP/fpv-browser-smoke"
+      - name: Upload failure diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-smoke-failure
+          path: ${{ runner.temp }}/fpv-browser-smoke/
+          if-no-files-found: ignore
+          retention-days: 7

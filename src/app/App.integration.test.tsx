@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createInitialDroneState, DEFAULT_DRONE_CONFIG } from '../drone'
 import type { FlightRuntimeFixedStepSample, FlightRuntimeTelemetry } from '../runtime'
 import { createHoverSuccessFixture } from '../training'
-import { TRAINING_PROGRESS_STORAGE_KEY } from '../training/progress'
+
 import type { TrainingSample } from '../training/types'
 import App from './App'
 
@@ -17,6 +17,7 @@ type RuntimeHarness = {
   readonly reconfigureCalls: number
   readonly fixedStepCalls: number
   arm(): boolean
+  reset(): void
   emitSample(sample: TrainingSample): void
   enterReplay(): boolean
   playReplay(): boolean
@@ -224,16 +225,24 @@ vi.mock('../runtime', () => {
 })
 
 function trainingSection(): HTMLElement {
-  const section = screen.getByRole('heading', { level: 2, name: /train the state/i }).closest('section')
+  const section = screen.getByRole('heading', { level: 2, name: /今天練習哪個動作/ }).closest('section')
   if (!section) throw new Error('Training section was not rendered')
   return section
 }
 
 function persistedAttempts(lessonId: string): number {
-  const raw = window.localStorage.getItem(TRAINING_PROGRESS_STORAGE_KEY)
-  if (!raw) return 0
-  const document = JSON.parse(raw) as { lessons?: Record<string, { attempts?: number }> }
-  return document.lessons?.[lessonId]?.attempts ?? 0
+  let attempts = 0
+  for (let i = 0; i < window.localStorage.length; i += 1) {
+    const key = window.localStorage.key(i)
+    if (!key?.startsWith('fpv-drone-trainer.training-progress.context.v1.')) continue
+    const saved = JSON.parse(window.localStorage.getItem(key) ?? '{}') as { progress?: { lessons?: Record<string, { attempts?: number }> } }
+    attempts += saved.progress?.lessons?.[lessonId]?.attempts ?? 0
+  }
+  return attempts
+}
+
+function emitCountdown(runtime: RuntimeHarness): void {
+  runtime.emitSample({ timestampSeconds: 3, state: createInitialDroneState(DEFAULT_DRONE_CONFIG), normalizedInput: { roll: 0, pitch: 0, yaw: 0, throttle: 0 }, armed: false })
 }
 
 function emitHoverSuccess(runtime: RuntimeHarness): void {
@@ -275,44 +284,98 @@ describe('integrated training/runtime UI boundaries', () => {
     runtimeHarness.instances.length = 0
   })
 
-  it('keeps result persistence, lesson isolation, retry/reset, replay, and tuning boundaries together', async () => {
+  it('clears a pending lesson when keyboard/runtime reset rewinds its clock', () => {
     render(<App />)
     const training = trainingSection()
     const runtime = runtimeHarness.instances[0]
-    if (!runtime) throw new Error('Mock runtime was not created')
+    fireEvent.click(within(training).getByRole('button', { name: '開始課程' }))
+    act(() => emitCountdown(runtime))
+    expect(within(training).getByText('等待解鎖')).toBeInTheDocument()
+    act(() => runtime.reset())
+    expect(within(training).getByText('準備選課')).toBeInTheDocument()
+    expect(within(training).queryByText('這次練習已結束')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('控制方式')).toBeEnabled()
+    expect(persistedAttempts('takeoff')).toBe(0)
+  })
 
-    fireEvent.click(within(training).getByRole('button', { name: /start countdown \/ reset/i }))
-    expect(screen.getByRole('button', { name: /apply \+ reset/i })).toBeDisabled()
+  it('keeps an unsaved result visible and explains storage failures', () => {
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota exceeded') })
+    try {
+      render(<App />)
+      const training = trainingSection()
+      const runtime = runtimeHarness.instances[0]
+      fireEvent.change(within(training).getByLabelText('選擇課程'), { target: { value: 'hover' } })
+      fireEvent.click(within(training).getByRole('button', { name: '開始課程' }))
+      act(() => emitCountdown(runtime))
+      fireEvent.click(screen.getByRole('button', { name: /^Arm$/ }))
+      act(() => emitHoverSuccess(runtime))
+      expect(within(training).getByText('本課完成！')).toBeInTheDocument()
+      expect(within(training).getByText(/結果仍在本次頁面，但未成功保存/)).toBeInTheDocument()
+      expect(persistedAttempts('hover')).toBe(0)
+    } finally { write.mockRestore() }
+  })
+
+  it('keeps result and best-score provenance together after switching settings', () => {
+    render(<App />)
+    const training = trainingSection()
+    const runtime = runtimeHarness.instances[0]
+    fireEvent.change(within(training).getByLabelText('選擇課程'), { target: { value: 'hover' } })
+    fireEvent.click(within(training).getByRole('button', { name: '開始課程' }))
+    act(() => emitCountdown(runtime))
     fireEvent.click(screen.getByRole('button', { name: /^Arm$/ }))
     act(() => emitHoverSuccess(runtime))
-    expect(runtime.fixedStepCalls).toBe(36)
+    fireEvent.click(screen.getByRole('button', { name: /^Disarm$/ }))
+    fireEvent.change(screen.getByLabelText('操控設定'), { target: { value: 'standard' } })
+    expect(within(training).getByText(/本次條件：新手設定/)).toBeInTheDocument()
+    expect(within(training).getByText(/本次條件已練 1 次/)).toBeInTheDocument()
+    fireEvent.click(within(training).getByRole('button', { name: '再練一次' }))
+    expect(within(training).getByText(/本次條件已練 0 次/)).toBeInTheDocument()
+  })
 
-    await waitFor(() => expect(within(training).getByText('Lesson passed')).toBeInTheDocument())
-    expect(within(training).getByText('Result')).toBeInTheDocument()
+  it('keeps result persistence, lesson isolation, retry/reset, replay, and tuning boundaries together', async () => {
+    render(<App />)
+    const training = trainingSection()
+    fireEvent.change(within(training).getByLabelText('選擇課程'), { target: { value: 'hover' } })
+    fireEvent.click(screen.getByText('進階調參與舊版紀錄'))
+    const runtime = runtimeHarness.instances[0]
+    if (!runtime) throw new Error('Mock runtime was not created')
+
+    fireEvent.click(within(training).getByRole('button', { name: '開始課程' }))
+    expect(screen.getByRole('button', { name: /apply \+ reset/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Arm$/ })).toBeDisabled()
+    act(() => emitCountdown(runtime))
+    fireEvent.click(screen.getByRole('button', { name: /^Arm$/ }))
+    act(() => emitHoverSuccess(runtime))
+    expect(runtime.fixedStepCalls).toBe(37)
+
+    await waitFor(() => expect(within(training).getByText('本課完成！')).toBeInTheDocument())
+    expect(within(training).getByText('練習結果')).toBeInTheDocument()
     expect(persistedAttempts('hover')).toBe(1)
     act(() => emitHoverSuccess(runtime))
     expect(persistedAttempts('hover')).toBe(1)
 
-    fireEvent.click(within(training).getByRole('button', { name: /coordinated turn/i }))
-    expect(within(training).getByRole('heading', { level: 3, name: 'Coordinated Turn' })).toBeInTheDocument()
-    fireEvent.click(within(training).getByRole('button', { name: /start countdown \/ reset/i }))
+    fireEvent.change(within(training).getByLabelText('選擇課程'), { target: { value: 'coordinated-turn' } })
+    expect(within(training).getByRole('heading', { level: 3, name: '協調轉彎' })).toBeInTheDocument()
+    fireEvent.click(within(training).getByRole('button', { name: '開始課程' }))
     expect(screen.getByRole('button', { name: /apply \+ reset/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Arm$/ })).toBeDisabled()
+    act(() => emitCountdown(runtime))
     fireEvent.click(screen.getByRole('button', { name: /^Arm$/ }))
     act(() => emitCoordinatedTurnFailure(runtime))
 
-    await waitFor(() => expect(within(training).getByText('Attempt recorded')).toBeInTheDocument())
-    expect(within(training).getByText('Result')).toBeInTheDocument()
+    await waitFor(() => expect(within(training).getByText('這次練習已結束')).toBeInTheDocument())
+    expect(within(training).getByText('練習結果')).toBeInTheDocument()
     expect(persistedAttempts('coordinated-turn')).toBe(1)
 
-    fireEvent.click(within(training).getByRole('button', { name: /^Retry$/ }))
-    expect(within(training).queryByText('Attempt recorded')).not.toBeInTheDocument()
-    fireEvent.click(within(training).getByRole('button', { name: /start countdown \/ reset/i }))
-    fireEvent.click(within(training).getByRole('button', { name: /^Reset$/ }))
-    expect(within(training).getByText('Ready')).toBeInTheDocument()
+    fireEvent.click(within(training).getByRole('button', { name: '再練一次' }))
+    expect(within(training).queryByText('這次練習已結束')).not.toBeInTheDocument()
+    fireEvent.click(within(training).getByRole('button', { name: '開始課程' }))
+    fireEvent.click(within(training).getByRole('button', { name: '停止練習' }))
+    expect(within(training).getByText('準備選課')).toBeInTheDocument()
     expect(persistedAttempts('coordinated-turn')).toBe(1)
 
-    fireEvent.click(within(training).getByRole('button', { name: /split-s/i }))
-    expect(within(training).getByRole('heading', { level: 3, name: 'Split-S' })).toBeInTheDocument()
+    fireEvent.change(within(training).getByLabelText('選擇課程'), { target: { value: 'split-s' } })
+    expect(within(training).getByRole('heading', { level: 3, name: 'Split-S 翻轉下降' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /enter replay/i })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: /enter replay/i }))
     fireEvent.click(screen.getByRole('button', { name: /^Play$/ }))
@@ -320,10 +383,11 @@ describe('integrated training/runtime UI boundaries', () => {
     expect(persistedAttempts('coordinated-turn')).toBe(1)
 
     const apply = screen.getByRole('button', { name: /apply \+ reset/i })
-    expect(apply).toBeEnabled()
-    fireEvent.click(apply)
+    expect(apply).toBeDisabled()
     expect(runtime.reconfigureCalls).toBe(0)
     fireEvent.click(screen.getByRole('button', { name: /exit playback/i }))
+    expect(apply).toBeEnabled()
+    fireEvent.click(apply)
     await waitFor(() => expect(runtime.reconfigureCalls).toBeGreaterThan(0))
   })
 })

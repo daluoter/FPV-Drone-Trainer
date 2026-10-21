@@ -106,6 +106,7 @@ interface SampledInput {
 
 const DEFAULT_TELEMETRY_INTERVAL_MS = 100
 const DEFAULT_CAMERA_MODE: FlightRuntimeTelemetry['cameraMode'] = 'fpv'
+const TRAINING_ARM_BLOCKED_REASON = 'Training countdown requires a disarmed drone; wait for the explicit arm prompt.'
 
 function profileKey(profile: ControllerProfile | null): string | null {
   if (!profile) return null
@@ -178,6 +179,7 @@ export class FlightRuntime {
   private replayPlayback: ReplayPlayback | null = null
   private controllerProfile: ControllerProfile | null
   private tuningLocked = false
+  private trainingArmBlocked = false
   private renderingAvailable: boolean
   private renderingSafetyReason: string | null = null
   private source: FlightInputSource = 'controller'
@@ -406,7 +408,24 @@ export class FlightRuntime {
     return this.tuningLocked
   }
 
+  /** Countdown owns this lock; releasing it still requires an explicit arm. */
+  public setTrainingArmBlocked(blocked: boolean): void {
+    if (this.trainingArmBlocked === blocked) return
+    this.trainingArmBlocked = blocked
+    if (blocked) {
+      this.keyboard.releaseKeys()
+      this.disarm(TRAINING_ARM_BLOCKED_REASON)
+      return
+    }
+    this.lastSafetyReasons = this.lastSafetyReasons.filter((reason) => reason !== TRAINING_ARM_BLOCKED_REASON)
+    this.emitTelemetry(true)
+  }
+
   public arm(): boolean {
+    if (this.trainingArmBlocked) {
+      this.disarm(TRAINING_ARM_BLOCKED_REASON)
+      return false
+    }
     if (this.simulation.getState().crashed) {
       this.lastSafetyReasons = ['Drone crashed; reset is required before re-arming.']
       this.emitTelemetry(true)

@@ -31,6 +31,8 @@ export interface FlightScene {
   /** Apply an independent presentation ghost; this never mutates DroneState. */
   applyGhost(state: Pick<ReplayGhostState, 'positionM' | 'orientation'>): void
   setReplayVisible(visible: boolean): void
+  /** Lesson-specific visual guidance; evaluator anchors remain unchanged. */
+  setLessonTarget(lessonId: string | null): void
   /** Presentation-only bounded path trace; evaluators remain renderer-independent. */
   setTrainingPath(path: readonly Vector3[]): void
   setReplayPath(path: readonly Vector3[]): void
@@ -279,6 +281,34 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   const referenceSet = createReferenceObjects(config.spawnPositionM)
   for (const reference of referenceSet.objects) scene.add(reference)
 
+  // Takeoff asks for +2 m relative to the pad's spawn anchor, while Hover's
+  // separate evaluator anchor stays at 3 m. This is a visual guide only.
+  const takeoffHeightTarget = new THREE.Group()
+  takeoffHeightTarget.name = 'takeoff-height-target'
+  takeoffHeightTarget.position.set(
+    config.spawnPositionM.x,
+    config.spawnPositionM.y + 2,
+    config.spawnPositionM.z,
+  )
+  takeoffHeightTarget.visible = false
+  const targetMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffc978,
+    transparent: true,
+    opacity: 0.6,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  })
+  const targetRing = new THREE.Mesh(new THREE.RingGeometry(1.12, 1.2, 64), targetMaterial)
+  targetRing.name = 'takeoff-height-ring'
+  targetRing.rotation.x = -Math.PI / 2
+  const targetBand = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.2, 1.2, 0.08, 64, 1, true),
+    targetMaterial.clone(),
+  )
+  targetBand.name = 'takeoff-height-band'
+  takeoffHeightTarget.add(targetRing, targetBand)
+  scene.add(takeoffHeightTarget)
+
   const padReference: FlightSceneReference = {
     id: 'takeoff-pad',
     kind: 'pad',
@@ -353,6 +383,13 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     if (!visible) replayPath.visible = false
   }
 
+  const setLessonTarget = (lessonId: string | null): void => {
+    const isTakeoff = lessonId === 'takeoff'
+    takeoffHeightTarget.visible = isTakeoff
+    const hoverZone = referenceById.get('hover-zone')
+    if (hoverZone) hoverZone.object.visible = !isTakeoff
+  }
+
   const setPath = (line: THREE.Line, path: readonly Vector3[], yOffset: number): void => {
     const maximumPoints = 1_200
     const stride = Math.max(1, Math.ceil(path.length / maximumPoints))
@@ -392,6 +429,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     applyState,
     applyGhost,
     setReplayVisible,
+    setLessonTarget,
     setTrainingPath,
     setReplayPath,
     dispose: () => disposeFlightScene(scene),

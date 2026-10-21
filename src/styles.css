@@ -2694,3 +2694,70 @@ h1 em {
   color: var(--faint);
   font-size: 0.62rem;
 }
+
+/* Learning workspace: one persistent flight viewport and concise lesson controls. */
+.school-shell { max-width: 1520px; padding: 12px 24px 32px; }
+.school-shell main { padding: 10px 0 20px; }
+.school-shell .topbar { min-height: 56px; padding: 8px 0; }
+.school-navigation { display: flex; flex-wrap: wrap; gap: 8px; }
+.school-navigation button { border: 1px solid var(--border, #d8d4ca); background: transparent; color: inherit; border-radius: 8px; padding: 9px 14px; cursor: pointer; }
+.school-navigation button[aria-pressed="true"] { background: #233e36; color: #fff; }
+.school-navigation button:disabled { opacity: .5; cursor: not-allowed; }
+.school-introduction { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 14px 0; }
+.school-introduction .eyebrow { margin: 0 0 4px; font-size: 11px; }
+.school-introduction h1 { font-size: clamp(21px, 2.1vw, 30px); line-height: 1.3; margin: 0; letter-spacing: -.03em; }
+.school-introduction > p { max-width: 520px; font-size: 13px; line-height: 1.7; margin: 0; }
+.school-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 0; font-size: 12px; }
+.school-toolbar select, .school-course-panel select { max-width: 100%; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface-raised); padding: 9px; color: var(--text); font: inherit; }
+.school-toolbar > span { color: var(--muted); }
+.school-flight { margin-top: 8px; padding-top: 12px; }
+.school-flight .free-flight-heading { margin-bottom: 10px; }
+.school-flight .free-flight-heading h2 { font-size: 18px; margin: 3px 0; }
+.school-flight .free-flight-heading p:not(.panel-kicker) { font-size: 12px; margin: 4px 0; }
+.school-demo-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding: 8px 0 12px; font-size: 12px; }
+.school-demo-bar > span { color: var(--muted); }
+.school-flight .free-flight-layout { display: grid; grid-template-columns: 280px minmax(320px, 1fr) 180px; align-items: start; gap: 14px; }
+.school-flight:not(.has-lessons) .free-flight-layout { grid-template-columns: minmax(320px, 1fr) 200px; }
+.school-flight .free-flight-viewport { min-height: 220px; height: clamp(240px, 34vh, 450px); }
+.school-flight .flight-canvas { height: 100%; min-height: 0; }
+.school-flight .flight-controls { padding: 10px; gap: 12px; }
+.school-flight .flight-controls label, .school-flight .flight-control-group > span { font-size: 11px; }
+.school-flight .flight-replay-card { margin-top: 10px; padding: 12px; }
+.school-flight .flight-replay-note { font-size: 11px; line-height: 1.6; }
+.school-flight .flight-side-panel { min-width: 0; }
+.school-flight .mode2-stick-overlay { padding: 10px; }
+.school-flight .mode2-stick-heading, .school-flight .mode2-stick-axis-labels { font-size: 9px; }
+.school-flight .mode2-stick-overlay-heading h3 { font-size: 12px; }
+.school-flight .mode2-stick-pads { gap: 6px; }
+.school-flight .mode2-stick-pad { min-height: 50px; }
+.school-flight .flight-safety-card { padding: 10px; font-size: 11px; }
+.school-flight .flight-warning { font-size: 10px; overflow-wrap: anywhere; }
+.school-course-panel { background: var(--surface); color: var(--text); border: 1px solid var(--line-strong); border-radius: 12px; padding: 16px; max-height: calc(100vh - 300px); overflow: auto; }
+.school-course-heading h2 { font-size: 16px; line-height: 1.5; margin: 4px 0 12px; }
+.school-lesson-label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.school-course-panel select { width: 100%; font-size: 12px; }
+.school-current-lesson h3 { font-size: 17px; margin: 10px 0 6px; }
+.school-current-lesson p, .school-next-action { font-size: 12px; line-height: 1.7; }
+.school-phase { display: inline-block; font-size: 11px; color: #a4db89; margin-top: 14px; }
+.school-checkpoints { list-style: none; padding: 0; font-size: 12px; line-height: 1.9; }
+.school-checkpoints .is-complete { color: var(--accent); }
+.school-course-actions { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0; }
+.school-course-actions .lab-button { font-size: 12px; padding: 10px 12px; }
+.school-metrics { display: grid; gap: 6px; margin: 10px 0; font-size: 12px; }
+.school-metrics > div { display: flex; justify-content: space-between; gap: 12px; }
+.school-metrics dd { margin: 0; font-variant-numeric: tabular-nums; }
+.school-live-hint, .school-demo-cue { background: #e9f2e9; color: #264e3c; border-radius: 8px; padding: 10px; line-height: 1.7; font-size: 12px; }
+.school-viewport-hint { position: absolute; left: 12px; right: 12px; bottom: 12px; background: #203b35e8; color: #fff; padding: 10px 14px; border-radius: 8px; font-size: 13px; line-height: 1.6; }
+.school-result { padding: 12px; border-radius: 8px; background: #203d31; color: #e0f5dc; font-size: 12px; line-height: 1.6; }
+.school-progress, .school-prototype-note, .school-lesson-notes { font-size: 11px; line-height: 1.7; color: var(--muted); }
+.school-lesson-notes summary, .school-settings summary { cursor: pointer; padding: 8px 0; }
+.school-lesson-notes ul { padding-left: 18px; }
+.school-settings { margin: 18px 0; border-top: 1px solid #d8dace; padding: 8px 0; }
+.school-settings > summary { font-size: 14px; font-weight: 600; }
+.school-help { font-size: 13px; line-height: 1.8; }
+.school-settings .controller-lab { margin-top: 16px; }
+.school-shell button:focus-visible, .school-shell select:focus-visible, .school-shell summary:focus-visible { outline: 3px solid #39866a; outline-offset: 3px; }
+@media (min-width: 1500px) { .school-flight .free-flight-viewport { height: 420px; } }
+@media (max-width: 1100px) { .school-flight .free-flight-layout { grid-template-columns: 260px minmax(300px, 1fr); } .school-flight .flight-side-panel { grid-column: 2; } .school-introduction > p { max-width: 380px; } }
+@media (max-width: 760px) { .school-shell { padding: 10px 14px; } .school-introduction { display: block; } .school-introduction > p { margin-top: 10px; } .school-flight .free-flight-layout, .school-flight:not(.has-lessons) .free-flight-layout { display: flex; flex-direction: column; } .school-lesson-slot, .school-flight .free-flight-main, .school-flight .flight-side-panel { width: 100%; } .school-course-panel { max-height: none; } .school-flight .flight-side-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } }
+@media (prefers-reduced-motion: reduce) { .school-shell * { scroll-behavior: auto !important; } }

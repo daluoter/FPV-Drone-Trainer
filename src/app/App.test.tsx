@@ -1,54 +1,40 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-
 import App from './App'
 
-describe('application shell', () => {
-  it('communicates the safe foundation state', () => {
+describe('beginner flight school', () => {
+  it('starts with a clear first lesson and preserves all existing lessons', () => {
     render(<App />)
-
-    expect(
-      screen.getByRole('heading', {
-        level: 1,
-        name: /train the inputs before you trust the drone/i,
-      }),
-    ).toBeInTheDocument()
-    expect(screen.getByText('Phase 8 / Replay build')).toBeInTheDocument()
-    expect(screen.getByText('Controller Lab reads only raw input until calibration proves it safe.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /controller lab/i })).toBeEnabled()
-    expect(screen.getByRole('button', { name: /free flight/i })).toBeEnabled()
-    expect(screen.getByRole('heading', { name: /tune the response, then reset/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /apply \+ reset/i })).toBeEnabled()
+    expect(screen.getByRole('heading', { level: 1, name: '小幅操作，一步步學會飛。' })).toBeInTheDocument()
+    expect(screen.getByLabelText('選擇課程')).toHaveValue('takeoff')
+    expect(screen.getAllByRole('option').filter((option) => /L0[126]|L1[34]/.test(option.textContent ?? ''))).toHaveLength(5)
+    expect(screen.getByText(/機體不會自動回平或煞停/)).toBeInTheDocument()
+    expect(screen.getByLabelText('操控設定')).toHaveValue('beginner')
   })
 
-  it('exposes the implemented signal path without starting simulation', () => {
+  it('keeps the same canvas while changing workspace and opens calibration on request', () => {
     render(<App />)
-
-    expect(screen.getByText('RC device')).toBeInTheDocument()
-    expect(screen.getByText('Renderer')).toBeInTheDocument()
-    expect(screen.getByLabelText('Implemented simulator data flow')).toBeInTheDocument()
-    expect(screen.getByText('Free Flight runtime / scroll above')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 2, name: /make the transmitter boring/i })).toBeInTheDocument()
-    expect(screen.getByText(/Gamepad API unavailable/i)).toBeInTheDocument()
+    const canvas = screen.getByLabelText('Free Flight 3D scene')
+    fireEvent.click(screen.getByRole('button', { name: '自由飛行' }))
+    expect(screen.queryByLabelText('選擇課程')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
+    fireEvent.click(screen.getByRole('button', { name: '開始學飛' }))
+    expect(screen.getByLabelText('選擇課程')).toHaveValue('takeoff')
+    fireEvent.click(screen.getByRole('button', { name: '設備與校正' }))
+    expect(screen.getByRole('heading', { name: /make the transmitter boring/i })).toBeVisible()
   })
 
-  it('locks tuning actions during countdown and permits them after the lesson is reset', () => {
+  it('locks inputs and settings throughout countdown and releases them on explicit stop', () => {
     render(<App />)
-
-    fireEvent.click(screen.getByRole('button', { name: /start countdown \/ reset/i }))
-    const apply = screen.getByRole('button', { name: /apply \+ reset/i })
-    const resetDefaults = screen.getByRole('button', { name: /reset defaults/i })
-    expect(apply).toBeDisabled()
-    expect(resetDefaults).toBeDisabled()
-    expect(screen.getByRole('status')).toHaveTextContent(/locked while a lesson is counting down or active/i)
-
-    const trainingSection = screen.getByRole('heading', { level: 2, name: /train the state/i }).closest('section')
-    if (!trainingSection) throw new Error('Training section was not rendered')
-    fireEvent.click(within(trainingSection).getByRole('button', { name: /^Reset$/ }))
-
-    expect(apply).toBeEnabled()
-    expect(resetDefaults).toBeEnabled()
-    fireEvent.click(apply)
-    expect(screen.getByRole('status')).toHaveTextContent(/saved and queued/i)
+    const training = document.getElementById('training')!
+    fireEvent.click(within(training).getByRole('button', { name: '開始課程' }))
+    expect(screen.getByRole('button', { name: /^Arm$/ })).toBeDisabled()
+    expect(screen.getByLabelText('控制方式')).toBeDisabled()
+    expect(screen.getByLabelText('操控設定')).toBeDisabled()
+    expect(screen.getByLabelText('選擇課程')).toBeDisabled()
+    fireEvent.click(within(training).getByRole('button', { name: '停止練習' }))
+    expect(screen.getByText('準備選課')).toBeInTheDocument()
+    expect(screen.getByLabelText('控制方式')).toBeEnabled()
+    expect(screen.getByLabelText('操控設定')).toBeEnabled()
   })
 })

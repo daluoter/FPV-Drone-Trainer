@@ -8,6 +8,7 @@ import {
   validateTrainingProgress,
 } from './progress'
 import type { TrainingResult, TrainingStorageLike } from './types'
+import { fingerprintTrainingSettings, trainingAttemptContextKey, type TrainingAttemptContext } from './attempt'
 
 class MemoryStorage implements TrainingStorageLike {
   private readonly values = new Map<string, string>()
@@ -40,6 +41,19 @@ function result(overrides: Partial<TrainingResult> = {}): TrainingResult {
     metrics: { driftM: 0.12, maxTiltDegrees: 4.5 },
     message: 'Passed',
     hint: null,
+    ...overrides,
+  }
+}
+
+function context(overrides: Partial<TrainingAttemptContext> = {}): TrainingAttemptContext {
+  return {
+    rulesVersion: 1,
+    physicsVersion: 1,
+    presetId: 'beginner',
+    settingsFingerprint: fingerprintTrainingSettings({ rates: 250, camera: 10 }),
+    inputSource: 'controller',
+    mode: 'challenge',
+    assistance: 'none',
     ...overrides,
   }
 }
@@ -112,5 +126,72 @@ describe('training progress persistence', () => {
     const failed = recordTrainingResult(createDefaultTrainingProgress(['hover']), result({ outcome: 'FAILED', score: 10 }), '2026-01-03T00:00:00.000Z')
     expect(failed.lessons.hover?.completed).toBe(false)
     expect(failed.lessons.hover?.best).toBeNull()
+  })
+
+  it('retains legacy progress unchanged while storing new attempts in their exact conditions', () => {
+    const storage = new MemoryStorage()
+    const store = new TrainingProgressStore(storage)
+    store.recordResult(result(), '2026-01-01T00:00:00.000Z')
+    const legacy = storage.getItem(TRAINING_PROGRESS_STORAGE_KEY)
+    const controller = context()
+    const keyboard = context({ inputSource: 'keyboard' })
+
+    const recorded = store.recordResult(result({ sessionId: 'context:1', score: 70, attemptContext: controller }))
+    expect(recorded.saved).toBe(true)
+    expect(recorded.progress.lessons.hover?.best?.score).toBe(70)
+    expect(storage.getItem(TRAINING_PROGRESS_STORAGE_KEY)).toBe(legacy)
+    expect(store.load().progress.lessons.hover?.best?.score).toBe(88)
+    expect(store.load(controller).progress.lessons.hover?.attempts).toBe(1)
+    expect(store.load(keyboard).progress.lessons.hover?.attempts).toBe(0)
+    expect(JSON.parse(storage.getItem(trainingAttemptContextKey(controller)) ?? '{}').context).toEqual(controller)
+
+    store.recordResult(result({ sessionId: 'keyboard:1', score: 95, attemptContext: keyboard }))
+    expect(store.load(controller).progress.lessons.hover?.best?.score).toBe(70)
+    expect(store.load(keyboard).progress.lessons.hover?.best?.score).toBe(95)
+    expect(store.clear(keyboard).saved).toBe(true)
+    expect(store.load(keyboard).loaded).toBe(false)
+    expect(store.load(controller).loaded).toBe(true)
+    expect(storage.getItem(TRAINING_PROGRESS_STORAGE_KEY)).toBe(legacy)
+  })
+
+  it('separates practice, presets, and settings while never inferring mastery from legacy records', () => {
+    const store = new TrainingProgressStore(new MemoryStorage())
+    const base = context()
+    store.recordResult(result({ attemptContext: base }))
+    for (const variant of [
+      context({ mode: 'practice' }),
+      context({ presetId: 'standard' }),
+      context({ settingsFingerprint: fingerprintTrainingSettings({ rates: 500, camera: 20 }) }),
+    ]) {
+      expect(store.load(variant).progress.lessons.hover?.completed).toBe(false)
+    }
+    expect(store.load().progress.lessons.hover?.completed).toBe(false)
+  })
+
+  it('preserves malformed stored data on a failed record rather than overwriting it', () => {
+    const storage = new MemoryStorage()
+    const store = new TrainingProgressStore(storage)
+    const source = context()
+    for (const [key, attempt] of [
+      [TRAINING_PROGRESS_STORAGE_KEY, result()],
+      [trainingAttemptContextKey(source), result({ attemptContext: source })],
+    ] as const) {
+      storage.setItem(key, '{recoverable-broken-json')
+      expect(store.recordResult(attempt).saved).toBe(false)
+      expect(storage.getItem(key)).toBe('{recoverable-broken-json')
+    }
+  })
+
+  it('rejects mismatched or unsupported context envelopes without touching legacy data', () => {
+    const storage = new MemoryStorage()
+    const store = new TrainingProgressStore(storage)
+    const source = context()
+    const key = trainingAttemptContextKey(source)
+    storage.setItem(key, JSON.stringify({ schemaVersion: 1, context: context({ inputSource: 'keyboard' }), progress: createDefaultTrainingProgress() }))
+    expect(store.load(source).loaded).toBe(false)
+    expect(store.load(source).errors.join(' ')).toMatch(/context.*incompatible/i)
+    const invalid = { ...source, rulesVersion: 2 } as unknown as TrainingAttemptContext
+    expect(store.recordResult(result({ attemptContext: invalid })).saved).toBe(false)
+    expect(storage.getItem(TRAINING_PROGRESS_STORAGE_KEY)).toBeNull()
   })
 })

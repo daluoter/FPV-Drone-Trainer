@@ -14,7 +14,9 @@ import {
   type FlightRuntimeTelemetry,
 } from '../runtime'
 import Mode2StickOverlay from '../training/StickOverlay'
-import type { TrainingSample, TrainingSceneReference, TrainingSetupRequest } from '../training/types'
+import { trainingHint } from '../training/feedback'
+import { createTeachingDemonstration, teachingCueAt, type TeachingDemonstration, type TeachingDemonstrationKind } from '../training/demonstrations'
+import type { TrainingMachineState, TrainingSample, TrainingSceneReference, TrainingSetupRequest } from '../training/types'
 import { flightSimulationConfigFromTuning, type TuningSettings } from '../tuning'
 import { REPLAY_SPEEDS, type ReplaySpeed } from '../replay'
 
@@ -27,6 +29,10 @@ export interface FreeFlightProps {
   readonly trainingSettingsLocked?: boolean
   readonly trainingSetupRequest?: TrainingSetupRequest | null
   readonly trainingPath?: readonly TrainingSample[]
+  readonly onTrainingReset?: () => void
+  readonly trainingArmBlocked?: boolean
+  readonly trainingState?: TrainingMachineState | null
+  readonly lessonPanel?: ReactNode
   readonly onSceneReferences?: (references: readonly TrainingSceneReference[]) => void
   readonly onFixedStep?: (sample: FlightRuntimeFixedStepSample) => void
   readonly onTelemetry?: (telemetry: FlightRuntimeTelemetry) => void
@@ -81,6 +87,10 @@ export default function FreeFlight({
   trainingSettingsLocked = false,
   trainingSetupRequest = null,
   trainingPath = [],
+  onTrainingReset,
+  trainingArmBlocked = false,
+  trainingState = null,
+  lessonPanel = null,
   onSceneReferences,
   onFixedStep,
   onTelemetry,
@@ -93,9 +103,11 @@ export default function FreeFlight({
   const [renderingState, setRenderingState] = useState<FreeFlightRenderingState>('initializing')
   const [renderingError, setRenderingError] = useState<string | null>(null)
   const [rendererRetryKey, setRendererRetryKey] = useState(0)
+  const [demonstration, setDemonstration] = useState<TeachingDemonstration | null>(null)
+  const [demoError, setDemoError] = useState<string | null>(null)
   const [source, setSource] = useState<FlightInputSource>('controller')
   const [cameraMode, setCameraMode] = useState<CameraMode>('fpv')
-  const [showHud, setShowHud] = useState(true)
+  const [showHud, setShowHud] = useState(false)
   const fixedStepListenerRef = useRef(onFixedStep)
   const telemetryListenerRef = useRef(onTelemetry)
   const sceneReferencesListenerRef = useRef(onSceneReferences)
@@ -162,12 +174,14 @@ export default function FreeFlight({
       },
       onFixedStep: (sample) => fixedStepListenerRef.current?.(sample),
     })
+    runtime.setTrainingArmBlocked?.(trainingArmBlocked)
     runtime.setRenderingAvailable?.(currentRendererStatus.kind === 'ready', currentRendererStatus.message)
     runtime.setInputSource(source)
     runtime.setCameraMode(cameraMode)
     runtime.setTuningLocked(trainingSettingsLocked)
     runtimeRef.current = runtime
     rendererRef.current = renderer
+    renderer.setLessonTarget?.(trainingState?.lessonId ?? null)
     appliedSettingsRef.current = settings
     sceneReferencesListenerRef.current?.(renderer.flightScene.sceneReferences.map((reference) => ({
       id: reference.id,
@@ -207,6 +221,10 @@ export default function FreeFlight({
   }, [poller, rendererRetryKey])
 
   useEffect(() => {
+    runtimeRef.current?.setTrainingArmBlocked?.(trainingArmBlocked)
+  }, [trainingArmBlocked, rendererRetryKey])
+
+  useEffect(() => {
     const runtime = runtimeRef.current
     runtime?.setTuningLocked(trainingSettingsLocked)
   }, [trainingSettingsLocked])
@@ -242,6 +260,10 @@ export default function FreeFlight({
   }, [trainingDisarmKey])
 
   useEffect(() => {
+    rendererRef.current?.setLessonTarget?.(trainingState?.lessonId ?? null)
+  }, [trainingState?.lessonId, rendererRetryKey])
+
+  useEffect(() => {
     rendererRef.current?.setTrainingPath(trainingPath.map((sample) => sample.state.positionM))
   }, [trainingPath])
 
@@ -258,12 +280,14 @@ export default function FreeFlight({
   }, [cameraMode])
 
   const retryRendering = (): void => {
+    if (trainingSettingsLocked) onTrainingReset?.()
     setRenderingState('initializing')
     setRenderingError(null)
     setRendererRetryKey((key) => key + 1)
   }
 
   const arm = (): void => {
+    if (trainingArmBlocked) return
     const runtime = runtimeRef.current
     if (!runtime || renderingState !== 'ready') return
     runtime.arm()
@@ -278,6 +302,7 @@ export default function FreeFlight({
   }
 
   const exitReplay = (): void => {
+    setDemonstration(null)
     const runtime = runtimeRef.current
     if (!runtime) return
     runtime.exitReplay()
@@ -320,12 +345,28 @@ export default function FreeFlight({
   }
 
   const reset = (): void => {
+    setDemonstration(null)
+    if (trainingSettingsLocked && onTrainingReset) { onTrainingReset(); return }
     const runtime = runtimeRef.current
     if (!runtime) return
     runtime.reset()
     setTelemetry(runtime.getTelemetry())
   }
 
+  const startDemonstration = (kind: TeachingDemonstrationKind): void => {
+    const runtime = runtimeRef.current
+    if (!runtime || trainingSettingsLocked || telemetry?.armed) return
+    try {
+      if (runtime.isReplayActive?.()) runtime.exitReplay()
+      const demo = createTeachingDemonstration(settings, kind)
+      if (!runtime.enterReplay(demo.recording)) return
+      setDemonstration(demo)
+      setDemoError(null)
+      runtime.playReplay()
+      setTelemetry(runtime.getTelemetry())
+    } catch { setDemoError('目前設定無法建立示範，請選擇新手預設後再試。') }
+  }
+  const playbackInput = telemetry?.replay.active ? runtimeRef.current?.getReplayPlayback?.()?.getGhostState()?.normalizedInput ?? null : telemetry?.normalizedInput
   const channels = channelValues(telemetry)
   const rawAxes = telemetry?.rawInput?.axes ?? []
   const processed = telemetry?.processedInput
@@ -333,23 +374,26 @@ export default function FreeFlight({
   const pid = telemetry?.pid
 
   return (
-    <section className="free-flight-section" id="free-flight" aria-labelledby="free-flight-title">
+    <section className={`free-flight-section school-flight ${lessonPanel ? 'has-lessons' : ''}`} id="free-flight" aria-labelledby="free-flight-title">
       <div className="free-flight-heading">
         <div>
-          <p className="panel-kicker">Phase 5 / Free Flight</p>
-          <h2 id="free-flight-title">Fly the state, not the shortcut.</h2>
-          <p>
-            The simulation and renderer run outside React at a fixed 240 Hz. Arm is an explicit
-            handoff: calibrated RC input needs a fresh session gate, neutral sticks, and low throttle.
-            Tuning changes are applied only through a disarmed reset.
-          </p>
+          <p className="panel-kicker">練習工作區 · Acro</p>
+          <h2 id="free-flight-title">看懂動作，再親手試一次。</h2>
+          <p>Arm 解鎖開始飛行，Disarm 停止馬達；課程倒數後等待你準備完成。示範與回放不會累積成績。</p>
         </div>
         <div className={`flight-state-badge ${renderingState === 'ready' && telemetry?.armed ? 'flight-state-armed' : ''}`}>
           <span aria-hidden="true" /> {fallbackTelemetryLabel(telemetry, renderingState)}
         </div>
       </div>
 
+      <div className="school-demo-bar" aria-label="L00 四軸與起飛示範">
+        <strong>L00 看懂四軸</strong>
+        {([['roll', '橫滾 Roll'], ['pitch', '俯仰 Pitch'], ['yaw', '偏航 Yaw'], ['takeoff', 'L01 起飛示範']] as const).map(([kind, label]) => <button className="lab-button lab-button-small" type="button" key={kind} disabled={trainingSettingsLocked || Boolean(telemetry?.armed) || renderingState !== 'ready'} onClick={() => startDemonstration(kind)}>{label}</button>)}
+        <span>左桿：油門／偏航 · 右桿：橫滾／俯仰</span>
+      </div>
+      {demoError && <p role="alert">{demoError}</p>}
       <div className="free-flight-layout">
+        {lessonPanel && <aside className="school-lesson-slot">{lessonPanel}</aside>}
         <div className="free-flight-main">
           <div className="free-flight-viewport" role="img" aria-label="Three.js Free Flight simulation viewport">
             <canvas key={rendererRetryKey} ref={canvasRef} className="flight-canvas" aria-label="Free Flight 3D scene" />
@@ -369,21 +413,23 @@ export default function FreeFlight({
             )}
             {renderingState === 'ready' && !telemetry?.armed && !telemetry?.replay.active && (
               <div className="flight-safe-overlay">
-                {telemetry?.state.crashed ? 'CRASHED / reset required before re-arming' : 'SAFE / explicit arm required'}
+                {telemetry?.state.crashed ? 'CRASHED / reset required before re-arming' : trainingArmBlocked ? '倒數準備中 · 請保持低油門' : trainingState?.phase === 'WAITING_FOR_ARM' ? '準備完成 · 按 Arm 開始，尚未計時' : 'SAFE / explicit arm required'}
               </div>
             )}
-            {renderingState === 'ready' && telemetry?.replay.active && <div className="flight-safe-overlay">PLAYBACK / live arm blocked</div>}
+            {renderingState === 'ready' && telemetry?.replay.active && <div className="flight-safe-overlay">{demonstration ? demonstration.title : '飛行回放'} · 真人飛行已停止</div>}
+            {trainingState?.phase === 'ACTIVE' && <div className="school-viewport-hint">{trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>}
           </div>
           <div className="flight-controls" aria-label="Flight controls">
             <div className="flight-control-group">
-              <label htmlFor="flight-input-source">Input source</label>
+              <label htmlFor="flight-input-source">控制方式</label>
               <select
                 id="flight-input-source"
+                disabled={trainingSettingsLocked || Boolean(telemetry?.replay.active)}
                 value={source}
                 onChange={(event) => setSource(event.target.value as FlightInputSource)}
               >
-                <option value="controller">Verified RC controller</option>
-                <option value="keyboard">Developer keyboard fallback</option>
+                <option value="controller">USB 遙控器（需校正）</option>
+                <option value="keyboard">鍵盤體驗</option>
               </select>
             </div>
             <div className="flight-control-group flight-camera-controls" aria-label="Camera mode">
@@ -401,7 +447,7 @@ export default function FreeFlight({
               ))}
             </div>
             <div className="flight-action-group">
-              <button className="lab-button lab-button-primary" type="button" onClick={arm} disabled={Boolean(renderingState !== 'ready' || telemetry?.armed || telemetry?.state.crashed || telemetry?.replay.active)}>
+              <button className="lab-button lab-button-primary" type="button" onClick={arm} disabled={Boolean(trainingArmBlocked || renderingState !== 'ready' || telemetry?.armed || telemetry?.state.crashed || telemetry?.replay.active)}>
                 Arm
               </button>
               <button className="lab-button" type="button" onClick={disarm} disabled={!telemetry?.armed || Boolean(telemetry?.replay.active)}>
@@ -416,14 +462,14 @@ export default function FreeFlight({
             <div className="flight-card-heading">
               <div>
                 <p className="panel-kicker">Bounded last flight</p>
-                <h3 id="flight-replay-title">Replay / ghost playback</h3>
+                <h3 id="flight-replay-title">{demonstration ? '同步教學示範' : '飛行回放'}</h3>
               </div>
               <span className={telemetry?.replay.active ? 'flight-pass' : 'flight-warn'}>
                 {telemetry?.replay.active ? 'PLAYBACK' : telemetry?.replay.available ? 'READY' : 'EMPTY'}
               </span>
             </div>
             <p className="flight-replay-note">
-              Playback is presentation-only. It disarms live flight, does not feed training, and is not saved to local storage.
+              {demonstration ? `${demonstration.description} · 模擬示範，尚待真人飛手驗證。` : '僅保留本次頁面的最後一段飛行，重新整理會清除。播放不會影響成績。'}
             </p>
             <div className="flight-replay-actions">
               {!telemetry?.replay.active ? (
@@ -470,22 +516,22 @@ export default function FreeFlight({
               </>
             )}
           </section>
+          {demonstration && telemetry?.replay.active && <p className="school-demo-cue" aria-live="polite">{teachingCueAt(demonstration, telemetry.replay.currentTimeSeconds)}</p>}
           {source === 'keyboard' && (
             <p className="flight-input-note">
-              Developer fallback selected: W/S pitch · A/D roll · Q/E yaw · R/F throttle · X reset.
-              Keys are normalized RC commands and still pass through Actual Rates, PID, mixer, and physics.
+              鍵盤：W/S 俯仰 · A/D 橫滾 · Q/E 偏航 · R/F 油門 · X 重設。鍵盤是離散輸入；細緻操控練習建議使用 USB 遙控器。
             </p>
           )}
         </div>
 
         <aside className="flight-side-panel">
-          <Mode2StickOverlay input={telemetry?.normalizedInput} mode="live" compact />
+          <Mode2StickOverlay input={playbackInput} mode={telemetry?.replay.active ? 'demonstration' : 'live'} compact />
           <section className="flight-safety-card" aria-labelledby="flight-safety-title">
             <div className="flight-card-heading">
-              <h3 id="flight-safety-title">Arm handoff</h3>
+              <h3 id="flight-safety-title">解鎖條件</h3>
               <span className={telemetry?.armed ? 'flight-pass' : 'flight-warn'}>{telemetry?.armed ? 'PASS' : 'LOCKED'}</span>
             </div>
-            <p>{profile ? 'Controller Lab profile is handed to the runtime. Stick movement is allowed after arming.' : 'Verify a Controller Lab profile, or explicitly select the developer fallback.'}</p>
+            <p>{profile ? '校正資料已就緒；仍需當次連線驗證、低油門與中立搖桿。' : '先完成下方設備校正，或選擇鍵盤體驗。'}</p>
             {telemetry?.safetyReasons.map((reason) => <span className="flight-warning" key={reason}>{reason}</span>)}
           </section>
           <label className="flight-hud-toggle">

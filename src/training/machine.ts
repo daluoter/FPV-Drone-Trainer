@@ -1,6 +1,7 @@
 import { isFiniteDroneState, type DroneState } from '../drone'
 import { isFiniteNormalizedRcInput } from '../flight-controller'
 import { DEFAULT_LESSONS } from './lessons'
+import type { TrainingAttemptContext } from './attempt'
 import {
   appendBoundedTrajectorySnapshot,
   TrainingTrajectoryBuffer,
@@ -114,6 +115,7 @@ function clearSession(
     countdownStartedAtSeconds: null,
     countdownEndsAtSeconds: null,
     activeStartedAtSeconds: null,
+    requiresDisarmBeforeArm: false,
     lastTimestampSeconds: null,
     lastSampleTimestampSeconds: null,
     sampleCount: 0,
@@ -213,6 +215,7 @@ function createResult(
     totalCheckpoints: lesson.checkpoints.length,
   }
   return {
+    ...(state.attemptContext ? { attemptContext: Object.freeze({ ...state.attemptContext }) } : {}),
     lessonId: lesson.id,
     sessionId: state.sessionId ?? nextSessionId(lesson.id, state.sessionNumber),
     outcome,
@@ -267,7 +270,12 @@ function abortSession(
   }
 }
 
-function startSession(state: TrainingMachineState, lesson: LessonDefinition, timestampSeconds: number): TrainingMachineState {
+function startSession(
+  state: TrainingMachineState,
+  lesson: LessonDefinition,
+  timestampSeconds: number,
+  attemptContext = state.attemptContext,
+): TrainingMachineState {
   const sessionNumber = state.sessionNumber + 1
   const sessionId = nextSessionId(lesson.id, sessionNumber)
   const countdownDuration = state.countdownDurationSeconds
@@ -279,12 +287,14 @@ function startSession(state: TrainingMachineState, lesson: LessonDefinition, tim
   }
   return {
     ...state,
+    attemptContext: attemptContext ? Object.freeze({ ...attemptContext }) : undefined,
     phase: 'COUNTDOWN',
     sessionId,
     sessionNumber,
     countdownStartedAtSeconds: timestampSeconds,
     countdownEndsAtSeconds: countdownEnds,
     activeStartedAtSeconds: null,
+    requiresDisarmBeforeArm: false,
     lastTimestampSeconds: timestampSeconds,
     lastSampleTimestampSeconds: null,
     armedAtLeastOnce: false,
@@ -310,18 +320,47 @@ function tick(state: TrainingMachineState, timestampSeconds: number): TrainingMa
     if (timestampSeconds >= ends) {
       return {
         ...state,
-        phase: 'ACTIVE',
-        activeStartedAtSeconds: ends,
+        phase: 'WAITING_FOR_ARM',
         lastTimestampSeconds: timestampSeconds,
         lastError: null,
       }
     }
   }
 
-  if (state.phase === 'COUNTDOWN' || state.phase === 'ACTIVE') {
+  if (state.phase === 'COUNTDOWN' || state.phase === 'WAITING_FOR_ARM' || state.phase === 'ACTIVE') {
     return { ...state, lastTimestampSeconds: timestampSeconds, lastError: null }
   }
   return state
+}
+
+function sampleWaitingState(
+  state: TrainingMachineState,
+  lesson: LessonDefinition,
+  sample: TrainingSample,
+  trajectoryBuffer?: TrainingTrajectoryBuffer,
+): TrainingMachineState {
+  const waiting = { ...state, lastTimestampSeconds: sample.timestampSeconds }
+  if (sample.state.crashed) {
+    return stateError(waiting, 'Reset the crashed drone and retry before arming the lesson.')
+  }
+  if (sample.armed === false) {
+    return { ...waiting, requiresDisarmBeforeArm: false, lastError: null }
+  }
+  if (sample.armed !== true) {
+    return stateError(waiting, 'Waiting for explicit arm telemetry before the lesson can evaluate.')
+  }
+  if (state.requiresDisarmBeforeArm) {
+    return stateError(waiting, 'The drone armed during countdown; disarm, then arm explicitly to start the lesson.')
+  }
+  // The first valid armed sample establishes the clock and the first scoring
+  // sample together. Time spent in countdown or waiting is never charged.
+  return sampleActiveState({
+    ...waiting,
+    phase: 'ACTIVE',
+    activeStartedAtSeconds: sample.timestampSeconds,
+    armedAtLeastOnce: true,
+    lastError: null,
+  }, lesson, sample, trajectoryBuffer)
 }
 
 function sampleActiveState(
@@ -343,13 +382,6 @@ function sampleActiveState(
       trajectoryBuffer,
     )
   }
-  if (sample.armed === false && state.armedAtLeastOnce !== true) {
-    return {
-      ...state,
-      lastTimestampSeconds: sample.timestampSeconds,
-      lastError: 'Waiting for explicit arm telemetry before the lesson can evaluate.',
-    }
-  }
   if (sample.armed === false) {
     return abortSession(
       state,
@@ -358,6 +390,9 @@ function sampleActiveState(
       'Attempt stopped: the flight was disarmed or focus was lost.',
       trajectoryBuffer,
     )
+  }
+  if (sample.armed !== true) {
+    return stateError(state, 'Explicit armed telemetry is required for each scored training sample.')
   }
   const previousSample = state.previousSample
   if (
@@ -378,6 +413,12 @@ function sampleActiveState(
       setupRequest: null,
       lastError: failure.message ?? null,
     }
+  }
+  if (
+    state.lastTimestampSeconds !== null &&
+    sample.timestampSeconds < state.lastTimestampSeconds
+  ) {
+    return stateError(state, 'Training sample timestamps must be monotonic.')
   }
   if (
     state.lastSampleTimestampSeconds !== null &&
@@ -488,6 +529,7 @@ export function createTrainingMachineState(
     ? lessons.find((candidate) => candidate.id === options.initialLessonId) ?? null
     : null
   return {
+    ...(options.attemptContext ? { attemptContext: Object.freeze({ ...options.attemptContext }) } : {}),
     phase: 'READY',
     lessonId: lesson?.id ?? null,
     sessionId: null,
@@ -496,6 +538,7 @@ export function createTrainingMachineState(
     countdownStartedAtSeconds: null,
     countdownEndsAtSeconds: null,
     activeStartedAtSeconds: null,
+    requiresDisarmBeforeArm: false,
     lastTimestampSeconds: null,
     lastSampleTimestampSeconds: null,
     sampleCount: 0,
@@ -511,7 +554,7 @@ export function createTrainingMachineState(
   }
 }
 
-/** Pure reducer for the READY -> COUNTDOWN -> ACTIVE -> result machine. */
+/** Pure reducer for READY -> COUNTDOWN -> WAITING_FOR_ARM -> ACTIVE -> result. */
 function reduceTrainingStateInternal(
   state: TrainingMachineState,
   action: TrainingAction,
@@ -549,7 +592,7 @@ function reduceTrainingStateInternal(
       if (!lesson || !lesson.available || !evaluatorFor(lesson)) {
         return stateError(state, 'This lesson is coming soon; its evaluator is not available yet.')
       }
-      return startSession(state, lesson, action.timestampSeconds)
+      return startSession(state, lesson, action.timestampSeconds, action.attemptContext)
     }
     case 'TICK':
       return tick(state, action.timestampSeconds)
@@ -562,14 +605,29 @@ function reduceTrainingStateInternal(
         return state
       }
       if (state.phase === 'COUNTDOWN') {
+        if (!validSample(action.sample)) return stateError(state, 'Training sample is invalid or contains non-finite values.')
         // Crossing the countdown boundary changes phase, but the boundary
-        // sample is not evaluated. This prevents pre-start state from passing.
-        return tick(state, action.sample.timestampSeconds)
+        // sample is not evaluated. Early arm must be followed by an observed
+        // disarm and a fresh arm rather than flowing into a scored attempt.
+        const next = tick(state, action.sample.timestampSeconds)
+        if (next.lastTimestampSeconds !== action.sample.timestampSeconds) return next
+        return action.sample.armed === true
+          ? {
+            ...next,
+            requiresDisarmBeforeArm: true,
+            lastError: 'Keep the drone disarmed during countdown; disarm before starting the lesson.',
+          }
+          : next
       }
-      if (state.phase !== 'ACTIVE') return stateError(state, 'Samples are accepted only while ACTIVE.')
+      if (!validSample(action.sample)) return stateError(state, 'Training sample is invalid or contains non-finite values.')
+      if (state.phase === 'WAITING_FOR_ARM' && state.lastTimestampSeconds !== null && action.sample.timestampSeconds < state.lastTimestampSeconds) {
+        return stateError(state, 'Training sample timestamps must be monotonic.')
+      }
       if (!state.lessonId) return stateError(state, 'The active training session has no lesson.')
       const lesson = byId.get(state.lessonId)
       if (!lesson) return stateError(state, 'The active lesson is no longer registered.')
+      if (state.phase === 'WAITING_FOR_ARM') return sampleWaitingState(state, lesson, action.sample, trajectoryBuffer)
+      if (state.phase !== 'ACTIVE') return stateError(state, 'Samples are scored only while ACTIVE.')
       return sampleActiveState(state, lesson, action.sample, trajectoryBuffer)
     }
     case 'SHOW_RESULT':
@@ -579,7 +637,7 @@ function reduceTrainingStateInternal(
       return { ...state, phase: 'RESULT', lastError: null }
     case 'RETRY':
       if (!state.lessonId) return stateError(state, 'There is no lesson session to retry.')
-      if (state.phase === 'COUNTDOWN' || state.phase === 'ACTIVE') {
+      if (state.phase === 'COUNTDOWN' || state.phase === 'WAITING_FOR_ARM' || state.phase === 'ACTIVE') {
         return clearSession({ ...state, sessionNumber: state.sessionNumber + 1 })
       }
       if (state.phase === 'SUCCESS' || state.phase === 'FAILED' || state.phase === 'RESULT') {
@@ -649,8 +707,8 @@ export class TrainingSession {
     return this.dispatch({ type: 'SET_SCENE_REFERENCES', sceneReferences })
   }
 
-  public start(timestampSeconds: number): TrainingMachineState {
-    return this.dispatch({ type: 'START', timestampSeconds })
+  public start(timestampSeconds: number, attemptContext?: TrainingAttemptContext): TrainingMachineState {
+    return this.dispatch({ type: 'START', timestampSeconds, attemptContext })
   }
 
   public tick(timestampSeconds: number): TrainingMachineState {

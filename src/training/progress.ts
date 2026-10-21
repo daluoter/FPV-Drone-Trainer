@@ -1,4 +1,10 @@
 import { DEFAULT_LESSONS } from './lessons'
+import {
+  copyTrainingAttemptContext,
+  isTrainingAttemptContext,
+  trainingAttemptContextKey,
+  type TrainingAttemptContext,
+} from './attempt'
 import type {
   LessonProgress,
   TrainingAttemptMetric,
@@ -11,6 +17,11 @@ import type {
 
 export const TRAINING_PROGRESS_SCHEMA_VERSION = 1 as const
 export const TRAINING_PROGRESS_STORAGE_KEY = 'fpv-drone-trainer.training-progress.v1'
+
+function progressStorageKey(context: TrainingAttemptContext | undefined): string | null {
+  if (context === undefined) return TRAINING_PROGRESS_STORAGE_KEY
+  return isTrainingAttemptContext(context) ? trainingAttemptContextKey(context) : null
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -192,12 +203,14 @@ export class TrainingProgressStore {
     this.lessonIds = lessonIds
   }
 
-  public load(): TrainingProgressLoadResult {
+  public load(context?: TrainingAttemptContext): TrainingProgressLoadResult {
     const fallback = createDefaultTrainingProgress(this.lessonIds)
+    const storageKey = progressStorageKey(context)
+    if (!storageKey) return { progress: fallback, loaded: false, errors: ['Training attempt context is invalid.'] }
     if (!this.storage) return { progress: fallback, loaded: false, errors: ['Training progress storage is unavailable.'] }
     let raw: string | null
     try {
-      raw = this.storage.getItem(TRAINING_PROGRESS_STORAGE_KEY)
+      raw = this.storage.getItem(storageKey)
     } catch {
       return { progress: fallback, loaded: false, errors: ['Training progress could not be read.'] }
     }
@@ -207,6 +220,13 @@ export class TrainingProgressStore {
       parsed = JSON.parse(raw)
     } catch {
       return { progress: fallback, loaded: false, errors: ['Saved training progress is malformed JSON.'] }
+    }
+    if (context) {
+      if (!isRecord(parsed) || parsed.schemaVersion !== 1 || !isTrainingAttemptContext(parsed.context)
+        || trainingAttemptContextKey(parsed.context) !== storageKey) {
+        return { progress: fallback, loaded: false, errors: ['Saved training progress context is incompatible.'] }
+      }
+      parsed = parsed.progress
     }
     const validation = validateTrainingProgress(parsed)
     if (!validation.valid) return { progress: fallback, loaded: false, errors: [...validation.errors] }
@@ -223,7 +243,9 @@ export class TrainingProgressStore {
     return { progress: { ...merged, lessons }, loaded: true, errors: [] }
   }
 
-  public save(progress: TrainingProgressDocument): TrainingProgressPersistenceResult {
+  public save(progress: TrainingProgressDocument, context?: TrainingAttemptContext): TrainingProgressPersistenceResult {
+    const storageKey = progressStorageKey(context)
+    if (!storageKey) return { saved: false, progress: copyTrainingProgress(progress), errors: ['Training attempt context is invalid.'] }
     const validation = validateTrainingProgress(progress)
     if (!validation.valid) {
       return { saved: false, progress: copyTrainingProgress(progress), errors: [...validation.errors] }
@@ -231,7 +253,9 @@ export class TrainingProgressStore {
     const copied = copyTrainingProgress(progress)
     if (!this.storage) return { saved: false, progress: copied, errors: ['Training progress storage is unavailable.'] }
     try {
-      this.storage.setItem(TRAINING_PROGRESS_STORAGE_KEY, JSON.stringify(copied))
+      this.storage.setItem(storageKey, JSON.stringify(context
+        ? { schemaVersion: 1, context: copyTrainingAttemptContext(context), progress: copied }
+        : copied))
       return { saved: true, progress: copied, errors: [] }
     } catch {
       return { saved: false, progress: copied, errors: ['Training progress could not be saved.'] }
@@ -239,20 +263,28 @@ export class TrainingProgressStore {
   }
 
   public recordResult(result: TrainingResult, completedAt = new Date().toISOString()): TrainingProgressPersistenceResult {
-    const loaded = this.load()
+    const context = result.attemptContext
+    const loaded = this.load(context)
+    // An invalid/unreadable document remains recoverable. Recording a new
+    // attempt must not silently replace it with an empty progress history.
+    if (!loaded.loaded && loaded.errors.length > 0) {
+      return { saved: false, progress: loaded.progress, errors: [...loaded.errors] }
+    }
     const progress = recordTrainingResult(loaded.progress, result, completedAt)
-    const saved = this.save(progress)
+    const saved = this.save(progress, context)
     return {
       ...saved,
       errors: [...loaded.errors, ...saved.errors],
     }
   }
 
-  public clear(): TrainingProgressPersistenceResult {
+  public clear(context?: TrainingAttemptContext): TrainingProgressPersistenceResult {
     const progress = createDefaultTrainingProgress(this.lessonIds)
+    const storageKey = progressStorageKey(context)
+    if (!storageKey) return { saved: false, progress, errors: ['Training attempt context is invalid.'] }
     if (!this.storage) return { saved: false, progress, errors: ['Training progress storage is unavailable.'] }
     try {
-      this.storage.removeItem(TRAINING_PROGRESS_STORAGE_KEY)
+      this.storage.removeItem(storageKey)
       return { saved: true, progress, errors: [] }
     } catch {
       return { saved: false, progress, errors: ['Training progress could not be cleared.'] }

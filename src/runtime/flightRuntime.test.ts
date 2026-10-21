@@ -95,6 +95,57 @@ function nextFrameRunner() {
 }
 
 describe('Free Flight runtime safety transitions', () => {
+  it.each(['controller', 'keyboard'] as const)('blocks direct %s arm requests during countdown until an explicit fresh arm', (source) => {
+    const handoff = createHandoff()
+    const frames = nextFrameRunner()
+    const runtime = new FlightRuntime({
+      poller: new FakePoller(handoff.device, handoff.snapshot),
+      profile: handoff.profile,
+      scheduleFrame: frames.schedule,
+      cancelFrame: frames.cancel,
+      now: () => 100,
+    })
+    runtime.setInputSource(source)
+    runtime.start()
+    frames.run(0)
+    runtime.setTrainingArmBlocked(true)
+    expect(runtime.arm()).toBe(false)
+    expect(runtime.getTelemetry().armed).toBe(false)
+    expect(runtime.getTelemetry().safetyReasons.join(' ')).toMatch(/countdown/i)
+    runtime.reset()
+    expect(runtime.arm()).toBe(false)
+
+    runtime.setTrainingArmBlocked(false)
+    frames.run(100)
+    expect(runtime.getTelemetry().armed).toBe(false)
+    expect(runtime.replayRecorder.isFlightActive()).toBe(false)
+    expect(runtime.arm()).toBe(true)
+    runtime.dispose()
+  })
+
+  it('disarms an already flying drone when countdown locks arming and never auto-rearms on release', () => {
+    const frames = nextFrameRunner()
+    const runtime = new FlightRuntime({ scheduleFrame: frames.schedule, cancelFrame: frames.cancel, now: () => 100 })
+    runtime.setInputSource('keyboard')
+    runtime.start()
+    frames.run(0)
+    expect(runtime.arm()).toBe(true)
+    expect(runtime.replayRecorder.isFlightActive()).toBe(true)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'r' }))
+
+    runtime.setTrainingArmBlocked(true)
+    expect(runtime.getTelemetry().armed).toBe(false)
+    expect(runtime.keyboard.getInput().throttle).toBe(0)
+    expect(runtime.replayRecorder.isFlightActive()).toBe(false)
+    expect(runtime.arm()).toBe(false)
+    runtime.setTrainingArmBlocked(false)
+    expect(runtime.getTelemetry().armed).toBe(false)
+    frames.run(100)
+    expect(runtime.getTelemetry().armed).toBe(false)
+    expect(runtime.arm()).toBe(true)
+    runtime.dispose()
+  })
+
   it('accepts intended stick movement after a gated arm and disarms on disconnect', () => {
     const handoff = createHandoff()
     const poller = new FakePoller(handoff.device, handoff.snapshot)

@@ -1,12 +1,8 @@
-import type { NormalizedRcInput } from '../flight-controller'
-import Mode2StickOverlay from './StickOverlay'
 import { DEFAULT_LESSONS } from './lessons'
-import type {
-  LessonDefinition,
-  LessonProgress,
-  TrainingMachineState,
-  TrainingProgressDocument,
-} from './types'
+import { lessonLearningContent } from './catalog'
+import { formatTrainingMetrics, trainingHint } from './feedback'
+import type { NormalizedRcInput } from '../flight-controller'
+import type { LessonDefinition, TrainingMachineState, TrainingProgressDocument } from './types'
 
 export interface TrainingPanelProps {
   readonly lessons?: readonly LessonDefinition[]
@@ -14,194 +10,50 @@ export interface TrainingPanelProps {
   readonly progress: TrainingProgressDocument
   readonly progressNotice?: string | null
   readonly liveInput?: NormalizedRcInput | null
+  readonly playbackActive?: boolean
   readonly onSelectLesson: (lessonId: string) => void
   readonly onStart: () => void
   readonly onRetry: () => void
   readonly onReset: () => void
 }
 
-function phaseLabel(state: TrainingMachineState): string {
-  if (state.phase === 'READY') return 'Ready'
-  if (state.phase === 'COUNTDOWN') return 'Countdown'
-  if (state.phase === 'ACTIVE') return 'Active'
-  if (state.phase === 'SUCCESS') return 'Success'
-  if (state.phase === 'FAILED') return 'Failed'
-  return 'Result'
+const PHASE_LABELS: Record<TrainingMachineState['phase'], string> = {
+  READY: '準備選課', COUNTDOWN: '倒數準備', WAITING_FOR_ARM: '等待解鎖',
+  ACTIVE: '練習進行中', SUCCESS: '完成', FAILED: '練習結束', RESULT: '練習結果',
 }
 
-function progressFor(progress: TrainingProgressDocument, lessonId: string): LessonProgress {
-  return progress.lessons[lessonId] ?? { recent: null, best: null, completed: false, attempts: 0 }
-}
-
-function activeElapsedSeconds(state: TrainingMachineState): number {
-  if (state.activeStartedAtSeconds === null || state.lastTimestampSeconds === null) return 0
-  return Math.max(0, state.lastTimestampSeconds - state.activeStartedAtSeconds)
-}
-
-function countdownRemainingSeconds(state: TrainingMachineState): number {
-  if (state.phase !== 'COUNTDOWN' || state.countdownEndsAtSeconds === null || state.lastTimestampSeconds === null) return 0
-  return Math.max(0, state.countdownEndsAtSeconds - state.lastTimestampSeconds)
-}
-
-export default function TrainingPanel({
-  lessons = DEFAULT_LESSONS,
-  state,
-  progress,
-  progressNotice = null,
-  liveInput = null,
-  onSelectLesson,
-  onStart,
-  onRetry,
-  onReset,
-}: TrainingPanelProps) {
-  const selected = state.lessonId ? lessons.find((lesson) => lesson.id === state.lessonId) ?? null : null
-  const selectedProgress = selected ? progressFor(progress, selected.id) : null
-  const canStart = state.phase === 'READY' && Boolean(selected?.available && selected.evaluator)
-  const canRetry = Boolean(selected && (state.phase === 'RESULT' || state.phase === 'SUCCESS' || state.phase === 'FAILED'))
-
+export default function TrainingPanel({ lessons = DEFAULT_LESSONS, state, progress, progressNotice, playbackActive = false, onSelectLesson, onStart, onRetry, onReset }: TrainingPanelProps) {
+  const selected = lessons.find((lesson) => lesson.id === state.lessonId) ?? null
+  const content = selected ? lessonLearningContent(selected.id) : null
+  const locked = ['COUNTDOWN', 'WAITING_FOR_ARM', 'ACTIVE'].includes(state.phase)
+  const terminal = ['RESULT', 'SUCCESS', 'FAILED'].includes(state.phase)
+  const remaining = Math.max(0, (state.countdownEndsAtSeconds ?? 0) - (state.lastTimestampSeconds ?? 0))
+  const metrics = formatTrainingMetrics(state.result?.metrics ?? state.lastEvaluation?.metrics ?? {}, selected?.id)
+  const saved = selected ? progress.lessons[selected.id] : null
   return (
-    <section className="training-section" id="training" aria-labelledby="training-title">
-      <div className="training-heading">
-        <div>
-          <p className="panel-kicker">Phase 7 / Flight school evaluators</p>
-          <h2 id="training-title">Train the state, not a stick ritual.</h2>
-          <p>
-            Four lessons consume finite fixed-step drone state and trajectory geometry. Start applies a
-            disarmed reset; arm explicitly in Free Flight after the countdown, then use live checkpoints and diagnostics.
-          </p>
-        </div>
-        <div className="training-phase-badge" aria-live="polite">
-          <span aria-hidden="true" /> {phaseLabel(state)}
-        </div>
+    <section className="school-course-panel" id="training" aria-labelledby="training-title">
+      <div className="school-course-heading"><p className="panel-kicker">循序練習 · 可自由選課</p><h2 id="training-title">今天練習哪個動作？</h2></div>
+      <label className="school-lesson-label" htmlFor="school-lesson">選擇課程</label>
+      <select id="school-lesson" value={state.lessonId ?? ''} disabled={locked || playbackActive} onChange={(event) => onSelectLesson(event.target.value)}>
+        {lessons.slice().sort((a, b) => a.priority - b.priority).map((lesson) => <option key={lesson.id} value={lesson.id} disabled={!lesson.available}>{lessonLearningContent(lesson.id)?.code} · {lessonLearningContent(lesson.id)?.title ?? lesson.title}</option>)}
+      </select>
+      <div className="school-course-actions">
+        {state.phase === 'READY' && <button className="lab-button lab-button-primary" type="button" disabled={!selected?.available || playbackActive} onClick={onStart}>開始課程</button>}
+        {terminal && <button className="lab-button lab-button-primary" type="button" disabled={playbackActive} onClick={onRetry}>再練一次</button>}
+        <button className="lab-button" type="button" disabled={state.phase === 'READY'} onClick={onReset}>{locked ? '停止練習' : '重設課程'}</button>
       </div>
-
-      <div className="training-layout">
-        <div className="training-menu panel-card">
-          <div className="panel-heading">
-            <div>
-              <p className="panel-kicker">Lesson menu</p>
-              <h3>Prioritized path</h3>
-            </div>
-            <span className="panel-tag">Geometry verified</span>
-          </div>
-          <div className="training-lesson-list">
-            {lessons
-              .slice()
-              .sort((left, right) => left.priority - right.priority)
-              .map((lesson) => {
-                const lessonProgress = progressFor(progress, lesson.id)
-                const selectedClass = lesson.id === state.lessonId ? 'training-lesson-selected' : ''
-                return (
-                  <button
-                    className={`training-lesson ${selectedClass}`}
-                    type="button"
-                    key={lesson.id}
-                    disabled={!lesson.available}
-                    onClick={() => onSelectLesson(lesson.id)}
-                    aria-pressed={lesson.id === state.lessonId}
-                  >
-                    <span className="training-lesson-priority">{String(lesson.priority).padStart(2, '0')}</span>
-                    <span className="training-lesson-copy">
-                      <strong>{lesson.title}</strong>
-                      <span>{lesson.description}</span>
-                    </span>
-                    <span className={`training-lesson-status ${lesson.available ? 'training-status-available' : ''}`}>
-                      {lesson.available ? (lessonProgress.completed ? 'Complete' : 'Available') : 'Coming soon'}
-                    </span>
-                  </button>
-                )
-              })}
-          </div>
-          <p className="training-menu-note">
-            Results require actual state and trajectory evidence. Disarm, reset, focus loss, invalid telemetry, or retry stops an active attempt.
-          </p>
-          {progressNotice && <p className="training-error" role="status">{progressNotice}</p>}
-        </div>
-
-        <div className="training-detail panel-card">
-          <div className="panel-heading">
-            <div>
-              <p className="panel-kicker">Session contract</p>
-              <h3>{selected?.title ?? 'Select a lesson'}</h3>
-            </div>
-            <span className="training-session-id">{state.sessionId ?? 'NO SESSION'}</span>
-          </div>
-          {selected ? (
-            <>
-              <p className="training-detail-description">{selected.description}</p>
-              <div className="training-objectives">
-                <strong>Objectives</strong>
-                <ul>{selected.objectives.map((objective) => <li key={objective}>{objective}</li>)}</ul>
-              </div>
-              <div className="training-checkpoints">
-                <strong>Checkpoints</strong>
-                <div>{selected.checkpoints.map((checkpoint) => {
-                  const checkpointState = state.checkpoints[checkpoint.id]
-                  return <span className={checkpointState?.completed ? 'training-checkpoint-done' : ''} key={checkpoint.id}>{checkpointState?.completed ? '✓ ' : '○ '}{checkpoint.title}</span>
-                })}</div>
-              </div>
-              {state.phase === 'COUNTDOWN' && (
-                <div className="training-live-metrics" aria-live="polite">
-                  <strong>Countdown</strong>
-                  <span>{countdownRemainingSeconds(state).toFixed(1)} s · reset while disarmed</span>
-                  <span>Arm in Free Flight during countdown / before Active</span>
-                </div>
-              )}
-              {state.phase === 'ACTIVE' && (
-                <div className="training-live-metrics" aria-live="polite">
-                  <strong>Live metrics</strong>
-                  <span>Active {activeElapsedSeconds(state).toFixed(2)} s</span>
-                  <span>{state.sampleCount} samples</span>
-                  {Object.entries(state.lastEvaluation?.metrics ?? {}).map(([metric, value]) => (
-                    <span key={metric}>{metric} {value.toFixed(2)}</span>
-                  ))}
-                </div>
-              )}
-              {selectedProgress && (
-                <div className="training-progress-summary">
-                  <span>{selectedProgress.attempts} attempts</span>
-                  <span>{selectedProgress.completed ? 'Completed' : 'Not completed'}</span>
-                  <span>Best {selectedProgress.best ? `${selectedProgress.best.score.toFixed(0)} / 100` : '—'}</span>
-                </div>
-              )}
-              <div className="training-actions">
-                <button className="lab-button lab-button-primary" type="button" onClick={onStart} disabled={!canStart}>
-                  {canStart ? 'Start countdown / reset' : 'Evaluator pending'}
-                </button>
-                <button className="lab-button" type="button" onClick={onRetry} disabled={!canRetry}>Retry</button>
-                <button className="lab-button" type="button" onClick={onReset} disabled={state.phase === 'READY'}>Reset</button>
-              </div>
-              {state.result && (
-                <div className={`training-result training-result-${state.result.outcome.toLowerCase()}`} aria-live="polite">
-                  <div className="training-result-heading">
-                    <strong>{state.result.outcome === 'SUCCESS' ? 'Lesson passed' : 'Attempt recorded'}</strong>
-                    <span>{state.result.score.toFixed(0)} / 100</span>
-                  </div>
-                  <p>{state.result.message}</p>
-                  <div className="training-result-metrics">
-                    <span>Active {state.result.elapsedSeconds.toFixed(2)} s</span>
-                    <span>{state.result.sampleCount} samples</span>
-                    <span>{state.result.completedCheckpoints} / {state.result.totalCheckpoints} checkpoints</span>
-                    {Object.entries(state.result.metrics)
-                      .filter(([metric]) => !['elapsedSeconds', 'sampleCount', 'completedCheckpoints', 'totalCheckpoints'].includes(metric))
-                      .slice(0, 8)
-                      .map(([metric, value]) => <span key={metric}>{metric} {value.toFixed(2)}</span>)}
-                  </div>
-                  {state.result.hint && <p className="training-result-hint">Hint: {state.result.hint}</p>}
-                </div>
-              )}
-            </>
-          ) : (
-            <p className="training-empty-state">Choose one of the prioritized lessons to inspect its setup and checkpoints.</p>
-          )}
-          {state.lastError && <p className="training-error" role="status">{state.lastError}</p>}
-        </div>
-
-        <div className="training-sticks">
-          <Mode2StickOverlay input={liveInput} mode="live" />
-          <Mode2StickOverlay mode="demonstration" compact />
-        </div>
-      </div>
+      <div className="school-current-lesson"><span className="school-phase" role="status">{PHASE_LABELS[state.phase]}</span><h3>{content?.title ?? selected?.title ?? '選擇課程'}</h3><p>{content?.objectives[0] ?? selected?.description}</p></div>
+      {selected && <ol className="school-checkpoints" aria-label="本課步驟">{selected.checkpoints.map((checkpoint) => <li key={checkpoint.id} className={state.checkpoints[checkpoint.id]?.completed ? 'is-complete' : ''}>{state.checkpoints[checkpoint.id]?.completed ? '✓' : '○'} {checkpoint.title}</li>)}</ol>}
+      {state.phase === 'READY' && <p className="school-next-action">先看上方示範，再開始課程。倒數後請自行按 Arm 解鎖。</p>}
+      {state.phase === 'COUNTDOWN' && <p className="school-next-action" aria-live="polite">準備 {remaining.toFixed(1)} 秒 · 保持低油門，倒數期間無法解鎖。</p>}
+      {state.phase === 'WAITING_FOR_ARM' && <p className="school-next-action" aria-live="polite">{state.requiresDisarmBeforeArm ? '請先 Disarm，確認低油門後再解鎖。' : '準備完成。按飛行畫面下方 Arm 解鎖，等待不會消耗練習時間。'}</p>}
+      {state.phase === 'ACTIVE' && <p className="school-live-hint" aria-live="polite">{trainingHint(selected?.id ?? null, state.lastEvaluation)}</p>}
+      {metrics.length > 0 && <dl className="school-metrics">{metrics.map((metric) => <div key={metric.key}><dt>{metric.label}</dt><dd>{metric.value}</dd></div>)}</dl>}
+      {state.result && <div className="school-result" aria-live="polite"><strong>{state.result.outcome === 'SUCCESS' ? '本課完成！' : '這次練習已結束'}</strong><p>{state.result.score.toFixed(0)} 分 · {state.result.elapsedSeconds.toFixed(1)} 秒</p><p>{state.result.outcome === 'SUCCESS' ? '你已完成本課步驟，可以再練一次確認穩定度。' : trainingHint(selected?.id ?? null, state.lastEvaluation)}</p>{state.result.attemptContext && <p>本次條件：{state.result.attemptContext.presetId === 'beginner' ? '新手' : state.result.attemptContext.presetId === 'standard' ? '一般' : '自訂'}設定 · {state.result.attemptContext.inputSource === 'keyboard' ? '鍵盤' : '遙控器'}</p>}<span>{state.result.completedCheckpoints} / {state.result.totalCheckpoints} 個步驟完成</span></div>}
+      {saved && <p className="school-progress">本次條件已練 {saved.attempts} 次 · 最佳 {saved.best ? `${saved.best.score.toFixed(0)} 分` : '尚無完成紀錄'}</p>}
+      <details className="school-lesson-notes"><summary>操作原理與常見錯誤</summary><ul>{content?.steps.map((step) => <li key={step}>{step}</li>)}</ul><p>{content?.commonMistakes[0]}</p></details>
+      <p className="school-prototype-note">課程挑戰採原型門檻，尚待真人試學校準。未解鎖、重設或播放示範都不會算通關。</p>
+      {(state.lastError || progressNotice) && <p className="training-error">{state.lastError ? '練習已停止或資料尚未就緒，請重設後再試。' : progressNotice}</p>}
     </section>
   )
 }

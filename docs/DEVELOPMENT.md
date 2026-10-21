@@ -24,6 +24,41 @@ npm run build
 
 `npm run build` runs strict TypeScript project checks before creating the production bundle. `npm test` is a deterministic Vitest run suitable for CI; use `npm run test:watch` while developing.
 
+## Continuous integration and production browser smoke
+
+The `CI` workflow runs for pull requests, pushes to `main`, and manual dispatch.
+It installs the locked npm dependencies, runs unit/integration tests and lint,
+then builds with strict TypeScript checks for the GitHub Pages project path.
+A Python Playwright smoke check opens that production build in Chromium and
+checks project-path assets, an initialized WebGL2 canvas, explicit keyboard
+arm/disarm, L01 countdown and waiting for explicit arm, training stop, synchronized
+demo controls/sticks without progress writes, the three camera controls, and logo navigation. This workflow does
+not deploy the site; production publishing remains a separate manual workflow.
+
+To reproduce the browser check after the required npm gates:
+
+```bash
+python3 -m venv /tmp/fpv-browser-venv
+/tmp/fpv-browser-venv/bin/python -m pip install -r scripts/browser-requirements.txt
+/tmp/fpv-browser-venv/bin/python -m playwright install --with-deps chromium
+npm run build -- --base=/FPV-Drone-Trainer/
+/tmp/fpv-browser-venv/bin/python scripts/browser_smoke.py
+```
+
+Playwright's OS dependency installation may require administrator access on a
+local machine. An existing compatible Chromium can instead be selected with
+`--chromium-executable /path/to/chromium`. The script starts and stops its own
+Vite preview using the same base path, so no separate preview process is needed.
+Use `--port` if the default port is occupied. Each run writes diagnostics to a
+new directory under `/tmp/fpv-browser-smoke`; `--artifact-dir` changes the parent.
+For a local visual review, `--screenshot` also saves the successful 1280 × 720 workspace.
+Failures include the preview log, browser errors, a screenshot and a Playwright
+trace when the browser launched. CI uploads those diagnostics for seven days.
+
+Chromium uses SwiftShader for repeatable headless WebGL checks. This smoke does
+not establish physical GPU performance, transmitter compatibility or a human's
+ability to complete a lesson; those remain separate owner checks.
+
 ## Evidence labels
 
 - **Automated:** commands and deterministic tests run in the repository, including camera transforms and runtime safety transitions.

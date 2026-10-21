@@ -4,6 +4,7 @@ import {
   orbitEvaluator,
   splitSEvaluator,
 } from './evaluators'
+import { takeoffEvaluator } from './takeoff'
 import type { LessonDefinition, LessonSetup } from './types'
 
 const DEFAULT_SETUP: Omit<LessonSetup, 'sceneReferenceIds'> = {
@@ -36,7 +37,7 @@ function phase7Lesson(
   }
 }
 
-/** Phase 7 owns exactly four state/trajectory lessons; no legacy replacement maneuvers are shipped. */
+/** Keep existing lesson order/IDs stable; learning order is determined by priority. */
 export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
   phase7Lesson({
     id: 'hover',
@@ -215,6 +216,41 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
     },
     hints: ['Keep the POI in a steady camera reference while preserving one direction, radius, altitude, and speed.'],
     evaluator: orbitEvaluator,
+  }),
+  phase7Lesson({
+    id: 'takeoff',
+    priority: 0,
+    title: '穩定起飛',
+    description: '從起飛墊緩慢垂直離地，在墊上方 2 公尺的目標高度連續穩住。',
+    objectives: [
+      '從起飛墊附近的低高度、水平狀態開始，確認解鎖後才評估。',
+      '控制上升速度，避免過度側移、傾斜或衝高。',
+      '在目標高度附近連續穩住 1.5 秒，速度與姿態都要穩定。',
+    ],
+    setup: lessonSetup(['takeoff-pad']),
+    checkpoints: [
+      { id: 'takeoff-ready', title: '起飛前準備', description: '在起飛墊附近保持低高度、低速度與水平姿態。' },
+      { id: 'takeoff-liftoff', title: '垂直離地', description: '實際離開起飛墊，緩慢上升且保持水平位置。' },
+      { id: 'takeoff-settle', title: '目標高度穩住', description: '在起飛墊上方 2 公尺附近，以低速度、低傾角連續停留 1.5 秒。' },
+    ],
+    success: {
+      title: '穩定起飛完成',
+      description: '已觀察到從起飛墊起飛、上升及連續穩定停留；不以搖桿動作代替實際飛行。',
+      criteria: ['從起飛墊附近起飛', '受控的高度、漂移、速度與傾角', '目標高度連續穩住 1.5 秒'],
+    },
+    failure: {
+      title: '起飛尚未穩住',
+      description: '此次起飛尚未在安全範圍內完成目標高度的連續穩定停留。',
+      criteria: ['不能從空中直接開始', '不能墜毀、解除解鎖或瞬移', '不能過度側移、傾斜或衝高'],
+    },
+    scoring: {
+      maxScore: 100,
+      minimumPassingScore: 70,
+      minimumActiveSeconds: 3,
+      metricLabels: ['altitudeM', 'altitudeErrorM', 'horizontalDriftM', 'horizontalSpeedMps', 'verticalSpeedMps', 'maxTiltDegrees', 'contiguousDwellSeconds'],
+    },
+    hints: ['先把油門當作上升與下降速度的微調，接近目標時提早減少上升速度。門檻為模擬器原型訓練設定。'],
+    evaluator: takeoffEvaluator,
   }),
 ]
 
