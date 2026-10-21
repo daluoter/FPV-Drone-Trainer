@@ -1,4 +1,4 @@
-import { createInitialDroneState, droneGroundSupport, DRONE_GROUND_CLEARANCE_M } from '../drone'
+import { droneGroundSupport, DRONE_GROUND_CLEARANCE_M } from '../drone'
 import { FlightSimulation, type NormalizedRcInput } from '../flight-controller'
 import { rotateVectorByQuaternion } from '../math/quaternion'
 import { applyActualRates, applyConfiguredRateLimit, type RateAxis } from '../rates'
@@ -6,6 +6,7 @@ import { FlightReplayRecorder, type ReplayRecording } from '../replay'
 import { flightSimulationConfigFromTuning, validateTuningSettings, type TuningSettings } from '../tuning/config'
 import { identifyTuningPreset, type TuningPresetSelection } from '../tuning/presets'
 import { CURRENT_TRAINING_RULES_VERSION, fingerprintTrainingSettings } from './attempt'
+import { createTrainingFieldAnchors, LANDING_TARGET_DISTANCE_M } from './field'
 
 export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'roll' | 'pitch' | 'yaw'
 
@@ -31,11 +32,13 @@ export interface TeachingDemonstration {
 
 const STEP_SECONDS = 1 / 240
 const TAKEOFF_DURATION_SECONDS = 10
-const LANDING_DURATION_SECONDS = 14
-const STRAIGHT_DURATION_SECONDS = 18
+const LANDING_DURATION_SECONDS = 32
+const STRAIGHT_DURATION_SECONDS = 27
 const AXIS_DURATION_SECONDS = 6.5
 const AXIS_RATE_DEGREES_PER_SECOND = 15
-const MAXIMUM_RECORDED_SAMPLES = 1_200
+const MAXIMUM_RECORDED_SAMPLES = 2_100
+const ROUTE_FORWARD_START_SECONDS = 7.5
+const LANDING_DESCENT_START_SECONDS = 20
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value))
@@ -87,11 +90,12 @@ function demonstrationInput(
   altitudeM: number,
   axisStick: number,
 ): NormalizedRcInput {
-  const throttle = collectiveThrottle(simulation, altitudeM, kind === 'landing' ? 0.42 : 0.65)
-  if (kind === 'straight-line') {
+  const descending = kind === 'landing' && timeSeconds >= LANDING_DESCENT_START_SECONDS
+  const throttle = collectiveThrottle(simulation, altitudeM, descending ? 0.42 : 0.65)
+  if (kind === 'straight-line' || kind === 'landing') {
     const state = simulation.getState()
     const up = rotateVectorByQuaternion(state.orientation, { x: 0, y: 1, z: 0 })
-    const targetZ = settings.drone.spawnPositionM.z - (timeSeconds < 0.6 ? 0 : 8)
+    const targetZ = settings.drone.spawnPositionM.z - (timeSeconds < ROUTE_FORWARD_START_SECONDS ? 0 : LANDING_TARGET_DISTANCE_M)
     const targetVelocityZ = clamp((targetZ - state.positionM.z) * 0.65, -1.3, 1.3)
     const accelerationZ = clamp((targetVelocityZ - state.velocityMps.z) * 2.4, -1.5, 1.5)
     const targetPitch = Math.atan2(accelerationZ, settings.drone.gravityMps2)
@@ -121,17 +125,19 @@ function cuesFor(kind: TeachingDemonstrationKind): readonly TeachingCue[] {
     { timeSeconds: 8, text: '連續穩住後完成起飛練習；實際操作仍需自己持續修正。' },
   ])
   if (kind === 'landing') return freeze([
-    { timeSeconds: 0, text: '從空中對準降落區，先保持水平並觀察下降速度。' },
-    { timeSeconds: 0.6, text: '略減油門開始下降；提早調整，不要等碰地才急加油門。' },
-    { timeSeconds: 5, text: '接近地面時降低下降速度，保持機身水平與落點穩定。' },
-    { timeSeconds: 9, text: '平穩接地後保持低油門與水平，連續穩住，再解除解鎖。' },
+    { timeSeconds: 0, text: '從地面起飛區開始，緩慢增加油門起飛；降落區在前方八公尺的藍色標記。' },
+    { timeSeconds: 3, text: '先在起點上方取得高度，穩住後再向前飛，不會從空中突然開始。' },
+    { timeSeconds: ROUTE_FORWARD_START_SECONDS, text: '小幅前傾飛向藍色降落區，保持高度，提早降低前進速度。' },
+    { timeSeconds: LANDING_DESCENT_START_SECONDS, text: '對準藍色降落區、先減少側移，再緩慢下降；接地前提早減少下降速度。' },
+    { timeSeconds: 29, text: '平穩接地後保持低油門與水平，連續穩住，再解除解鎖。' },
   ])
   if (kind === 'straight-line') return freeze([
-    { timeSeconds: 0, text: '先在起點穩住高度，確認前方路線與停點。' },
-    { timeSeconds: 0.6, text: '小幅前傾開始前進，同時用油門維持高度。' },
-    { timeSeconds: 6, text: '接近終點前反向小幅修正，先降低速度，避免衝過停點。' },
-    { timeSeconds: 10, text: '回復水平並不會立即煞停；持續觀察速度與位置。' },
-    { timeSeconds: 14, text: '在終點附近連續穩住，完成前進、減速與停點練習。' },
+    { timeSeconds: 0, text: '從地面起飛區開始，先自己建立推力，逐步爬升到起點目標高度。' },
+    { timeSeconds: 5, text: '先在起點穩住高度，確認前方路線與停點，再開始前進。' },
+    { timeSeconds: ROUTE_FORWARD_START_SECONDS, text: '小幅前傾開始前進，同時用油門維持高度；通過中途圈只是其中一步。' },
+    { timeSeconds: 13.5, text: '進入減速區後反向小幅修正，觀察實際速度下降，避免衝過停點。' },
+    { timeSeconds: 18, text: '回復水平並不會立即煞停；持續觀察速度與位置。' },
+    { timeSeconds: 22, text: '在終點附近連續穩住，完成前進、減速與停點練習；穿過金色圈不等於已完成整課。' },
   ])
   const axisName = kind === 'roll' ? '橫滾 Roll' : kind === 'pitch' ? '俯仰 Pitch' : '偏航 Yaw'
   return freeze([
@@ -163,12 +169,12 @@ export function createTeachingDemonstration(
   }
   // The renderer's takeoff-pad anchor is the geometry-clamped initial COM,
   // including nonzero ground or a configured spawn below the support surface.
-  const spawn = createInitialDroneState(settings.drone).positionM
+  const { pad: spawn, launch: groundedSpawn, routeAltitudeM: routeAltitude } = createTrainingFieldAnchors(settings.drone)
   const takeoff = kind === 'takeoff'
   const landing = kind === 'landing'
   const straight = kind === 'straight-line'
   const start = takeoff ? spawn : landing || straight
-    ? { ...spawn, y: spawn.y + 2.5 }
+    ? groundedSpawn
     : { ...spawn, y: Math.max(spawn.y + 8, settings.drone.ground.heightM + 8) }
   simulation.resetAt(start)
   simulation.arm()
@@ -179,13 +185,14 @@ export function createTeachingDemonstration(
   const axisStick = kind === 'roll' || kind === 'pitch' || kind === 'yaw' ? stickForRate(settings, kind) : 0
   const supportedAltitude = settings.drone.ground.heightM
     + droneGroundSupport(settings.drone, simulation.getState().orientation).supportOffsetM + DRONE_GROUND_CLEARANCE_M
-  const targetAltitude = takeoff ? spawn.y + 2 : landing ? supportedAltitude - 0.025 : start.y
+  const targetAltitude = takeoff ? spawn.y + 2 : landing || straight ? routeAltitude : start.y
   const initialInput = demonstrationInput(simulation, settings, 0, kind, start.y, axisStick)
   recorder.record({ timestampSeconds: 0, state: simulation.getState(), normalizedInput: initialInput, armed: true, telemetry: simulation.getTelemetry() })
   const steps = Math.round(duration / STEP_SECONDS)
   for (let index = 0; index < steps; index += 1) {
     const timeSeconds = index * STEP_SECONDS
-    const desiredAltitude = (takeoff || landing) && timeSeconds < 0.5 ? start.y : targetAltitude
+    const desiredAltitude = (takeoff || landing || straight) && timeSeconds < 0.5 ? start.y
+      : landing && timeSeconds >= LANDING_DESCENT_START_SECONDS ? supportedAltitude - 0.025 : targetAltitude
     const input = demonstrationInput(simulation, settings, timeSeconds, kind, desiredAltitude, axisStick)
     const step = simulation.step(input, STEP_SECONDS)
     if (step.state.crashed || step.reset || !step.telemetry.armed) {
@@ -195,7 +202,7 @@ export function createTeachingDemonstration(
   }
   const recording = recorder.endFlight()
   const title = kind === 'takeoff' ? '油門與起飛示範'
-    : kind === 'landing' ? '定點降落：下降、減速與平穩接地'
+    : kind === 'landing' ? '起飛到降落：前往藍色降落區、減速與平穩接地'
       : kind === 'straight-line' ? '直線與減速停點：前進、煞停與穩住'
         : kind === 'roll' ? '橫滾 Roll：推桿、回中與反向修正'
       : kind === 'pitch' ? '俯仰 Pitch：推桿、回中與反向修正'

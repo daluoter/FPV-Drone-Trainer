@@ -1,4 +1,3 @@
-import { STRAIGHT_LINE_HEIGHT_OFFSET_M } from './straightLine'
 import type { TrainingSceneReference, TrainingSetupRequest } from './types'
 
 /** Resolve teaching heights from the same configured anchors used by scoring. */
@@ -8,11 +7,11 @@ export function prepareTrainingSetup(
 ): TrainingSetupRequest | null {
   if (!request) return null
   if (request.lessonId === 'landing' || request.lessonId === 'straight-line') {
-    const pad = references.find((reference) => reference.id === 'takeoff-pad')
-    if (!pad) return request
+    const launch = references.find((reference) => reference.id === 'training-launch')
+    if (!launch) return request
     return {
       ...request,
-      setup: { ...request.setup, spawnPositionM: { ...pad.positionM, y: pad.positionM.y + STRAIGHT_LINE_HEIGHT_OFFSET_M } },
+      setup: { ...request.setup, spawnPositionM: { ...launch.positionM } },
     }
   }
   const spawn = request.setup.spawnPositionM

@@ -1,6 +1,6 @@
 import { DEFAULT_LESSONS } from './lessons'
 import { lessonLearningContent } from './catalog'
-import { formatTrainingMetrics, trainingHint } from './feedback'
+import { formatTrainingMetrics, trainingHint, trainingObjective, trainingRouteGuide } from './feedback'
 import { summarizeTrainingResult } from './resultFeedback'
 import type { NormalizedRcInput } from '../flight-controller'
 import type { LessonDefinition, TrainingMachineState, TrainingProgressDocument } from './types'
@@ -36,6 +36,8 @@ export default function TrainingPanel({ mode = 'challenge', lessons = DEFAULT_LE
   const ordered = lessons.slice().sort((a, b) => a.priority - b.priority)
   const nextLesson = selected ? ordered[ordered.findIndex((lesson) => lesson.id === selected.id) + 1] : null
   const resultFeedback = state.result ? summarizeTrainingResult(state.result) : null
+  const objective = trainingObjective(selected?.id ?? null, state.lastEvaluation)
+  const routeGuide = trainingRouteGuide(selected?.id ?? null)
   return (
     <section className="school-course-panel" id="training" aria-labelledby="training-title">
       <div className="school-course-heading"><p className="panel-kicker">循序練習 · 可自由選課</p><h2 id="training-title">今天練習哪個動作？</h2></div>
@@ -49,6 +51,8 @@ export default function TrainingPanel({ mode = 'challenge', lessons = DEFAULT_LE
         <button className="lab-button" type="button" disabled={state.phase === 'READY'} onClick={onReset}>{locked ? '停止練習' : '重設課程'}</button>
       </div>
       <div className="school-current-lesson"><span className="school-phase" role="status">{PHASE_LABELS[state.phase]}</span><h3>{content?.title ?? selected?.title ?? '選擇課程'}</h3><p>{content?.objectives[0] ?? selected?.description}</p></div>
+      {routeGuide && state.phase === 'READY' && <p className="school-route-guide">{routeGuide}</p>}
+      {objective && !terminal && <div className="school-objective" aria-label="目前任務" aria-live="polite"><strong>{objective.title}</strong><p>{objective.detail}</p></div>}
       {content && <p className="school-prototype-note">建議先備：{content.prerequisiteIds.length ? content.prerequisiteIds.map((id) => id === 'intro' ? 'L00 四軸與 Acro' : lessonLearningContent(id)?.title ?? id).join('、') : '可從這一課開始'}；仍可自由選課。</p>}
       {selected && <ol className="school-checkpoints" aria-label="本課步驟">{selected.checkpoints.map((checkpoint) => <li key={checkpoint.id} className={state.checkpoints[checkpoint.id]?.completed ? 'is-complete' : ''}>{state.checkpoints[checkpoint.id]?.completed ? '✓' : '○'} {checkpoint.title}</li>)}</ol>}
       {state.phase === 'READY' && <p className="school-next-action">先看上方示範，再開始課程。倒數後請自行按 Arm 解鎖。</p>}

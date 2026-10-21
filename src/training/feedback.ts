@@ -1,4 +1,14 @@
 import type { TrainingEvaluation } from './types'
+import { LANDING_LIFTOFF_HEIGHT_M, LANDING_SETTLED_DWELL_SECONDS, LANDING_ZONE_DISTANCE_M } from './landing'
+import {
+  STRAIGHT_LINE_BRAKE_ZONE_START_M,
+  STRAIGHT_LINE_CORRIDOR_HALF_WIDTH_M,
+  STRAIGHT_LINE_ROUTE_LENGTH_M,
+  STRAIGHT_LINE_SETTLED_DWELL_SECONDS,
+  STRAIGHT_LINE_STOP_RADIUS_M,
+  STRAIGHT_LINE_TRANSIT_DISTANCE_M,
+  STRAIGHT_LINE_MIN_BRAKE_ENTRY_SPEED_MPS,
+} from './straightLine'
 
 export interface TrainingMetricDisplay {
   readonly key: string
@@ -14,9 +24,12 @@ interface MetricDefinition {
 }
 
 const METRICS: Readonly<Record<string, MetricDefinition>> = {
+  launchHeightM: { label: '離起飛地面', unit: 'm', digits: 2 },
+  launchDistanceM: { label: '距離起飛點', unit: 'm', digits: 2 },
   altitudeM: { label: '起飛點上方', unit: 'm', digits: 2 },
   landingHeightM: { label: '離地間隙', unit: 'm', digits: 2 },
-  landingPositionErrorM: { label: '落點偏差', unit: 'm', digits: 2 },
+  landingPositionErrorM: { label: '距降落區中心', unit: 'm', digits: 2 },
+  landingRouteErrorM: { label: '偏離前往路線', unit: 'm', digits: 2 },
   touchdownDescentSpeedMps: { label: '接地下降速度', unit: 'm/s', digits: 2 },
   alongTrackM: { label: '前進距離', unit: 'm', digits: 2 },
   crossTrackErrorM: { label: '偏離直線', unit: 'm', digits: 2 },
@@ -67,12 +80,20 @@ const LESSON_METRICS: Readonly<Record<string, readonly string[]>> = {
 }
 
 function metricPriorities(metrics: Readonly<Record<string, number>>, lessonId: string | null): readonly string[] {
+  if (lessonId === 'landing' && metrics.landingPhase <= 1) {
+    return ['landingHeightM', 'launchDistanceM', 'verticalSpeedMps']
+  }
+  if (lessonId === 'landing' && metrics.landingPhase === 2) {
+    return ['landingPositionErrorM', 'landingHeightM', 'horizontalSpeedMps']
+  }
   if (lessonId === 'landing' && metrics.groundTouching > 0.5) {
-    return ['landingHeightM', 'landingPositionErrorM', 'touchdownDescentSpeedMps']
+    return ['landingPositionErrorM', 'touchdownDescentSpeedMps', 'contiguousDwellSeconds']
   }
   if (lessonId === 'straight-line') {
+    if (metrics.routePhase === 0) return ['launchHeightM', 'altitudeErrorM', 'verticalSpeedMps']
     if (metrics.routePhase >= 4) return ['stopErrorM', 'horizontalSpeedMps', 'contiguousDwellSeconds']
     if (metrics.routePhase >= 3) return ['stopErrorM', 'forwardSpeedMps', 'altitudeErrorM']
+    if (metrics.routePhase === 2) return ['forwardSpeedMps', 'stopErrorM', 'altitudeErrorM']
   }
   return lessonId ? LESSON_METRICS[lessonId] ?? [] : []
 }
@@ -134,24 +155,114 @@ const HINT_TRANSLATIONS: Readonly<Record<string, string>> = {
 
 const LESSON_HINTS: Readonly<Record<string, string>> = {
   takeoff: '緩推油門，留在起飛區上方；接近目標高度時改用小量修正。',
-  landing: '先對準降落區並減少水平移動，再緩慢降低高度，接地前留意下降速度。',
-  'straight-line': '沿標示航線前進，接近停點前提早減速；Acro 回中不會自動煞停。',
+  landing: `先從地面起飛，再前往正前方 ${LANDING_ZONE_DISTANCE_M} m 的藍色降落區；對準並減速後才下降。`,
+  'straight-line': '先自行起飛到起點高度環，再前進、減速並停穩；穿過圓環本身不算完成。',
   hover: '先減少水平移動，再用小量油門修正高度，避免連續大幅補桿。',
   'coordinated-turn': '先對準入口，再沿標示航線轉彎，同時留意高度。',
   'split-s': '先確認進入高度，再依序完成倒置、下降半圈與恢復正向。',
   orbit: '沿目標周圍保持同一繞行方向，先穩住半徑與高度。',
 }
 
+export interface TrainingObjective {
+  readonly title: string
+  readonly detail: string
+}
+
+function fact(metrics: Readonly<Record<string, number>>, key: string, unit: string, digits = 1): string | null {
+  const value = metrics[key]
+  return Number.isFinite(value) ? `${value.toFixed(digits)} ${unit}` : null
+}
+
+function remaining(value: number, unit = 'm'): string {
+  return `${Math.max(0, value).toFixed(1)} ${unit}`
+}
+
+/** A visible current objective from authoritative stage facts, separate from success. */
+export function trainingObjective(
+  lessonId: string | null,
+  evaluation: Pick<TrainingEvaluation, 'metrics'> | null | undefined,
+): TrainingObjective | null {
+  const metrics = evaluation?.metrics ?? {}
+  if (lessonId === 'straight-line') {
+    const phase = metrics.routePhase ?? 0
+    if (phase === 0) {
+      const error = fact(metrics, 'altitudeErrorM', 'm')
+      return {
+        title: '1／5 地面起飛，到起點高度',
+        detail: `在起飛點上方緩慢升高，先到起點高度環再前進。${error ? `距目標高度 ${error}。` : ''}`,
+      }
+    }
+    if (phase === 1) return {
+      title: '2／5 前進至藍色中途環',
+      detail: `保持高度與直線，前進到 ${STRAIGHT_LINE_TRANSIT_DISTANCE_M} m 藍色環。${Number.isFinite(metrics.alongTrackM) ? `距中途目標 ${remaining(STRAIGHT_LINE_TRANSIT_DISTANCE_M - metrics.alongTrackM)}。` : ''}`,
+    }
+    if (phase === 2) {
+      const beforeBrake = Number.isFinite(metrics.alongTrackM) && metrics.alongTrackM < STRAIGHT_LINE_BRAKE_ZONE_START_M
+      const entryTooSlow = !beforeBrake && Number.isFinite(metrics.brakeEntrySpeedMps)
+        && metrics.brakeEntrySpeedMps < STRAIGHT_LINE_MIN_BRAKE_ENTRY_SPEED_MPS
+      return {
+        title: '3／5 金色區內實際減速',
+        detail: beforeBrake
+          ? `距 ${STRAIGHT_LINE_BRAKE_ZONE_START_M} m 金色減速區 ${remaining(STRAIGHT_LINE_BRAKE_ZONE_START_M - metrics.alongTrackM)}；進入後小幅反向修正以降速。`
+          : entryTooSlow
+            ? `尚未觀察到可判定的減速。在金色區內以至少 ${STRAIGHT_LINE_MIN_BRAKE_ENTRY_SPEED_MPS} m/s 小幅前進，再降低速度；綠色終點前需要完成減速。`
+            : `已到金色減速區，需觀察到實際速度下降；穿過金色環還未完成。${fact(metrics, 'forwardSpeedMps', 'm/s') ? `目前前進速度 ${fact(metrics, 'forwardSpeedMps', 'm/s')}。` : ''}`,
+      }
+    }
+    if (phase >= 4) return {
+      title: '5／5 綠色停點連續穩住',
+      detail: `已進入停點穩定範圍，保持低速與高度，再穩住 ${remaining(STRAIGHT_LINE_SETTLED_DWELL_SECONDS - (metrics.contiguousDwellSeconds ?? 0), 's')}；離開範圍會重新計時。`,
+    }
+    return {
+      title: '4／5 對準綠色終點並停穩',
+      detail: `已觀察到減速；在 ${STRAIGHT_LINE_ROUTE_LENGTH_M} m 綠色終點 ${STRAIGHT_LINE_STOP_RADIUS_M} m 內停穩。${fact(metrics, 'stopErrorM', 'm') ? `距停點 ${fact(metrics, 'stopErrorM', 'm')}，` : ''}${fact(metrics, 'horizontalSpeedMps', 'm/s') ? `水平速度 ${fact(metrics, 'horizontalSpeedMps', 'm/s')}。` : ''}`,
+    }
+  }
+  if (lessonId === 'landing') {
+    const phase = metrics.landingPhase ?? 0
+    if (phase <= 1) return {
+      title: '1／4 自行起飛',
+      detail: `從起飛墊緩推油門，先離地至少 ${LANDING_LIFTOFF_HEIGHT_M} m，再朝前方藍色降落區飛行；起飛墊不是這次的降落目標。`,
+    }
+    if (phase === 2) return {
+      title: '2／4 前往藍色降落區',
+      detail: `沿前方路線找藍色光柱與地面標記，先保持高度前進。${fact(metrics, 'landingPositionErrorM', 'm') ? `距降落區 ${fact(metrics, 'landingPositionErrorM', 'm')}。` : ''}`,
+    }
+    if (phase >= 4) return {
+      title: '4／4 接地後連續穩住',
+      detail: `保持低油門與水平，再穩住 ${remaining(LANDING_SETTLED_DWELL_SECONDS - (metrics.contiguousDwellSeconds ?? 0), 's')}；看到完成後再 Disarm。`,
+    }
+    return {
+      title: '3／4 對準降落區，減速下降',
+      detail: `先消除側移，再緩慢下降。${fact(metrics, 'landingPositionErrorM', 'm') ? `距區域中心 ${fact(metrics, 'landingPositionErrorM', 'm')}；` : ''}${fact(metrics, 'landingHeightM', 'm') ? `離地間隙 ${fact(metrics, 'landingHeightM', 'm')}。` : ''}`,
+    }
+  }
+  return null
+}
+
+/** Short route instructions remain visible before a lesson starts. */
+export function trainingRouteGuide(lessonId: string | null): string | null {
+  if (lessonId === 'straight-line') {
+    return `地面起飛 → 起點高度環 → 藍色 ${STRAIGHT_LINE_TRANSIT_DISTANCE_M} m → 金色 ${STRAIGHT_LINE_BRAKE_ZONE_START_M} m 減速 → 綠色 ${STRAIGHT_LINE_ROUTE_LENGTH_M} m 停穩 ${STRAIGHT_LINE_SETTLED_DWELL_SECONDS} 秒。圓環是位置指引，穿圈不等於完成。飛行走廊左右各 ${STRAIGHT_LINE_CORRIDOR_HALF_WIDTH_M} m；終點需在 ${STRAIGHT_LINE_STOP_RADIUS_M} m 內、水平與垂直速度均 ≤ 0.35 m/s，並保持高度。`
+  }
+  if (lessonId === 'landing') return `地面起飛 → 飛往正前方 ${LANDING_ZONE_DISTANCE_M} m 的藍色降落區 → 減速下降 → 接地穩住 ${LANDING_SETTLED_DWELL_SECONDS} 秒。降落目標與起飛墊分開，依藍色光柱及地面標記辨認。`
+  return null
+}
+
 /** Reuse evaluator guidance without inventing a cause from unsigned error metrics. */
 export function trainingHint(
   lessonId: string | null,
-  evaluation: Pick<TrainingEvaluation, 'status' | 'hint'> | null | undefined,
+  evaluation: Pick<TrainingEvaluation, 'status' | 'hint' | 'metrics' | 'recovery'> | null | undefined,
 ): string {
   const hint = evaluation?.hint?.trim()
   if (hint) {
     const translated = HINT_TRANSLATIONS[hint]
     if (translated) return translated
     if (/[\u3400-\u9fff]/u.test(hint)) return hint
+  }
+  if (evaluation?.status === 'continue' && evaluation.metrics && evaluation.recovery !== 'restart') {
+    const objective = trainingObjective(lessonId, evaluation)
+    if (objective) return `${objective.title}：${objective.detail}`
   }
   if (evaluation?.status === 'success') return '已完成本課目標。先解除解鎖，再查看結果與回放。'
   if (evaluation?.status === 'failure') return '本次練習已停止。先查看結果，再按重試，倒數後明確解鎖。'

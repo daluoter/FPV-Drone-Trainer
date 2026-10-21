@@ -56,3 +56,20 @@ ghost without applying a replay pose to the live simulation state.
   interpolation, runtime playback isolation and arm/training boundaries.
   They do not prove WebGL context behavior, transmitter safety, or human-flight
   fidelity.
+
+
+## Session-bound result markers
+
+The lesson workspace can capture a bounded recording at a terminal result and
+retain it with the matching session ID. Completed checkpoints and the final
+completion/stop timestamp become seek buttons. Playback is paused at the selected
+position, with the normal explicit-disarm boundary and no training feed. A new
+flight or demonstration cannot replace the recording behind those buttons.
+
+Markers outside the retained window are disabled with a visible explanation.
+When a terminal event falls within 50 ms after the last decimated sample, the last
+frame is available with its exact lag labelled; larger gaps remain unavailable.
+All times are projected from absolute simulation time to the first retained
+sample's relative clock. Captured result recordings remain in memory only and
+are lost on reload; this does not add replay export, IndexedDB or full physics
+continuation.

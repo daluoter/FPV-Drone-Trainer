@@ -67,7 +67,7 @@ describe('flight scene reference contract', () => {
       expect(initialSpawn.y).toBeGreaterThan(5)
       expect(scene.scene.getObjectByName('takeoff-height-target')?.position.toArray()).toEqual([6, initialSpawn.y + 2, -3])
       expect(scene.scene.getObjectByName('straight-line-targets')?.children.map((ring) => ring.position.y))
-        .toEqual([initialSpawn.y + 2.5, initialSpawn.y + 2.5, initialSpawn.y + 2.5, initialSpawn.y + 2.5])
+        .toEqual([8, 8, 8, 8])
       expect(scene.getReference('hover-zone')?.positionM).toEqual({ x: 6, y: 8, z: -3 })
       expect(scene.getReference('hover-zone')?.object.position.y).toBe(8)
       for (const id of ['turn-entry', 'turn-apex', 'turn-exit']) {
@@ -80,7 +80,8 @@ describe('flight scene reference contract', () => {
       expect((orbitCircle?.parent?.position.y ?? 0) + (orbitCircle?.position.y ?? 0)).toBeCloseTo(5.02)
       expect(scene.getReference('split-s-reference')?.positionM.y).toBe(5.9)
       expect(scene.getReference('split-s-reference')?.object.position.y).toBe(5)
-      expect(scene.getReference('landing-surface')?.positionM).toEqual({ x: 6, y: 5, z: -3 })
+      expect(scene.getReference('landing-surface')?.positionM).toEqual({ x: 6, y: 5, z: -11 })
+      expect(scene.getReference('training-launch')?.positionM).toEqual(createInitialDroneState(config, { x: 6, y: 5, z: -3 }).positionM)
       expect(scene.ground.position.y).toBe(5)
       expect(config.spawnPositionM).toEqual({ x: 6, y: 0, z: -3 })
       expect(config.ground.heightM).toBe(5)
@@ -98,6 +99,9 @@ describe('flight scene reference contract', () => {
     try {
       scene.setLessonTarget('landing')
       expect(landing?.visible).toBe(true)
+      expect(landing?.position.toArray()).toEqual([0, 0, -8])
+      expect(landing?.getObjectByName('landing-beacon')).toBeDefined()
+      expect(scene.getReference('training-launch')?.positionM.z).toBe(0)
       expect(takeoff?.visible).toBe(false)
       expect(straight?.visible).toBe(false)
       expect(scene.getReference('hover-zone')?.object.visible).toBe(false)
@@ -106,6 +110,8 @@ describe('flight scene reference contract', () => {
       scene.setLessonTarget('straight-line')
       expect(straight?.visible).toBe(true)
       expect(straight?.children).toHaveLength(4)
+      expect(scene.getReference('straight-stop')?.positionM).toEqual({ x: 0, y: 3, z: -8 })
+      expect(scene.getReference('straight-stop')?.sizeM).toEqual({ x: 1.3, y: 0.9, z: 1.3 })
       expect(landing?.visible).toBe(false)
       expect(takeoff?.visible).toBe(false)
       expect(scene.getReference('turn-entry')?.object.visible).toBe(false)
@@ -142,6 +148,11 @@ describe('flight scene reference contract', () => {
         'orbit-poi',
         'split-s-reference',
         'landing-surface',
+        'training-launch',
+        'straight-start',
+        'straight-transit',
+        'straight-brake',
+        'straight-stop',
       ])
       expect(scene.getReference('hover-zone')?.kind).toBe('zone')
       expect(scene.getReference('hover-zone')?.positionM).toEqual({ x: 0, y: 3, z: 0 })

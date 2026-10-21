@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import IntroLesson from './IntroLesson'
@@ -76,6 +77,28 @@ describe('L00 introductory knowledge practice', () => {
     rerender(<IntroLesson completed disabled={false} onDemonstrate={demonstrate} onComplete={complete} />)
     expect(screen.getByText(/觀念練習已完成/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '下一步' })).toBeEnabled()
+    expect(complete).not.toHaveBeenCalled()
+  })
+
+  it('offers an inline exit while playback blocks the quiz and preserves the current answer afterward', () => {
+    const complete = vi.fn()
+    function IntroWithPlayback() {
+      const [playing, setPlaying] = useState(false)
+      return <IntroLesson completed={false} disabled={playing} playbackActive={playing}
+        onDemonstrate={() => setPlaying(true)} onComplete={complete} onExitPlayback={() => setPlaying(false)} />
+    }
+    render(<IntroWithPlayback />)
+    answer(CORRECT_CHOICES[0])
+    fireEvent.click(screen.getByRole('button', { name: '看橫滾示意' }))
+    expect(screen.getByRole('radio', { name: CORRECT_CHOICES[0] })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '下一步' })).toBeDisabled()
+    const exit = screen.getByRole('button', { name: '結束示範，繼續作答' })
+    expect(exit).toBeEnabled()
+    fireEvent.click(exit)
+    expect(screen.getByRole('radio', { name: CORRECT_CHOICES[0] })).toBeChecked()
+    expect(screen.getByRole('radio', { name: CORRECT_CHOICES[0] })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '下一步' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: '結束示範，繼續作答' })).not.toBeInTheDocument()
     expect(complete).not.toHaveBeenCalled()
   })
 })

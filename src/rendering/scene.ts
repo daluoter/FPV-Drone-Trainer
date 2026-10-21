@@ -1,7 +1,9 @@
 import * as THREE from 'three'
 
 import type { DroneConfig, DroneState } from '../drone'
-import { createInitialDroneState, DEFAULT_DRONE_CONFIG, DRONE_GEOMETRY } from '../drone'
+import { DEFAULT_DRONE_CONFIG, DRONE_GEOMETRY } from '../drone'
+import { createTrainingFieldAnchors } from '../training/field'
+import { STRAIGHT_LINE_BRAKE_ZONE_START_M, STRAIGHT_LINE_CORRIDOR_HALF_WIDTH_M, STRAIGHT_LINE_ROUTE_LENGTH_M, STRAIGHT_LINE_STOP_RADIUS_M, STRAIGHT_LINE_TRANSIT_DISTANCE_M } from '../training/straightLine'
 import type { Vector3 } from '../math/vector'
 import type { ReplayGhostState } from '../replay'
 
@@ -232,7 +234,8 @@ export function disposeFlightScene(scene: THREE.Scene): void {
 export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): FlightScene {
   // Match the authoritative upright spawn clamp, including configured contact
   // geometry. The pad's teaching anchor may not remain below raised ground.
-  const teachingSpawn = createInitialDroneState(config).positionM
+  const field = createTrainingFieldAnchors(config)
+  const teachingSpawn = field.pad
   const scene = new THREE.Scene()
   scene.name = 'free-flight-scene'
   scene.background = new THREE.Color(0x080d13)
@@ -263,10 +266,11 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   const takeoffPad = new THREE.Group()
   takeoffPad.name = 'takeoff-pad'
   const padBase = new THREE.Mesh(
-    new THREE.BoxGeometry(2.4, 0.08, 2.4),
+    new THREE.PlaneGeometry(2.4, 2.4),
     material(0x17262e, 0.78, 0.12),
   )
-  padBase.position.y = config.ground.heightM + 0.04
+  padBase.rotation.x = -Math.PI / 2
+  padBase.position.y = config.ground.heightM + 0.007
   takeoffPad.add(padBase)
   const padLineMaterial = material(0xb8f36b, 0.58, 0.15)
   for (const [x, z, width, depth] of [
@@ -276,7 +280,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     [1.04, 0, 0.035, 2.0],
   ] as const) {
     const line = new THREE.Mesh(new THREE.BoxGeometry(width, 0.012, depth), padLineMaterial)
-    line.position.set(x, config.ground.heightM + 0.087, z)
+    line.position.set(x, config.ground.heightM + 0.012, z)
     takeoffPad.add(line)
   }
   takeoffPad.position.set(config.spawnPositionM.x, 0, config.spawnPositionM.z)
@@ -320,24 +324,64 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     positionM: { ...teachingSpawn },
     sizeM: { x: 2.4, y: 0.08, z: 2.4 },
   }
-  const landingTarget = new THREE.Mesh(new THREE.RingGeometry(0.82, 0.94, 48), new THREE.MeshBasicMaterial({ color: 0x8abac4, side: THREE.DoubleSide, transparent: true, opacity: 0.8 }))
+  // Landing is a separate visible destination; the launch paint is not its target.
+  const landingTarget = new THREE.Group()
   landingTarget.name = 'landing-target'
-  landingTarget.rotation.x = -Math.PI / 2
-  landingTarget.position.set(config.spawnPositionM.x, config.ground.heightM + 0.095, config.spawnPositionM.z)
+  landingTarget.position.set(field.landing.x, field.landing.y, field.landing.z)
   landingTarget.visible = false
+  const landingPaint = new THREE.Mesh(new THREE.RingGeometry(0.03, 0.85, 64), new THREE.MeshBasicMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }))
+  landingPaint.name = 'landing-zone-paint'
+  landingPaint.rotation.x = -Math.PI / 2
+  landingPaint.position.y = 0.015
+  const landingRim = new THREE.Mesh(new THREE.RingGeometry(0.85, 0.96, 64), new THREE.MeshBasicMaterial({ color: 0x45d7f7, side: THREE.DoubleSide }))
+  landingRim.rotation.x = -Math.PI / 2
+  landingRim.position.y = 0.018
+  const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 3.6, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide }))
+  beacon.name = 'landing-beacon'
+  beacon.position.y = 1.8
+  landingTarget.add(landingPaint, landingRim, beacon)
+  for (const [x, z] of [[-1.05, -1.05], [1.05, -1.05], [-1.05, 1.05], [1.05, 1.05]]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 2.5, 8), new THREE.MeshBasicMaterial({ color: 0x45d7f7 }))
+    post.position.set(x, 1.25, z)
+    landingTarget.add(post)
+  }
   scene.add(landingTarget)
+
   const straightTargets = new THREE.Group()
   straightTargets.name = 'straight-line-targets'
   straightTargets.visible = false
-  const routeAltitude = teachingSpawn.y + 2.5
-  for (const distance of [0, 3, 5, 8]) {
-    const ring = new THREE.Mesh(new THREE.RingGeometry(distance === 8 ? 0.6 : 0.9, distance === 8 ? 0.67 : 0.97, 48), new THREE.MeshBasicMaterial({ color: distance === 8 ? 0xffc978 : 0x8abac4, side: THREE.DoubleSide }))
-    ring.position.set(config.spawnPositionM.x, routeAltitude, config.spawnPositionM.z - distance)
-    straightTargets.add(ring)
+  const routeAltitude = field.routeAltitudeM
+  const routeReferences: FlightSceneReference[] = []
+  for (const [id, distance, color] of [
+    ['straight-start', 0, 0x8abac4],
+    ['straight-transit', STRAIGHT_LINE_TRANSIT_DISTANCE_M, 0x45d7f7],
+    ['straight-brake', STRAIGHT_LINE_BRAKE_ZONE_START_M, 0xffc978],
+    ['straight-stop', STRAIGHT_LINE_ROUTE_LENGTH_M, 0xb8f36b],
+  ] as const) {
+    const marker = new THREE.Group()
+    marker.name = id
+    marker.position.set(teachingSpawn.x, routeAltitude, teachingSpawn.z - distance)
+    const stopZone = id === 'straight-stop'
+    const horizontal = stopZone || id === 'straight-start'
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.94, 1, 64), new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }))
+    ring.name = `${id}-ring`
+    if (horizontal) {
+      ring.rotation.x = -Math.PI / 2
+      ring.scale.setScalar(stopZone ? STRAIGHT_LINE_STOP_RADIUS_M : 0.7)
+    } else ring.scale.set(STRAIGHT_LINE_CORRIDOR_HALF_WIDTH_M, 0.7, 1)
+    marker.add(ring)
+    if (stopZone) {
+      const volume = new THREE.Mesh(new THREE.CylinderGeometry(STRAIGHT_LINE_STOP_RADIUS_M, STRAIGHT_LINE_STOP_RADIUS_M, 0.9, 48, 1, true), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.15, depthWrite: false, side: THREE.DoubleSide }))
+      volume.name = 'straight-stop-volume'
+      marker.add(volume)
+    }
+    straightTargets.add(marker)
+    routeReferences.push({ id, kind: 'zone', object: marker, positionM: { x: marker.position.x, y: marker.position.y, z: marker.position.z }, sizeM: stopZone ? { x: STRAIGHT_LINE_STOP_RADIUS_M * 2, y: 0.9, z: STRAIGHT_LINE_STOP_RADIUS_M * 2 } : { x: STRAIGHT_LINE_CORRIDOR_HALF_WIDTH_M * 2, y: 1.4, z: 0.08 } })
   }
   scene.add(straightTargets)
-  const landingSurface: FlightSceneReference = { id: 'landing-surface', kind: 'zone', object: landingTarget, positionM: { x: config.spawnPositionM.x, y: config.ground.heightM, z: config.spawnPositionM.z }, sizeM: { x: 2.4, y: 0, z: 2.4 } }
-  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface]
+  const landingSurface: FlightSceneReference = { id: 'landing-surface', kind: 'zone', object: landingTarget, positionM: { ...field.landing }, sizeM: { x: 1.7, y: 0, z: 1.7 } }
+  const launchReference: FlightSceneReference = { id: 'training-launch', kind: 'pad', object: takeoffPad, positionM: { ...field.launch } }
+  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences]
   const referenceById = new Map(sceneReferences.map((reference) => [reference.id, reference]))
 
   const drone = createQuadVisual()

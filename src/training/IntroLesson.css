@@ -84,6 +84,23 @@
   margin-top: 12px;
 }
 
+.intro-playback-return {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--accent, #b8f36b);
+  border-radius: 8px;
+  background: var(--accent-dim, #203322);
+}
+
+.intro-playback-return p {
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
+
+.intro-playback-return button {
+  width: 100%;
+}
+
 .intro-lesson-question fieldset {
   padding: 0;
   border: 0;

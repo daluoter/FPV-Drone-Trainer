@@ -9,6 +9,8 @@ export interface IntroLessonProps {
   readonly onComplete: () => void
   readonly completed: boolean
   readonly disabled: boolean
+  readonly playbackActive?: boolean
+  readonly onExitPlayback?: () => void
 }
 
 interface IntroStep {
@@ -86,7 +88,7 @@ const STEPS: readonly IntroStep[] = [
 ]
 
 /** Knowledge practice only; it never owns a runtime or produces flight results. */
-export default function IntroLesson({ onDemonstrate, onComplete, completed, disabled }: IntroLessonProps) {
+export default function IntroLesson({ onDemonstrate, onComplete, completed, disabled, playbackActive = false, onExitPlayback }: IntroLessonProps) {
   const [stepIndex, setStepIndex] = useState(0)
   const [answers, setAnswers] = useState<readonly string[]>(STEPS.map(() => ''))
   const [correct, setCorrect] = useState<readonly boolean[]>(STEPS.map(() => completed))
@@ -96,9 +98,10 @@ export default function IntroLesson({ onDemonstrate, onComplete, completed, disa
   const correctCount = correct.filter(Boolean).length
   const allCorrect = correctCount === STEPS.length
   const finished = completed || submitted
+  const blocked = disabled || playbackActive
 
   const choose = (answerId: string): void => {
-    if (disabled) return
+    if (blocked) return
     setAnswers((previous) => previous.map((answer, index) => index === stepIndex ? answerId : answer))
     setCorrect((previous) => previous.map((value, index) => index === stepIndex ? false : value))
     setFeedback(null)
@@ -106,21 +109,21 @@ export default function IntroLesson({ onDemonstrate, onComplete, completed, disa
 
   const check = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
-    if (disabled || !answers[stepIndex]) return
+    if (blocked || !answers[stepIndex]) return
     const isCorrect = answers[stepIndex] === step.correctId
     setCorrect((previous) => previous.map((value, index) => index === stepIndex ? isCorrect : value))
     setFeedback({ correct: isCorrect, message: step.explanation })
   }
 
   const move = (nextIndex: number): void => {
-    if (disabled || nextIndex < 0 || nextIndex >= STEPS.length) return
+    if (blocked || nextIndex < 0 || nextIndex >= STEPS.length) return
     if (nextIndex > stepIndex && !correct[stepIndex] && !finished) return
     setStepIndex(nextIndex)
     setFeedback(null)
   }
 
   const complete = (): void => {
-    if (disabled || finished || !allCorrect) return
+    if (blocked || finished || !allCorrect) return
     setSubmitted(true)
     onComplete()
   }
@@ -136,21 +139,25 @@ export default function IntroLesson({ onDemonstrate, onComplete, completed, disa
         {STEPS.map((item, index) => <li key={item.id} aria-current={index === stepIndex ? 'step' : undefined} className={correct[index] || finished ? 'is-correct' : ''}><span>{correct[index] || finished ? '✓' : index + 1}</span><span className="intro-lesson-progress-name">{item.title}</span></li>)}
       </ol>
       <div className="intro-lesson-copy"><strong>{step.title}</strong><p>{step.description}</p></div>
-      {step.demonstrations.length > 0 && <div className="intro-lesson-demos" aria-label="本步驟示意">{step.demonstrations.map((demo) => <button className="lab-button lab-button-small" key={demo.kind} type="button" disabled={disabled} onClick={() => { if (!disabled) onDemonstrate(demo.kind) }}>{demo.label}</button>)}</div>}
+      {step.demonstrations.length > 0 && <div className="intro-lesson-demos" aria-label="本步驟示意">{step.demonstrations.map((demo) => <button className="lab-button lab-button-small" key={demo.kind} type="button" disabled={blocked} onClick={() => { if (!blocked) onDemonstrate(demo.kind) }}>{demo.label}</button>)}</div>}
+      {playbackActive && <div className="intro-playback-return">
+        <p>正在觀看示範／回放。結束後可接著作答，已選答案會保留。</p>
+        <button className="lab-button lab-button-primary" type="button" disabled={!onExitPlayback} onClick={onExitPlayback}>結束示範，繼續作答</button>
+      </div>}
       <form onSubmit={check} className="intro-lesson-question">
-        <fieldset disabled={disabled}>
+        <fieldset disabled={blocked}>
           <legend>{step.question}</legend>
           {step.choices.map((choice) => <label key={choice.id} className="intro-lesson-choice"><input type="radio" name={`intro-answer-${step.id}`} value={choice.id} checked={answers[stepIndex] === choice.id} onChange={() => choose(choice.id)} /><span>{choice.label}</span></label>)}
         </fieldset>
-        <button className="lab-button lab-button-small" type="submit" disabled={disabled || !answers[stepIndex]}>檢查答案</button>
+        <button className="lab-button lab-button-small" type="submit" disabled={blocked || !answers[stepIndex]}>檢查答案</button>
       </form>
       {feedback && <p className={`intro-lesson-feedback ${feedback.correct ? 'is-correct' : 'is-retry'}`} role="status"><strong>{feedback.correct ? '答對了。' : '再試一次。'}</strong> {feedback.message}</p>}
-      {disabled && <p className="intro-lesson-note">請先結束目前練習，或退出示範／回放，再操作觀念題。</p>}
+      {disabled && !playbackActive && <p className="intro-lesson-note">飛行尚未結束。請按飛行畫面下方的 Disarm 解除解鎖，或在課程面板按「停止練習」，再繼續作答。</p>}
       <div className="intro-lesson-actions">
-        <button className="lab-button lab-button-small" type="button" disabled={disabled || stepIndex === 0} onClick={() => move(stepIndex - 1)}>上一步</button>
+        <button className="lab-button lab-button-small" type="button" disabled={blocked || stepIndex === 0} onClick={() => move(stepIndex - 1)}>上一步</button>
         {stepIndex < STEPS.length - 1
-          ? <button className="lab-button lab-button-small" type="button" disabled={disabled || (!correct[stepIndex] && !finished)} onClick={() => move(stepIndex + 1)}>下一步</button>
-          : <button className="lab-button lab-button-primary lab-button-small" type="button" disabled={disabled || !allCorrect || finished} onClick={complete}>完成觀念練習</button>}
+          ? <button className="lab-button lab-button-small" type="button" disabled={blocked || (!correct[stepIndex] && !finished)} onClick={() => move(stepIndex + 1)}>下一步</button>
+          : <button className="lab-button lab-button-primary lab-button-small" type="button" disabled={blocked || !allCorrect || finished} onClick={complete}>完成觀念練習</button>}
       </div>
     </section>
   )

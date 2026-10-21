@@ -8,12 +8,16 @@ function requestFor(lessonId: string): TrainingSetupRequest {
 }
 
 describe('reference-relative training setup', () => {
-  it('uses the actual normalized pad for airborne landing and straight-line starts', () => {
-    const references = [{ id: 'takeoff-pad', kind: 'pad', positionM: { x: 6, y: 5.05, z: -3 } }]
+  it('starts landing and straight-line on the actual supported ground, independently of the elevated teaching pad', () => {
+    const references = [
+      { id: 'takeoff-pad', kind: 'pad', positionM: { x: 6, y: 5.5, z: -3 } },
+      { id: 'training-launch', kind: 'pad', positionM: { x: 6, y: 5.05, z: -3 } },
+    ]
     for (const lessonId of ['landing', 'straight-line']) {
       const original = requestFor(lessonId)
-      expect(prepareTrainingSetup(original, references)?.setup.spawnPositionM).toEqual({ x: 6, y: 7.55, z: -3 })
-      expect(original.setup.spawnPositionM).toEqual({ x: 0, y: 3, z: 0 })
+      const before = JSON.stringify(original)
+      expect(prepareTrainingSetup(original, references)?.setup.spawnPositionM).toEqual({ x: 6, y: 5.05, z: -3 })
+      expect(JSON.stringify(original)).toBe(before)
     }
   })
 

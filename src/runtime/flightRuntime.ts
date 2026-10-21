@@ -16,7 +16,8 @@ import {
   type FlightTelemetry,
   type NormalizedRcInput,
 } from '../flight-controller'
-import { droneGroundContactRadius, droneGroundSupport, DRONE_GROUND_CLEARANCE_M, type DroneState } from '../drone'
+import { droneGroundContactRadius, droneGroundSupport, type DroneState } from '../drone'
+import { GROUND_CONTACT_SLOP_M } from '../simulation/dynamics'
 import type { LessonSetup } from '../training/types'
 import { FlightRenderer } from '../rendering'
 import {
@@ -622,14 +623,14 @@ export class FlightRuntime {
     const heightM = config.ground.heightM
     // droneGroundContactRadius caches the configured geometry's bound. Only
     // samples inside that envelope need a full orientation support query.
-    if (state.positionM.y > heightM + droneGroundContactRadius(config) + DRONE_GROUND_CLEARANCE_M + 1e-5) {
+    if (state.positionM.y > heightM + droneGroundContactRadius(config) + GROUND_CONTACT_SLOP_M + 1e-5) {
       return { heightM, supportOffsetM: 0, touching: false }
     }
     const supportOffsetM = droneGroundSupport(config, state.orientation).supportOffsetM
     return {
       heightM,
       supportOffsetM,
-      touching: state.positionM.y <= heightM + supportOffsetM + DRONE_GROUND_CLEARANCE_M + 1e-5,
+      touching: state.positionM.y <= heightM + supportOffsetM + GROUND_CONTACT_SLOP_M + 1e-5,
     }
   }
 

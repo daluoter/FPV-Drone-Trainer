@@ -39,6 +39,7 @@ export default function App() {
   const [preferencesNotice, setPreferencesNotice] = useState(initialLearning.error)
   const [showIntro, setShowIntro] = useState(false)
   const [demonstrationRequest, setDemonstrationRequest] = useState<{ sequence: number; kind: TeachingDemonstrationKind } | null>(null)
+  const [exitPlaybackRequest, setExitPlaybackRequest] = useState(0)
   const poller = useMemo(() => createBrowserGamepadPoller(), [])
   const tuningStore = useMemo(() => new TuningSettingsStore(), [])
   const initialTuningLoad = useMemo(() => tuningStore.load(), [tuningStore])
@@ -268,6 +269,7 @@ export default function App() {
           profile={flightProfile}
           settings={tuningSettings}
           demonstrationRequest={demonstrationRequest}
+          exitPlaybackRequest={exitPlaybackRequest}
           trainingResetKey={trainingResetKey}
           trainingDisarmKey={trainingDisarmKey}
           trainingSettingsLocked={trainingSettingsLocked}
@@ -276,7 +278,7 @@ export default function App() {
           trainingPath={trainingState.trajectory}
           onTrainingReset={resetTraining}
           trainingState={workspace === 'learning' && !showIntro ? trainingState : null}
-          lessonPanel={workspace === 'learning' ? <div className="school-learning-sidebar"><div hidden={!showIntro}><IntroLesson disabled={busy} completed={learningPreferences.introCompleted} onDemonstrate={(kind) => setDemonstrationRequest((previous) => ({ sequence: (previous?.sequence ?? 0) + 1, kind }))} onComplete={() => { persistLearning({ ...learningPreferences, introCompleted: true }); setShowIntro(false) }} /></div><div hidden={showIntro}><TrainingPanel
+          lessonPanel={workspace === 'learning' ? <div className="school-learning-sidebar"><div hidden={!showIntro}><IntroLesson playbackActive={playbackActive} onExitPlayback={() => setExitPlaybackRequest((value) => value + 1)} disabled={busy} completed={learningPreferences.introCompleted} onDemonstrate={(kind) => setDemonstrationRequest((previous) => ({ sequence: (previous?.sequence ?? 0) + 1, kind }))} onComplete={() => { persistLearning({ ...learningPreferences, introCompleted: true }); setShowIntro(false) }} /></div><div hidden={showIntro}><TrainingPanel
             mode={learningPreferences.mode}
             state={trainingState}
             progress={trainingProgress}

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
@@ -163,8 +164,8 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(lesson).to_have_value("takeoff")
             expect(lesson.locator("option:checked")).to_contain_text("L01")
             expect(lesson.locator("option")).to_have_count(7)
-            expect(lesson.locator("option[value='landing']")).to_contain_text("L03")
-            expect(lesson.locator("option[value='straight-line']")).to_contain_text("L04")
+            expect(lesson.locator("option[value='landing']")).to_contain_text("L04")
+            expect(lesson.locator("option[value='straight-line']")).to_contain_text("L03")
             progress_before_waiting = training_progress(page)
             training.get_by_role("button", name="開始課程", exact=True).click()
             expect(phase).to_have_text("倒數準備")
@@ -243,7 +244,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             )
             flight.get_by_role("button", name="Pause", exact=True).click()
             expect(phase).to_have_text("準備選課")
-            flight.get_by_role("button", name="Exit playback", exact=True).click()
+            flight.get_by_role("button", name="結束示範", exact=True).click()
             expect(disarm).to_be_disabled()
             expect(arm).to_be_enabled()
             expect(source).to_be_enabled()
@@ -260,11 +261,34 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(phase).to_have_text("等待解鎖", timeout=10_000)
             arm.click()
             expect(phase).to_have_text("練習進行中")
+            page.wait_for_timeout(200)
             disarm.click()
             expect(phase).to_have_text("練習結果")
             expect(training.locator(".school-result")).to_contain_text("引導練習")
             expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
             stored_attempts = training_progress(page)
+            # This marker must use the completed attempt's recording, stay
+            # paused and leave both the live flight and persisted score alone.
+            result_replay = flight.get_by_role("region", name="本次結果回放", exact=True)
+            finish_marker = result_replay.get_by_role("button", name=re.compile(r"^回放：練習結束"))
+            expect(finish_marker).to_be_enabled()
+            finish_marker.click()
+            expect(flight.get_by_role("button", name="Play", exact=True)).to_be_enabled()
+            expect(disarm).to_be_disabled()
+            expect(arm).to_be_disabled()
+            marked_time = float(timeline.input_value())
+            page.wait_for_timeout(200)
+            if abs(float(timeline.input_value()) - marked_time) > .02:
+                raise AssertionError("A result marker did not leave its replay paused.")
+            if training_progress(page) != stored_attempts:
+                raise AssertionError("Result marker playback modified training progress.")
+            if screenshot:
+                page.screenshot(path=str(artifact_dir / "result-marker-replay.png"))
+            flight.get_by_role("button", name="結束回放", exact=True).click()
+            expect(disarm).to_be_disabled()
+            expect(arm).to_be_enabled()
+            expect(phase).to_have_text("練習結果")
+            checks.append("session-bound result marker seek, paused playback and progress isolation")
             contexts = [json.loads(document).get("context") for document in stored_attempts.values()]
             if len(contexts) != 1 or contexts[0]["mode"] != "practice" or contexts[0]["inputSource"] != "keyboard":
                 raise AssertionError("The real interrupted attempt did not retain practice/keyboard provenance.")
@@ -287,6 +311,19 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             check_answer = intro.get_by_role("button", name="檢查答案", exact=True)
             expect(next_intro).to_be_disabled()
             expect(check_answer).to_be_disabled()
+            # Exit where the user is answering, preserving the selection.
+            intro.get_by_role("radio", name="偏航 Yaw：轉動機頭方向", exact=True).check()
+            intro.get_by_role("button", name="看橫滾示意", exact=True).click()
+            inline_exit = intro.get_by_role("button", name="結束示範，繼續作答", exact=True)
+            expect(inline_exit).to_be_visible()
+            expect(check_answer).to_be_disabled()
+            if screenshot:
+                page.screenshot(path=str(artifact_dir / "l00-inline-exit.png"))
+            inline_exit.click()
+            expect(check_answer).to_be_enabled()
+            expect(intro.get_by_role("radio", name="偏航 Yaw：轉動機頭方向", exact=True)).to_be_checked()
+            expect(disarm).to_be_disabled()
+            checks.append("inline L00 demonstration exit restores answers without rearming")
             intro.get_by_role("radio", name="偏航 Yaw：轉動機頭方向", exact=True).check()
             check_answer.click()
             expect(intro.locator(".intro-lesson-feedback")).to_contain_text("再試一次")
@@ -316,8 +353,8 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             checks.append("L00 wrong-answer gating, full knowledge completion and reload persistence")
 
             for demo_name, first_cue, final_cue in (
-                ("L03 降落示範", "從空中對準降落區", "平穩接地後"),
-                ("L04 直線示範", "先在起點穩住高度", "在終點附近連續穩住"),
+                ("L04 降落示範", "從地面起飛區開始", "平穩接地後"),
+                ("L03 直線示範", "從地面起飛區開始", "在終點附近連續穩住"),
             ):
                 before_demo = training_progress(page)
                 flight.get_by_role("button", name=demo_name, exact=True).click()
@@ -332,36 +369,49 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 expect(cue).to_contain_text(final_cue)
                 expect(flight.get_by_role("button", name="Play", exact=True)).to_be_enabled()
                 expect(phase).to_have_text("準備選課")
-                flight.get_by_role("button", name="Exit playback", exact=True).click()
+                flight.get_by_role("button", name="結束示範", exact=True).click()
                 expect(disarm).to_be_disabled()
                 expect(arm).to_be_enabled()
                 if training_progress(page) != before_demo:
                     raise AssertionError(f"{demo_name} modified flight progress.")
             checks.append("L03/L04 demonstration cue synchronization and progress isolation")
 
-            # Observe public telemetry while waiting: airborne setup must not
-            # fall to the ground before the learner explicitly arms the drone.
+            # Both revised lessons wait on actual supported ground and remain
+            # safe after arm at zero throttle while the learner prepares to lift off.
             hud = flight.get_by_role("checkbox", name="Developer HUD", exact=True)
             hud.check()
             position = flight.locator(".flight-data-row").filter(
                 has=page.get_by_text("Position m", exact=True)
             ).locator("code")
-            report["airborne_wait_positions"] = {}
+            report["ground_start_positions"] = {}
             for lesson_id in ("landing", "straight-line"):
                 lesson.select_option(lesson_id)
                 training.get_by_role("button", name="開始課程", exact=True).click()
-                expect(position).to_have_text("0.00, 3.00, 0.00")
+                coords = [float(value.strip()) for value in position.inner_text().split(",")]
+                if len(coords) != 3 or abs(coords[0]) > .01 or abs(coords[2]) > .01 or not (0 < coords[1] < .15):
+                    raise AssertionError(f"Lesson {lesson_id} did not start on supported ground: {coords}")
                 expect(phase).to_have_text("等待解鎖", timeout=10_000)
                 page.wait_for_timeout(500)
-                expect(position).to_have_text("0.00, 3.00, 0.00")
+                coords = [float(value.strip()) for value in position.inner_text().split(",")]
+                if len(coords) != 3 or abs(coords[0]) > .01 or abs(coords[2]) > .01 or not (0 < coords[1] < .15):
+                    raise AssertionError(f"Lesson {lesson_id} did not start on supported ground: {coords}")
                 expect(disarm).to_be_disabled()
                 expect(training.locator(".school-result")).to_have_count(0)
-                report["airborne_wait_positions"][lesson_id] = position.inner_text()
+                report["ground_start_positions"][lesson_id] = position.inner_text()
+                if screenshot:
+                    page.evaluate("window.scrollTo({top: 0, behavior: 'instant'})")
+                    page.screenshot(path=str(artifact_dir / f"{lesson_id}-ground-start.png"))
+                arm.click()
+                expect(phase).to_have_text("練習進行中")
+                page.wait_for_timeout(400)
+                expect(phase).to_have_text("練習進行中")
+                expect(flight.locator(".flight-state-badge")).not_to_contain_text("CRASHED")
+                expect(training.locator(".school-objective")).to_be_visible()
                 training.get_by_role("button", name="停止練習", exact=True).click()
                 expect(phase).to_have_text("準備選課")
                 expect(source).to_be_enabled()
             hud.uncheck()
-            checks.append("L03/L04 airborne setup stays at three metres through countdown and arm wait")
+            checks.append("L03/L04 actual ground start, safe low-throttle arm and visible stage guidance")
 
             fullscreen = flight.locator(".school-fullscreen")
             fullscreen.click()

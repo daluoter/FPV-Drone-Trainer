@@ -22,7 +22,7 @@ describe('lesson catalog', () => {
       'Split-S',
       'Orbit / 刷鍋',
       '穩定起飛',
-      '定點降落',
+      '起飛、前往降落區與降落',
       'Straight Line and Stop',
     ])
     expect(DEFAULT_LESSONS.every((lesson) => lesson.available && lesson.availability === 'available' && lesson.evaluator)).toBe(true)
@@ -32,8 +32,8 @@ describe('lesson catalog', () => {
       ['split-s-reference'],
       ['takeoff-pad', 'orbit-poi'],
       ['takeoff-pad'],
-      ['takeoff-pad', 'landing-surface'],
-      ['takeoff-pad'],
+      ['training-launch', 'landing-surface'],
+      ['takeoff-pad', 'training-launch', 'landing-surface'],
     ])
   })
 

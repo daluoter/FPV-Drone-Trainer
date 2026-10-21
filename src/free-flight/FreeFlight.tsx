@@ -14,7 +14,8 @@ import {
   type FlightRuntimeTelemetry,
 } from '../runtime'
 import Mode2StickOverlay from '../training/StickOverlay'
-import { trainingHint } from '../training/feedback'
+import { trainingHint, trainingObjective } from '../training/feedback'
+import { createResultReplaySnapshot, type ResultReplayMarker, type ResultReplaySnapshot } from '../training/resultReplay'
 import { createTeachingDemonstration, teachingCueAt, type TeachingDemonstration, type TeachingDemonstrationKind } from '../training/demonstrations'
 import type { TrainingMachineState, TrainingSample, TrainingSceneReference, TrainingSetupRequest } from '../training/types'
 import { flightSimulationConfigFromTuning, type TuningSettings } from '../tuning'
@@ -30,6 +31,7 @@ export interface FreeFlightProps {
   readonly trainingSetupRequest?: TrainingSetupRequest | null
   readonly trainingPath?: readonly TrainingSample[]
   readonly demonstrationRequest?: { readonly sequence: number; readonly kind: TeachingDemonstrationKind } | null
+  readonly exitPlaybackRequest?: number
   readonly onTrainingReset?: () => void
   readonly trainingArmBlocked?: boolean
   readonly trainingState?: TrainingMachineState | null
@@ -89,6 +91,7 @@ export default function FreeFlight({
   trainingSetupRequest = null,
   trainingPath = [],
   demonstrationRequest = null,
+  exitPlaybackRequest = 0,
   onTrainingReset,
   trainingArmBlocked = false,
   trainingState = null,
@@ -110,6 +113,9 @@ export default function FreeFlight({
   const [rendererRetryKey, setRendererRetryKey] = useState(0)
   const [demonstration, setDemonstration] = useState<TeachingDemonstration | null>(null)
   const [demoError, setDemoError] = useState<string | null>(null)
+  const [resultReplay, setResultReplay] = useState<ResultReplaySnapshot | null>(null)
+  const capturedResultSessionRef = useRef<string | null>(null)
+  const [playingResultSession, setPlayingResultSession] = useState<string | null>(null)
   const [source, setSource] = useState<FlightInputSource>('controller')
   const [cameraMode, setCameraMode] = useState<CameraMode>('fpv')
   const [showHud, setShowHud] = useState(false)
@@ -281,12 +287,24 @@ export default function FreeFlight({
   }, [trainingDisarmKey])
 
   useEffect(() => {
-    rendererRef.current?.setLessonTarget?.(trainingState?.lessonId ?? null)
-  }, [trainingState?.lessonId, rendererRetryKey])
+    const lessonId = telemetry?.replay.active && demonstration
+      ? demonstration.lessonId === 'intro' ? null : demonstration.lessonId
+      : trainingState?.lessonId ?? null
+    rendererRef.current?.setLessonTarget?.(lessonId)
+  }, [trainingState?.lessonId, rendererRetryKey, telemetry?.replay.active, demonstration])
 
   useEffect(() => {
     rendererRef.current?.setTrainingPath(trainingPath.map((sample) => sample.state.positionM))
   }, [trainingPath])
+
+  useEffect(() => {
+    const result = trainingState?.result
+    if (!result || capturedResultSessionRef.current === result.sessionId) return
+    // Capture this session once. Later flights, clock resets and demonstrations
+    // must never supply a replacement recording for these result markers.
+    capturedResultSessionRef.current = result.sessionId
+    setResultReplay(createResultReplaySnapshot(trainingState, runtimeRef.current?.getReplayRecording?.() ?? null))
+  }, [trainingState?.result?.sessionId])
 
   useEffect(() => {
     runtimeRef.current?.setControllerProfile(profile)
@@ -318,15 +336,33 @@ export default function FreeFlight({
   const enterReplay = (): void => {
     const runtime = runtimeRef.current
     if (!runtime) return
+    setPlayingResultSession(null)
     runtime.enterReplay()
     setTelemetry(runtime.getTelemetry())
   }
 
   const exitReplay = (): void => {
     setDemonstration(null)
+    setPlayingResultSession(null)
     const runtime = runtimeRef.current
     if (!runtime) return
     runtime.exitReplay()
+    setTelemetry(runtime.getTelemetry())
+  }
+
+  useEffect(() => {
+    if (exitPlaybackRequest > 0 && runtimeRef.current?.getTelemetry().replay.active) exitReplay()
+  }, [exitPlaybackRequest])
+
+  const replayResultMarker = (marker: ResultReplayMarker): void => {
+    const runtime = runtimeRef.current
+    if (!runtime || !resultReplay?.recording || marker.timeSeconds === null || trainingSettingsLocked) return
+    if (runtime.getTelemetry().replay.active && playingResultSession !== resultReplay.sessionId) runtime.exitReplay()
+    if (!runtime.getTelemetry().replay.active && !runtime.enterReplay(resultReplay.recording)) return
+    setDemonstration(null)
+    runtime.pauseReplay()
+    runtime.seekReplay(marker.timeSeconds)
+    setPlayingResultSession(resultReplay.sessionId)
     setTelemetry(runtime.getTelemetry())
   }
 
@@ -405,6 +441,8 @@ export default function FreeFlight({
     } catch { setFullscreenError('瀏覽器未提供全螢幕；仍可在目前畫面練習。') }
   }
   const playbackInput = telemetry?.replay.active ? runtimeRef.current?.getReplayPlayback?.()?.getGhostState()?.normalizedInput ?? null : telemetry?.normalizedInput
+  const currentObjective = trainingObjective(trainingState?.lessonId ?? null, trainingState?.lastEvaluation)
+  const visibleResultReplay = resultReplay?.sessionId === trainingState?.result?.sessionId && !demonstration ? resultReplay : null
   const channels = channelValues(telemetry)
   const rawAxes = telemetry?.rawInput?.axes ?? []
   const processed = telemetry?.processedInput
@@ -427,7 +465,7 @@ export default function FreeFlight({
 
       <div className="school-demo-bar" aria-label="L00 四軸與起飛示範">
         <strong>L00 看懂四軸</strong>
-        {([['roll', '橫滾 Roll'], ['pitch', '俯仰 Pitch'], ['yaw', '偏航 Yaw'], ['takeoff', 'L01 起飛示範'], ['landing', 'L03 降落示範'], ['straight-line', 'L04 直線示範']] as const).map(([kind, label]) => <button className="lab-button lab-button-small" type="button" key={kind} disabled={trainingSettingsLocked || Boolean(telemetry?.armed) || renderingState !== 'ready'} onClick={() => startDemonstration(kind)}>{label}</button>)}
+        {([['roll', '橫滾 Roll'], ['pitch', '俯仰 Pitch'], ['yaw', '偏航 Yaw'], ['takeoff', 'L01 起飛示範'], ['straight-line', 'L03 直線示範'], ['landing', 'L04 降落示範']] as const).map(([kind, label]) => <button className="lab-button lab-button-small" type="button" key={kind} disabled={trainingSettingsLocked || Boolean(telemetry?.armed) || renderingState !== 'ready'} onClick={() => startDemonstration(kind)}>{label}</button>)}
         <span>左桿：油門／偏航 · 右桿：橫滾／俯仰</span>
       </div>
       {fullscreenError && <p role="status">{fullscreenError}</p>}
@@ -435,6 +473,11 @@ export default function FreeFlight({
       <div className="free-flight-layout">
         {lessonPanel && <aside className="school-lesson-slot">{lessonPanel}</aside>}
         <div className="free-flight-main">
+          {telemetry?.replay.active && <div className="school-demo-bar school-playback-return">
+            <strong>{demonstration ? '正在觀看教學示範' : '正在觀看飛行回放'}</strong>
+            <button className="lab-button lab-button-primary" type="button" onClick={exitReplay}>{demonstration ? '結束示範' : '結束回放'}</button>
+            <span>結束後回到練習，仍需自行解鎖。</span>
+          </div>}
           <div className="free-flight-viewport" role="img" aria-label="Three.js Free Flight simulation viewport">
             <canvas key={rendererRetryKey} ref={canvasRef} className="flight-canvas" aria-label="Free Flight 3D scene" />
             <div className="flight-viewport-overlay" aria-hidden="true">
@@ -457,7 +500,7 @@ export default function FreeFlight({
               </div>
             )}
             {renderingState === 'ready' && telemetry?.replay.active && <div className="flight-safe-overlay">{demonstration ? demonstration.title : '飛行回放'} · 真人飛行已停止</div>}
-            {trainingState?.phase === 'ACTIVE' && <div className="school-viewport-hint">{trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>}
+            {trainingState?.phase === 'ACTIVE' && <div className="school-viewport-hint">{currentObjective && trainingState.lastEvaluation?.recovery !== 'restart' ? <><strong>{currentObjective.title}</strong><span>{currentObjective.detail}</span></> : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>}
           </div>
           <div className="flight-controls" aria-label="Flight controls">
             <div className="flight-control-group">
@@ -498,11 +541,22 @@ export default function FreeFlight({
               </button>
             </div>
           </div>
+          {visibleResultReplay && <section className="school-result-replay" aria-label="本次結果回放">
+            <strong>本次結果回放</strong>
+            <p>點選步驟查看該次錄影，會停止目前飛行並暫停在標記位置。重新整理會清除錄影。</p>
+            <div className="school-result-replay-markers">{visibleResultReplay.markers.map((marker) => <button
+              className="lab-button lab-button-small" type="button" key={marker.id}
+              aria-label={`回放：${marker.label}`}
+              disabled={marker.timeSeconds === null || trainingSettingsLocked}
+              onClick={() => replayResultMarker(marker)}
+            >{marker.label}{marker.timeSeconds === null ? '（片段未保留）' : ` · ${marker.timeSeconds.toFixed(2)} s`}</button>)}</div>
+            {visibleResultReplay.notice && <p className="school-prototype-note">{visibleResultReplay.notice}</p>}
+          </section>}
           <section className="flight-replay-card" aria-labelledby="flight-replay-title">
             <div className="flight-card-heading">
               <div>
                 <p className="panel-kicker">Bounded last flight</p>
-                <h3 id="flight-replay-title">{demonstration ? '同步教學示範' : '飛行回放'}</h3>
+                <h3 id="flight-replay-title">{demonstration ? '同步教學示範' : telemetry?.replay.active && playingResultSession ? '結果標記播放' : '飛行回放'}</h3>
               </div>
               <span className={telemetry?.replay.active ? 'flight-pass' : 'flight-warn'}>
                 {telemetry?.replay.active ? 'PLAYBACK' : telemetry?.replay.available ? 'READY' : 'EMPTY'}
@@ -521,7 +575,7 @@ export default function FreeFlight({
                   <button className="lab-button lab-button-primary" type="button" onClick={telemetry.replay.playing ? pauseReplay : playReplay}>
                     {telemetry.replay.playing ? 'Pause' : 'Play'}
                   </button>
-                  <button className="lab-button" type="button" onClick={exitReplay}>Exit playback</button>
+                  <button className="lab-button" type="button" onClick={exitReplay}>{demonstration ? '結束示範／回到練習' : '結束回放／回到練習'}</button>
                 </>
               )}
             </div>

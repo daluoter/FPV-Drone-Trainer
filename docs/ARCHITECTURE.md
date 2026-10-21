@@ -105,3 +105,13 @@ A separate continuous previous-flight sample remains for physical-clock and path
 integrity checks. Rules version 2 separates these stricter acceptance rules from
 old contextual scores. Knowledge preferences, flight progress and presentation
 recordings remain separate data domains.
+
+
+Result-marker review retains one immutable terminal-session recording beside its
+checkpoint times. It is a separate bounded presentation snapshot, captured once
+per result session and trimmed to that attempt; later recorder writes, source
+clock resets and demonstration playback cannot rebind it. Marker seek uses the
+existing disarmed ghost runtime and never emits scored fixed-step samples.
+Ground-start training anchors and demo targets share pure field geometry;
+contact observation uses the physical solver's contact slop. Rules version 3
+separates revised route/landing acceptance from earlier results.

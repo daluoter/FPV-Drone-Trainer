@@ -1,6 +1,7 @@
 import { DRONE_GROUND_CLEARANCE_M, isFiniteDroneState } from '../drone'
 import { rotateVectorByQuaternion } from '../math/quaternion'
 import type { LessonLearningContent } from './catalog'
+import { LANDING_TARGET_DISTANCE_M } from './field'
 import type {
   LessonDefinition,
   LessonEvaluatorContract,
@@ -12,6 +13,8 @@ import type {
 /** Prototype simulator training tolerances; hardware/human validation is deferred. */
 export const LANDING_SETTLED_DWELL_SECONDS = 1
 export const LANDING_MAX_TOUCHDOWN_SPEED_MPS = 0.8
+export const LANDING_ZONE_DISTANCE_M = LANDING_TARGET_DISTANCE_M
+export const LANDING_LIFTOFF_HEIGHT_M = 0.8
 
 function metric(context: TrainingEvaluationContext, name: string): number {
   const value = context.previousEvaluation?.metrics?.[name]
@@ -28,12 +31,12 @@ function stop(
     return {
       status: 'continue', recovery: 'restart', metrics,
       message,
-      hint: '先回到墊上方至少 0.8 公尺，降低漂移，再從進場重新練習；安全停止與 Disarm 隨時可用。',
+      hint: '本次步驟已重新開始；安全返回起飛區並落地，再自行起飛、飛往前方藍色降落區。也可停止課程後重試。',
     }
   }
   return {
     status: 'failure', metrics, message,
-    hint: '解除解鎖並重試；先降低側移速度，再緩慢下降，接地後保持水平至結果出現。',
+    hint: '重試後從地面自行起飛，飛往前方藍色降落區；先降低側移與下降速度，平穩接地後保持至結果出現。',
   }
 }
 
@@ -45,12 +48,12 @@ function evaluateLanding(sample: TrainingSample, context: TrainingEvaluationCont
   if (sample.armed === false) return stop(context, '降落停止：已解除解鎖或失去焦點，不能以 Disarm 代替受控接地。')
   if (sample.armed !== true) return { status: 'continue', metrics: {}, message: '等待實際解鎖後的降落資料。' }
 
-  const pad = context.sceneReferences.find((reference) => reference.id === 'takeoff-pad')
+  const launch = context.sceneReferences.find((reference) => reference.id === 'training-launch')
   const surface = context.sceneReferences.find((reference) => reference.id === 'landing-surface')
   const contact = sample.groundContact
-  if (!pad || !surface || !Object.values(pad.positionM).every(Number.isFinite)
+  if (!launch || !surface || !Object.values(launch.positionM).every(Number.isFinite)
     || !Object.values(surface.positionM).every(Number.isFinite)) {
-    return stop(context, '降落場景缺少起飛墊或實際地面參考，無法評分。')
+    return stop(context, '降落場景缺少地面起飛點或指定降落區，無法評分。')
   }
   if (!contact || typeof contact.touching !== 'boolean' || !Number.isFinite(contact.heightM)
     || !Number.isFinite(contact.supportOffsetM) || contact.supportOffsetM < 0
@@ -62,15 +65,35 @@ function evaluateLanding(sample: TrainingSample, context: TrainingEvaluationCont
   const velocity = sample.state.velocityMps
   const contactHeight = contact.heightM + contact.supportOffsetM + DRONE_GROUND_CLEARANCE_M
   const clearance = position.y - contactHeight
-  const horizontalError = Math.hypot(position.x - pad.positionM.x, position.z - pad.positionM.z)
+  const horizontalError = Math.hypot(position.x - surface.positionM.x, position.z - surface.positionM.z)
+  const launchDistance = Math.hypot(position.x - launch.positionM.x, position.z - launch.positionM.z)
+  const routeX = surface.positionM.x - launch.positionM.x
+  const routeZ = surface.positionM.z - launch.positionM.z
+  const routeLengthSquared = routeX * routeX + routeZ * routeZ
+  if (routeLengthSquared < 4) return stop(context, '降落區必須與起飛區分開，請重設訓練場。')
+  const routeProjection = Math.max(0, Math.min(1,
+    ((position.x - launch.positionM.x) * routeX + (position.z - launch.positionM.z) * routeZ) / routeLengthSquared,
+  ))
+  const routeError = Math.hypot(
+    position.x - launch.positionM.x - routeX * routeProjection,
+    position.z - launch.positionM.z - routeZ * routeProjection,
+  )
   const horizontalSpeed = Math.hypot(velocity.x, velocity.z)
   const verticalSpeed = Math.abs(velocity.y)
   const up = rotateVectorByQuaternion(sample.state.orientation, { x: 0, y: 1, z: 0 })
   const tilt = Math.acos(Math.min(1, Math.max(-1, up.y))) * 180 / Math.PI
-  const descentObserved = metric(context, 'descentObserved') === 1 || (velocity.y < -0.08 && clearance > 0.05)
+  const launched = context.checkpoints['landing-launch']?.completed === true
+  const lifted = context.checkpoints['landing-liftoff']?.completed === true
+  const approached = context.checkpoints['landing-approach']?.completed === true
+  const touched = context.checkpoints['landing-touchdown']?.completed === true
+  const descentObserved = metric(context, 'descentObserved') === 1
+    || (approached && velocity.y < -0.08 && clearance > 0.05 && horizontalError <= 1.2)
   const metrics: Record<string, number> = {
     landingHeightM: Math.max(0, clearance),
     landingPositionErrorM: horizontalError,
+    launchDistanceM: launchDistance,
+    landingRouteErrorM: routeError,
+    landingPhase: touched ? 4 : approached ? 3 : lifted ? 2 : launched ? 1 : 0,
     horizontalDriftM: horizontalError,
     horizontalSpeedMps: horizontalSpeed,
     verticalSpeedMps: verticalSpeed,
@@ -112,22 +135,59 @@ function evaluateLanding(sample: TrainingSample, context: TrainingEvaluationCont
       return stop(context, '降落停止：位置跳躍與實際速度不一致，瞬移不能當降落。', metrics)
     }
   }
-  if (horizontalError > 25 || clearance > 25 || horizontalSpeed > 12 || verticalSpeed > 5 || tilt > 70) {
+  if (routeError > 25 || clearance > 25 || horizontalSpeed > 12 || verticalSpeed > 5 || tilt > 70) {
     return stop(context, '降落停止：已超出安全飛行範圍。', metrics)
   }
-  if (horizontalError > 4 || clearance > 7 || horizontalSpeed > 3 || verticalSpeed > 2 || tilt > 40) {
-    return stop(context, '降落偏離練習範圍，請回到墊上方並先降低速度。', metrics, true)
+  if (routeError > 4 || clearance > 7 || horizontalSpeed > 3 || verticalSpeed > 2 || tilt > 40) {
+    return stop(context, '降落偏離練習路線，請先降低速度，返回起飛區重練。', metrics, true)
   }
 
-  const approached = context.checkpoints['landing-approach']?.completed === true
-  const touched = context.checkpoints['landing-touchdown']?.completed === true
-  const approach = !contact.touching && clearance >= 0.8 && clearance <= 5
-    && horizontalError <= 1.2 && horizontalSpeed <= 1.5 && verticalSpeed <= 1.2 && tilt <= 15
-  if (!approached && !approach) {
-    return stop(context, '必須先從墊上方進場；已經在地面不能直接累積降落成績。', metrics, true)
+  if (context.mode !== 'practice' && context.elapsedSeconds > 90) {
+    return stop(context, '降落挑戰逾時，尚未完成起飛、前往指定區與受控降落。', metrics)
   }
-  if (contact.touching && horizontalError > 0.85) {
-    return stop(context, '落點超出指定降落區，不能在其他位置接地通關。', metrics, true)
+  const launchReady = contact.touching && launchDistance <= 1
+    && horizontalSpeed <= 0.5 && verticalSpeed <= 0.3 && tilt <= 15
+  if (!launched) {
+    if (!launchReady) return stop(context, '需先在起飛區地面開始，不能直接從空中或降落區開始通關。', metrics, true)
+    return {
+      status: 'continue', checkpointIds: ['landing-launch'], metrics: { ...metrics, landingPhase: 1 },
+      hint: `從起飛區緩慢加油門，自行起飛到至少 ${LANDING_LIFTOFF_HEIGHT_M} 公尺；藍色降落區在前方 ${LANDING_TARGET_DISTANCE_M} 公尺。`,
+    }
+  }
+  const liftoff = !lifted && !contact.touching && clearance >= LANDING_LIFTOFF_HEIGHT_M
+    && launchDistance <= 1.5 && horizontalSpeed <= 1.5 && verticalSpeed <= 1.5 && tilt <= 20
+  if (!lifted) {
+    if (contact.touching && launchDistance > 1) {
+      return stop(context, '仍需從起飛區自行離地；不能沿地面移動到降落區。', metrics, true)
+    }
+    if (!liftoff && launchDistance > 1.5) {
+      return stop(context, `先在起飛區上方升到至少 ${LANDING_LIFTOFF_HEIGHT_M} 公尺，再前往藍色降落區。`, metrics, true)
+    }
+    return {
+      status: 'continue', checkpointIds: liftoff ? ['landing-liftoff'] : [],
+      metrics: { ...metrics, landingPhase: liftoff ? 2 : 1 },
+      hint: liftoff ? `已起飛。前方 ${LANDING_TARGET_DISTANCE_M} 公尺有藍色降落區與光柱；保持高度、緩慢飛近。`
+        : `先緩慢加油門離地，保持水平，在起飛區上方升到至少 ${LANDING_LIFTOFF_HEIGHT_M} 公尺。`,
+    }
+  }
+  const approach = !contact.touching && clearance >= LANDING_LIFTOFF_HEIGHT_M && clearance <= 5
+    && horizontalError <= 1.2 && horizontalSpeed <= 1.5 && verticalSpeed <= 1.2 && tilt <= 15
+  if (contact.touching && (!approached || horizontalError > 0.85)) {
+    return stop(context, '需飛往前方藍色降落區後再接地；起飛區或其他位置落地不能完成本課。', metrics, true)
+  }
+  if (!approached && !approach) {
+    return {
+      status: 'continue', metrics: { ...metrics, landingPhase: 2 },
+      hint: horizontalError > 1.2
+        ? `藍色降落區還有 ${horizontalError.toFixed(1)} 公尺；保持高度飛近光柱，再減速對準。`
+        : `已接近藍色降落區；先在區上方至少 ${LANDING_LIFTOFF_HEIGHT_M} 公尺降低側移與傾角，再開始下降。`,
+    }
+  }
+  if (approach && !approached) {
+    return {
+      status: 'continue', checkpointIds: ['landing-approach'], metrics: { ...metrics, landingPhase: 3 },
+      hint: '已對準藍色降落區。小量減少油門下降，接地前把下降速度降到 0.8 m/s 以下。',
+    }
   }
   if (touched && !contact.touching && clearance > 0.08) {
     return stop(context, '接地後再次升空，請從進場重新完成連續降落。', metrics, true)
@@ -163,6 +223,7 @@ function evaluateLanding(sample: TrainingSample, context: TrainingEvaluationCont
     ? metric(context, 'contiguousDwellSeconds') + localDelta
     : 0
   metrics.landingSettled = settled ? 1 : 0
+  metrics.landingPhase = touched || touchdown ? 4 : 3
   metrics.contiguousDwellSeconds = dwell
   const checkpointIds = [
     ...(approach ? ['landing-approach'] : []),
@@ -172,9 +233,6 @@ function evaluateLanding(sample: TrainingSample, context: TrainingEvaluationCont
   const score = Math.max(0, Math.min(100,
     100 - horizontalError * 15 - metrics.touchdownDescentSpeedMps * 10 - horizontalSpeed * 10 - tilt * 0.5,
   ))
-  if (context.mode !== 'practice' && context.elapsedSeconds > 35) {
-    return { ...stop(context, '降落挑戰逾時，尚未完成受控接地與穩定停留。', metrics), checkpointIds, score }
-  }
   if (settled && dwell >= LANDING_SETTLED_DWELL_SECONDS && context.elapsedSeconds >= 3) {
     return {
       status: 'success', checkpointIds, metrics, score,
@@ -194,21 +252,22 @@ export const landingEvaluator: LessonEvaluatorContract = { evaluate: evaluateLan
 
 export const LANDING_LESSON: LessonDefinition = {
   id: 'landing',
-  priority: 1.5,
-  title: '定點降落',
-  description: '從空中進場，在指定起飛墊附近降低漂移與下降速度，平穩接地並保持穩定。',
+  priority: 1.75,
+  title: '起飛、前往降落區與降落',
+  description: `從地面自行起飛，飛往前方 ${LANDING_TARGET_DISTANCE_M} 公尺的藍色降落區，減速、對準並平穩接地。`,
   availability: 'available',
   available: true,
-  objectives: ['先從墊上方進場，逐步降低高度。', '接地前降低水平與下降速度。', '在指定區實際接地，連續穩住 1 秒後再解除解鎖。'],
+  objectives: [`從地面自行起飛，飛往前方 ${LANDING_TARGET_DISTANCE_M} 公尺的藍色降落區。`, '在區上方先減速對準，再控制下降。', '平穩接地並連續穩住 1 秒，看到完成結果後再解除解鎖。'],
   setup: {
     requiresDisarmed: true,
     resetSimulation: true,
-    sceneReferenceIds: ['takeoff-pad', 'landing-surface'],
-    spawnPositionM: { x: 0, y: 3, z: 0 },
+    sceneReferenceIds: ['training-launch', 'landing-surface'],
     spawnOrientation: { x: 0, y: 0, z: 0, w: 1 },
   },
   checkpoints: [
-    { id: 'landing-approach', title: '對準降落區', description: '從指定墊上方至少 0.8 公尺進場，先控制漂移與姿態。' },
+    { id: 'landing-launch', title: '起飛區地面準備', description: '在起飛區保持水平與低油門，從地面自行開始。' },
+    { id: 'landing-liftoff', title: '自行起飛', description: `在起飛區上方實際離地，升到至少 ${LANDING_LIFTOFF_HEIGHT_M} 公尺。` },
+    { id: 'landing-approach', title: '對準降落區', description: `從指定墊上方至少 ${LANDING_LIFTOFF_HEIGHT_M} 公尺進場，先控制漂移與姿態。` },
     { id: 'landing-touchdown', title: '平穩接地', description: '以低下降與側移速度實際接地；不能以墜毀或空中 Disarm 代替。' },
     { id: 'landing-settle', title: '接地後穩住', description: '留在指定區、保持低速度與水平姿態連續 1 秒。' },
   ],
@@ -220,7 +279,7 @@ export const LANDING_LESSON: LessonDefinition = {
   failure: {
     title: '降落尚未完成',
     description: '此次尚未完成安全進場、低速指定接地與連續停留。',
-    criteria: ['不能直接從地面開始', '不能在空中或錯誤落點通關', '不能墜毀、瞬移或以解除解鎖代替降落'],
+    criteria: ['不能省略起飛或直接從降落區開始', '不能在空中或錯誤落點通關', '不能墜毀、瞬移或以解除解鎖代替降落'],
   },
   scoring: {
     maxScore: 100,
@@ -233,16 +292,17 @@ export const LANDING_LESSON: LessonDefinition = {
 }
 
 export const LANDING_LEARNING_CONTENT: LessonLearningContent = {
-  code: 'L03',
-  title: '定點降落',
+  code: 'L04',
+  title: '起飛、前往降落區與降落',
   level: '入門',
-  prerequisiteIds: ['hover'],
-  objectives: ['以低速對準指定區接地。', '辨別平穩降落與墜毀，接地穩住後再 Disarm。'],
+  prerequisiteIds: ['straight-line'],
+  objectives: ['自行起飛並飛往另一個降落區。', '在藍色區低速接地，穩住後再 Disarm。'],
   steps: [
-    '課程從墊上方 3 公尺開始；準備完成再明確解鎖。',
+    '課程從起飛區地面開始；倒數後自行解鎖，緩慢加油門離地。',
+    `升到至少 ${LANDING_LIFTOFF_HEIGHT_M} 公尺，再飛往前方 ${LANDING_TARGET_DISTANCE_M} 公尺的藍色降落區；光柱標示落點。`,
     '先觀察落點，降低側移速度並讓機體接近水平。',
     '逐步減少油門緩慢下降，接近地面時提早減少下降速度。',
-    '在墊中心附近平穩接地，保持低油門與水平姿態。',
+    '在藍色降落區中心平穩接地，保持低油門與水平姿態。',
     '連續穩住 1 秒，看到完成結果後再 Disarm。',
   ],
   commonMistakes: [

@@ -62,7 +62,7 @@ describe('FlightRenderer lifecycle and failure contract', () => {
 
     expect(renderer.flightScene).not.toBe(previous)
     expect(renderer.renderer).toBe(rendererStub)
-    expect(renderer.flightScene.getReference('landing-surface')?.positionM).toEqual({ x: 4, y: 2, z: -3 })
+    expect(renderer.flightScene.getReference('landing-surface')?.positionM).toEqual({ x: 4, y: 2, z: -11 })
     expect(renderer.flightScene.getReference('landing-surface')?.object.visible).toBe(true)
     expect(renderer.flightScene.getReference('hover-zone')?.object.visible).toBe(false)
     expect(disposePrevious).toHaveBeenCalledOnce()

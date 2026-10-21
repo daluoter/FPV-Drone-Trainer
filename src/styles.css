@@ -2755,6 +2755,16 @@ h1 em {
 .school-viewport-hint { position: absolute; left: 12px; right: 12px; bottom: 12px; background: #203b35e8; color: #fff; padding: 10px 14px; border-radius: 8px; font-size: 13px; line-height: 1.6; }
 .school-result { padding: 12px; border-radius: 8px; background: #203d31; color: #e0f5dc; font-size: 12px; line-height: 1.6; }
 .school-result-feedback { font-size: 12px; line-height: 1.7; }
+.school-objective { margin: 10px 0; padding: 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-raised); font-size: 12px; line-height: 1.65; }
+.school-objective strong { display: block; color: var(--accent); }
+.school-objective p { margin: 4px 0 0; }
+.school-route-guide { font-size: 11px; line-height: 1.7; color: var(--muted); }
+.school-playback-return { justify-content: space-between; padding: 10px 12px; margin-bottom: 10px; border: 1px solid var(--accent); border-radius: 8px; background: var(--surface-raised); }
+.school-playback-return .lab-button { flex-shrink: 0; }
+.school-viewport-hint strong { display: block; margin-bottom: 3px; }
+.school-result-replay { margin-top: 10px; padding: 12px; border: 1px solid var(--line-strong); border-radius: 8px; font-size: 12px; line-height: 1.6; }
+.school-result-replay p { margin: 6px 0; }
+.school-result-replay-markers { display: flex; flex-wrap: wrap; gap: 7px; }
 .school-progress, .school-prototype-note, .school-lesson-notes { font-size: 11px; line-height: 1.7; color: var(--muted); }
 .school-lesson-notes summary, .school-settings summary { cursor: pointer; padding: 8px 0; }
 .school-lesson-notes ul { padding-left: 18px; }

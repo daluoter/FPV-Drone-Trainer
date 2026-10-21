@@ -34,7 +34,7 @@ checks project-path assets, an initialized WebGL2 canvas, explicit keyboard
 arm/disarm, countdown and waiting for explicit arm, keyboard reset, training stop,
 practice/challenge progress isolation, L00 knowledge completion and reload,
 synchronized L01/L03/L04 demo controls without progress writes, airborne waiting
-positions, fullscreen recovery, camera controls, and logo navigation. This workflow does
+positions, an inline L00 playback exit, session-bound result marker seek with progress isolation, fullscreen recovery, camera controls, and logo navigation. This workflow does
 not deploy the site; production publishing remains a separate manual workflow.
 
 To reproduce the browser check after the required npm gates:

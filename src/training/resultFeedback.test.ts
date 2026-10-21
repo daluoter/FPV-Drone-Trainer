@@ -39,4 +39,25 @@ describe('observed result coaching', () => {
     expect(feedback.observedGap).toBeNull()
     expect(feedback.nextPractice).toContain('相同條件再練一次')
   })
+
+  it('does not classify the initial eight-metre target distance or zero speed as stopping or landing skill', () => {
+    for (const [lessonId, metrics] of [
+      ['straight-line', { routePhase: 0, stopErrorM: 8, horizontalSpeedMps: 0, contiguousDwellSeconds: 0 }],
+      ['landing', { landingPhase: 1, landingPositionErrorM: 8, horizontalSpeedMps: 0, touchdownDescentSpeedMps: 0, groundTouching: 1 }],
+    ] as const) {
+      const feedback = summarizeTrainingResult({ ...result, lessonId, metrics, completedCheckpoints: 0 })
+      expect(feedback.observedStrength).toBeNull()
+      expect(feedback.observedGap).not.toMatch(/終點偏差|落點偏差|下降速度/)
+      expect(feedback.nextPractice).toContain('起飛')
+    }
+  })
+
+  it('names the actual uncompleted route stage instead of blaming a distant final target during transit', () => {
+    const gold = summarizeTrainingResult({ ...result, lessonId: 'straight-line', metrics: { routePhase: 2, stopErrorM: 2 } })
+    expect(gold.observedGap).toContain('穿過圓環不等於完成')
+    expect(gold.nextPractice).toContain('觀察前進速度確實降低')
+    const transit = summarizeTrainingResult({ ...result, lessonId: 'landing', metrics: { landingPhase: 2, landingPositionErrorM: 5 } })
+    expect(transit.observedGap).toContain('尚未完成從空中')
+    expect(transit.nextPractice).toContain('先保持高度')
+  })
 })

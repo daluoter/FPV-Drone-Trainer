@@ -1,4 +1,5 @@
-import { isFiniteDroneState } from '../drone'
+import { DRONE_GROUND_CLEARANCE_M, isFiniteDroneState } from '../drone'
+import { TRAINING_ROUTE_ALTITUDE_AGL_M } from './field'
 import { rotateVectorByQuaternion } from '../math/quaternion'
 import type { LessonLearningContent } from './catalog'
 import type {
@@ -11,17 +12,20 @@ import type {
 
 /** Prototype geometry/tolerances shared with field presentation, pending pilot trials. */
 export const STRAIGHT_LINE_ROUTE_LENGTH_M = 8
-export const STRAIGHT_LINE_HEIGHT_OFFSET_M = 2.5
+export const STRAIGHT_LINE_TARGET_HEIGHT_AGL_M = TRAINING_ROUTE_ALTITUDE_AGL_M
 export const STRAIGHT_LINE_CORRIDOR_HALF_WIDTH_M = 1.25
 export const STRAIGHT_LINE_TRANSIT_DISTANCE_M = 3
 export const STRAIGHT_LINE_BRAKE_ZONE_START_M = 5
 export const STRAIGHT_LINE_STOP_RADIUS_M = 0.65
 export const STRAIGHT_LINE_SETTLED_DWELL_SECONDS = 1.2
 export const STRAIGHT_LINE_ALTITUDE_TOLERANCE_M = 0.7
+export const STRAIGHT_LINE_MIN_BRAKE_ENTRY_SPEED_MPS = 0.2
+export const STRAIGHT_LINE_MIN_BRAKE_REDUCTION_MPS = 0.1
+export const STRAIGHT_LINE_BRAKE_REDUCTION_RATIO = 0.3
 
 const MAXIMUM_SAMPLE_GAP_SECONDS = 0.35
 const MAXIMUM_SPEED_MPS = 4
-const TIME_LIMIT_SECONDS = 45
+const TIME_LIMIT_SECONDS = 90
 
 function metric(context: TrainingEvaluationContext, name: string): number {
   const value = context.previousEvaluation?.metrics?.[name]
@@ -45,7 +49,7 @@ function excursion(
     status: 'continue', recovery: 'restart',
     metrics: { ...metrics, peakForwardSpeedMps: 0, brakeEntrySpeedMps: 0, furthestProgressM: 0, contiguousDwellSeconds: 0, settled: 0, routePhase: 0 },
     message,
-    hint: '本次局部目標已重新開始；先降低速度、回到起點與目標高度，穩住後再走完整條路線。',
+    hint: '本次局部目標已重新開始；先降低速度，回起飛區平穩接地，再自行起飛並走完整條路線。',
   }
 }
 
@@ -59,12 +63,23 @@ function evaluateStraightLine(sample: TrainingSample, context: TrainingEvaluatio
   if (sample.armed !== true) return { status: 'continue', metrics: {}, message: '等待實際解鎖的飛行資料。' }
 
   const pad = context.sceneReferences.find((reference) => reference.id === 'takeoff-pad')
-  if (!pad || !Object.values(pad.positionM).every(Number.isFinite)) {
-    return terminal('直線練習無法取得有效起飛墊參考，請重設訓練場。')
+  const launch = context.sceneReferences.find((reference) => reference.id === 'training-launch')
+  const surface = context.sceneReferences.find((reference) => reference.id === 'landing-surface')
+  if (!pad || !launch || !surface || !Object.values(pad.positionM).every(Number.isFinite)
+    || !Object.values(launch.positionM).every(Number.isFinite) || !Object.values(surface.positionM).every(Number.isFinite)) {
+    return terminal('直線練習無法取得有效起飛區參考，請重設訓練場。')
+  }
+  const contact = sample.groundContact
+  if (!contact || typeof contact.touching !== 'boolean' || !Number.isFinite(contact.heightM)
+    || !Number.isFinite(contact.supportOffsetM) || contact.supportOffsetM < 0
+    || Math.abs(contact.heightM - surface.positionM.y) > 1e-5
+    || (contact.touching && Math.abs(sample.state.positionM.y
+      - contact.heightM - contact.supportOffsetM - DRONE_GROUND_CLEARANCE_M) > 0.003)) {
+    return terminal('直線練習停止：缺少有效的地面接觸資料，不能跳過自行起飛。')
   }
   const position = sample.state.positionM
   const velocity = sample.state.velocityMps
-  const targetAltitude = pad.positionM.y + STRAIGHT_LINE_HEIGHT_OFFSET_M
+  const targetAltitude = surface.positionM.y + STRAIGHT_LINE_TARGET_HEIGHT_AGL_M
   const altitudeError = Math.abs(position.y - targetAltitude)
   const crossTrackError = Math.abs(position.x - pad.positionM.x)
   const progress = pad.positionM.z - position.z
@@ -72,15 +87,21 @@ function evaluateStraightLine(sample: TrainingSample, context: TrainingEvaluatio
   const horizontalSpeed = Math.hypot(velocity.x, velocity.z)
   const verticalSpeed = Math.abs(velocity.y)
   const stopError = Math.hypot(position.x - pad.positionM.x, progress - STRAIGHT_LINE_ROUTE_LENGTH_M)
+  const launchDistance = Math.hypot(position.x - launch.positionM.x, position.z - launch.positionM.z)
   const up = rotateVectorByQuaternion(sample.state.orientation, { x: 0, y: 1, z: 0 })
   const tilt = Math.acos(Math.max(-1, Math.min(1, up.y))) * 180 / Math.PI
+  const groundStarted = context.checkpoints['straight-ground']?.completed === true
+  const started = context.checkpoints['straight-start']?.completed === true
+  const transited = context.checkpoints['straight-transit']?.completed === true
+  const braked = context.checkpoints['straight-brake']?.completed === true
   const peakSpeed = Math.max(metric(context, 'peakForwardSpeedMps'), forwardSpeed, 0)
   const furthestProgress = Math.max(metric(context, 'furthestProgressM'), progress, 0)
   const metrics: Record<string, number> = {
     alongTrackM: progress,
     crossTrackErrorM: crossTrackError,
-    altitudeM: position.y - pad.positionM.y,
-    targetAltitudeM: STRAIGHT_LINE_HEIGHT_OFFSET_M,
+    launchHeightM: Math.max(0, position.y - launch.positionM.y),
+    altitudeM: position.y - surface.positionM.y,
+    targetAltitudeM: STRAIGHT_LINE_TARGET_HEIGHT_AGL_M,
     altitudeErrorM: altitudeError,
     forwardSpeedMps: forwardSpeed,
     horizontalSpeedMps: horizontalSpeed,
@@ -92,11 +113,13 @@ function evaluateStraightLine(sample: TrainingSample, context: TrainingEvaluatio
     furthestProgressM: furthestProgress,
     contiguousDwellSeconds: 0,
     settled: 0,
-    routePhase: 0,
+    groundStarted: groundStarted ? 1 : 0,
+    takeoffReady: started ? 1 : 0,
+    routePhase: started ? braked ? 3 : transited ? 2 : 1 : 0,
   }
 
-  // Local practice recovery clears previousSample; the flight-level sample still
-  // guards continuity so resetting objectives cannot hide a teleport or rewind.
+  // Keep the actual previous flight sample across local practice recovery.
+  // New objectives cannot hide a reset, frozen physics or a teleport.
   const previousFlight = context.previousFlightSample ?? context.previousSample
   if (previousFlight) {
     const delta = sample.timestampSeconds - previousFlight.timestampSeconds
@@ -119,57 +142,102 @@ function evaluateStraightLine(sample: TrainingSample, context: TrainingEvaluatio
       return terminal('直線練習停止：位置跳躍與速度不一致，不能跳過路線。', metrics)
     }
   }
-
-  if (crossTrackError > STRAIGHT_LINE_CORRIDOR_HALF_WIDTH_M || altitudeError > STRAIGHT_LINE_ALTITUDE_TOLERANCE_M
+  if (context.mode !== 'practice' && context.elapsedSeconds > TIME_LIMIT_SECONDS) {
+    return terminal('直線挑戰逾時：尚未完成自行起飛、前進、減速與穩定停點。', metrics)
+  }
+  if (crossTrackError > STRAIGHT_LINE_CORRIDOR_HALF_WIDTH_M
     || progress < -1 || progress > STRAIGHT_LINE_ROUTE_LENGTH_M + 1.25
     || horizontalSpeed > MAXIMUM_SPEED_MPS || verticalSpeed > 2 || tilt > 40
+    || position.y < launch.positionM.y - 0.1
+    || position.y > targetAltitude + STRAIGHT_LINE_ALTITUDE_TOLERANCE_M
     || furthestProgress - progress > 1.25) {
-    return excursion(context, '偏離直線走廊、目標高度或受控速度範圍，請回到起點重練。', metrics)
-  }
-  if (context.mode !== 'practice' && context.elapsedSeconds > TIME_LIMIT_SECONDS) {
-    return terminal('直線挑戰逾時：尚未完成依序前進、減速與穩定停點。', metrics)
+    return excursion(context, '偏離直線走廊、高度或受控速度範圍，請回起飛區接地後重練。', metrics)
   }
 
-  const started = context.checkpoints['straight-start']?.completed === true
-  const transited = context.checkpoints['straight-transit']?.completed === true
-  const braked = context.checkpoints['straight-brake']?.completed === true
-  const atStart = Math.hypot(position.x - pad.positionM.x, progress) <= 0.7
+  const groundedStart = !groundStarted && contact.touching && launchDistance <= 0.85
+    && horizontalSpeed <= 0.6 && verticalSpeed <= 0.2 && tilt <= 15
+  if (!groundStarted && !groundedStart) {
+    return excursion(context, '本課須先從起飛區地面開始，再自行起飛；不能從空中或終點跳過起飛。', metrics)
+  }
+  const atStart = groundStarted && !contact.touching && launchDistance <= 0.7
+    && altitudeError <= STRAIGHT_LINE_ALTITUDE_TOLERANCE_M
     && horizontalSpeed <= 0.6 && verticalSpeed <= 0.5 && tilt <= 15
-  if (!started && !atStart) {
-    return excursion(context, '需從起點穩定開始，不能跳到中途或終點。', metrics)
+  if (!started) {
+    if (launchDistance > STRAIGHT_LINE_CORRIDOR_HALF_WIDTH_M) {
+      return excursion(context, '先在起飛區上方升到起點環並穩住，再開始前進。', metrics)
+    }
+    metrics.groundStarted = groundStarted || groundedStart ? 1 : 0
+    metrics.takeoffReady = atStart ? 1 : 0
+    metrics.routePhase = atStart ? 1 : 0
+    return {
+      status: 'continue', metrics,
+      checkpointIds: [...(groundedStart ? ['straight-ground'] : []), ...(atStart ? ['straight-start'] : [])],
+      hint: atStart
+        ? '起飛完成。沿直線向前，通過前方三公尺的中途環；保持目前高度。'
+        : '從地面自行起飛，升到起飛區上方的起點環；先穩住高度與速度，再向前飛。',
+    }
   }
-  if (started && !transited && progress > STRAIGHT_LINE_BRAKE_ZONE_START_M) {
-    return excursion(context, '必須先通過中途目標，再進入減速區；不可跳過路線順序。', metrics)
-  }
-  if (transited && !braked && progress >= STRAIGHT_LINE_ROUTE_LENGTH_M - STRAIGHT_LINE_STOP_RADIUS_M) {
-    return excursion(context, '尚未在減速區觀察到實際降速；穿過終點不算停點。', metrics)
+  if (altitudeError > STRAIGHT_LINE_ALTITUDE_TOLERANCE_M) {
+    return excursion(context, '航線已開始，請保持起點環的目標高度；回起飛區重練。', metrics)
   }
 
-  const transit = started && !transited && progress >= STRAIGHT_LINE_TRANSIT_DISTANCE_M
-    && progress <= STRAIGHT_LINE_BRAKE_ZONE_START_M && forwardSpeed >= 0.6
-  const brakeEntrySpeed = metric(context, 'brakeEntrySpeedMps') || (
-    transited && progress >= STRAIGHT_LINE_BRAKE_ZONE_START_M
-      && progress < STRAIGHT_LINE_ROUTE_LENGTH_M - STRAIGHT_LINE_STOP_RADIUS_M && forwardSpeed >= 0.8
-      ? forwardSpeed : 0
-  )
-  metrics.brakeEntrySpeedMps = brakeEntrySpeed
   const previousProgress = context.previousSample
-    ? pad.positionM.z - context.previousSample.state.positionM.z : 0
-  const braking = transited && !braked && progress >= STRAIGHT_LINE_BRAKE_ZONE_START_M
-    && progress < STRAIGHT_LINE_ROUTE_LENGTH_M - STRAIGHT_LINE_STOP_RADIUS_M
-    && previousProgress >= STRAIGHT_LINE_BRAKE_ZONE_START_M
-    && brakeEntrySpeed >= 0.8 && forwardSpeed >= -0.2 && horizontalSpeed <= brakeEntrySpeed * 0.7
-  const settled = braked && stopError <= STRAIGHT_LINE_STOP_RADIUS_M && altitudeError <= 0.45
+    ? pad.positionM.z - context.previousSample.state.positionM.z : progress
+  // Crossing the transit plane is enough: the pilot need not sample an exact
+  // ring position, but a continuous forward route at the correct height is required.
+  const transit = !transited && previousProgress <= STRAIGHT_LINE_BRAKE_ZONE_START_M
+    && progress >= STRAIGHT_LINE_TRANSIT_DISTANCE_M && progress <= STRAIGHT_LINE_BRAKE_ZONE_START_M + 0.5
+    && progress > previousProgress && forwardSpeed >= -0.05
+  if (!transited && !transit && progress > STRAIGHT_LINE_BRAKE_ZONE_START_M) {
+    return excursion(context, '需先通過三公尺中途環，再到金色減速環；不可跳過路線順序。', metrics)
+  }
+
+  let brakeEntrySpeed = metric(context, 'brakeEntrySpeedMps')
+  const previousForwardSpeed = context.previousSample ? -context.previousSample.state.velocityMps.z : 0
+  const entryCrossing = previousProgress < STRAIGHT_LINE_BRAKE_ZONE_START_M
+    && progress >= STRAIGHT_LINE_BRAKE_ZONE_START_M && progress > previousProgress
+  // Interpolate the measured continuous segment at the entry plane instead of
+  // requiring a sample exactly at five metres. Pre-zone peak speed never counts.
+  if (!brakeEntrySpeed && (transited || transit)) {
+    const crossingFraction = entryCrossing
+      ? (STRAIGHT_LINE_BRAKE_ZONE_START_M - previousProgress) / (progress - previousProgress) : 0
+    const observedEntrySpeed = entryCrossing
+      ? previousForwardSpeed + (forwardSpeed - previousForwardSpeed) * crossingFraction
+      : previousProgress >= STRAIGHT_LINE_BRAKE_ZONE_START_M ? previousForwardSpeed : 0
+    if (observedEntrySpeed >= STRAIGHT_LINE_MIN_BRAKE_ENTRY_SPEED_MPS) brakeEntrySpeed = observedEntrySpeed
+  }
+  metrics.brakeEntrySpeedMps = brakeEntrySpeed
+  const inZoneEnd = Math.min(progress, STRAIGHT_LINE_ROUTE_LENGTH_M)
+  const observedInZone = Boolean(context.previousSample)
+    && inZoneEnd > Math.max(previousProgress, STRAIGHT_LINE_BRAKE_ZONE_START_M)
+  const endFraction = progress > STRAIGHT_LINE_ROUTE_LENGTH_M && previousProgress < STRAIGHT_LINE_ROUTE_LENGTH_M
+    ? (STRAIGHT_LINE_ROUTE_LENGTH_M - previousProgress) / (progress - previousProgress) : 1
+  const inZoneForwardSpeed = previousForwardSpeed + (forwardSpeed - previousForwardSpeed) * endFraction
+  const previousLateralSpeed = context.previousSample?.state.velocityMps.x ?? velocity.x
+  const inZoneLateralSpeed = previousLateralSpeed + (velocity.x - previousLateralSpeed) * endFraction
+  const inZoneHorizontalSpeed = Math.hypot(inZoneLateralSpeed, inZoneForwardSpeed)
+  const braking = (transited || transit) && !braked && observedInZone
+    && progress <= STRAIGHT_LINE_ROUTE_LENGTH_M + STRAIGHT_LINE_STOP_RADIUS_M
+    && brakeEntrySpeed >= STRAIGHT_LINE_MIN_BRAKE_ENTRY_SPEED_MPS && inZoneForwardSpeed >= -0.2
+    && inZoneHorizontalSpeed <= brakeEntrySpeed - Math.max(
+      STRAIGHT_LINE_MIN_BRAKE_REDUCTION_MPS,
+      brakeEntrySpeed * STRAIGHT_LINE_BRAKE_REDUCTION_RATIO,
+    ) + 1e-9
+  // Evaluate this very sample's valid braking before deciding it missed the
+  // zone; the former check rejected a valid reduction near the final ring.
+  if (transited && !braked && !braking && progress > STRAIGHT_LINE_ROUTE_LENGTH_M + STRAIGHT_LINE_STOP_RADIUS_M) {
+    return excursion(context, '已越過終點，但尚未在金色減速環後觀察到降速；請從地面完整重練。', metrics)
+  }
+  const settled = (braked || braking) && stopError <= STRAIGHT_LINE_STOP_RADIUS_M && altitudeError <= 0.45
     && horizontalSpeed <= 0.35 && verticalSpeed <= 0.35 && tilt <= 12
   const localDelta = context.previousSample ? sample.timestampSeconds - context.previousSample.timestampSeconds : 0
   const dwell = settled && metric(context, 'settled') === 1
     ? metric(context, 'contiguousDwellSeconds') + localDelta : 0
   metrics.settled = settled ? 1 : 0
   metrics.contiguousDwellSeconds = dwell
-  metrics.routePhase = braked ? settled ? 4 : 3 : transited || transit ? 2 : started || atStart ? 1 : 0
+  metrics.routePhase = braked || braking ? settled ? 4 : 3 : transited || transit ? 2 : 1
   const stopped = settled && dwell + 1e-9 >= STRAIGHT_LINE_SETTLED_DWELL_SECONDS
   const checkpointIds = [
-    ...(!started && atStart ? ['straight-start'] : []),
     ...(transit ? ['straight-transit'] : []),
     ...(braking ? ['straight-brake'] : []),
     ...(stopped ? ['straight-stop'] : []),
@@ -180,31 +248,31 @@ function evaluateStraightLine(sample: TrainingSample, context: TrainingEvaluatio
   if (stopped && context.elapsedSeconds >= 3) {
     return {
       status: 'success', metrics, checkpointIds, score,
-      message: '已沿直線維持高度，實際降低前進速度，並在終點連續穩住。',
+      message: '已自行起飛、沿直線前進，在金色環後減速，並於終點連續穩住。',
     }
   }
   return {
     status: 'continue', metrics, checkpointIds, score,
-    hint: !started ? '先在起點保持水平、低速與目標高度。'
-      : !transited ? '小幅前傾建立前進速度，沿直線通過中途目標並維持高度。'
-        : !braked ? '接近終點前反向小幅傾斜降低前進速度；搖桿回中不會自動煞停。'
-          : settled ? '在終點連續穩住，觀察位置、速度與高度。'
-            : '降低剩餘速度，回到終點上方，再以小幅操作維持穩定。',
+    hint: !(transited || transit) ? '通過前方三公尺中途環，保持起點環高度；穿過一圈只完成一個步驟。'
+      : !(braked || braking) ? '已通過中途環。飛過金色減速環後，反向小幅傾斜降低速度，再到八公尺終點停穩。'
+        : settled ? '已到終點，連續穩住 1.2 秒才會完成；保持低速與高度。'
+          : '減速已達標。回到八公尺終點區，將水平速度降至 0.35 m/s 以下，再連續穩住 1.2 秒。',
   }
 }
 
 export const straightLineEvaluator: LessonEvaluatorContract = { evaluate: evaluateStraightLine }
 
 export const STRAIGHT_LINE_LESSON: LessonDefinition = {
-  id: 'straight-line', priority: 1.75, title: 'Straight Line and Stop',
+  id: 'straight-line', priority: 1.5, title: 'Straight Line and Stop',
   description: '在起飛墊前方的直線走廊依序前進、減速，最後在八公尺處穩定停點。',
   availability: 'available', available: true,
-  objectives: ['從起點穩定開始並維持目標高度。', '通過中途目標後，在減速區實際降低速度。', '在終點低速、水平地連續穩住。'],
+  objectives: ['從地面自行起飛，到起點環穩住再前進。', '通過中途目標後，在減速區實際降低速度。', '在終點低速、水平地連續穩住。'],
   setup: {
-    requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: ['takeoff-pad'],
-    spawnPositionM: { x: 0, y: 3, z: 0 }, spawnOrientation: { x: 0, y: 0, z: 0, w: 1 },
+    requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: ['takeoff-pad', 'training-launch', 'landing-surface'],
+    spawnPositionM: { x: 0, y: 0, z: 0 }, spawnOrientation: { x: 0, y: 0, z: 0, w: 1 },
   },
   checkpoints: [
+    { id: 'straight-ground', title: '地面準備', description: '在起飛區地面開始，等待自己增加油門起飛。' },
     { id: 'straight-start', title: '起點穩定', description: '在起點保持水平、低速與目標高度。' },
     { id: 'straight-transit', title: '直線前進', description: '維持高度，實際飛過中途三公尺目標。' },
     { id: 'straight-brake', title: '提早減速', description: '在終點前觀察到實際速度降低。' },
@@ -227,14 +295,14 @@ export const STRAIGHT_LINE_LESSON: LessonDefinition = {
 }
 
 export const STRAIGHT_LINE_LEARNING_CONTENT: LessonLearningContent = {
-  code: 'L04', title: '直線與減速停點', level: '入門', prerequisiteIds: ['landing'],
+  code: 'L03', title: '起飛、直線與減速停點', level: '入門', prerequisiteIds: ['hover'],
   objectives: ['沿直線前進八公尺並維持高度。', '提早減速，在終點連續穩住而非高速掠過。'],
   steps: [
-    '從空中起點開始，先確認水平姿態、前方路線與目標高度。',
+    '從地面自行起飛，升到起飛區上方的起點環並穩住；課程不會把你放在半空中。',
     '小幅前傾建立前進速度，通過三公尺中途目標；適度補油維持高度。',
-    '進入五公尺後的減速區前先看終點，以反向小幅傾斜降低前進速度。',
+    '三公尺中途環通過後，飛過五公尺金色減速環，再以反向小幅傾斜降低前進速度。',
     'Acro 回中不會自動煞停；觀察實際速度下降後，再將機體帶回近水平。',
-    '在八公尺終點小幅修正位置、高度及剩餘速度，連續穩住完成本課。',
+    '在八公尺終點區內把水平速度降至 0.35 m/s 以下，連續穩住 1.2 秒才完成；只穿過金色圈圈不算整課成功。',
   ],
   commonMistakes: [
     '接近終點才大幅反向操作，造成越過終點或向後飛。',

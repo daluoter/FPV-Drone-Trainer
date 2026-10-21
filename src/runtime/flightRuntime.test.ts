@@ -165,6 +165,23 @@ describe('Free Flight runtime safety transitions', () => {
     runtime.dispose()
   })
 
+  it('reports solver contact before positional correction reaches minimum clearance', () => {
+    const frames = nextFrameRunner()
+    const samples: FlightRuntimeFixedStepSample[] = []
+    const support = droneGroundSupport(DEFAULT_DRONE_CONFIG, { x: 0, y: 0, z: 0, w: 1 }).supportOffsetM
+    const drone = { ...DEFAULT_DRONE_CONFIG, spawnPositionM: { x: 0, y: support + 0.0018, z: 0 } }
+    const runtime = new FlightRuntime({ simulation: { drone }, scheduleFrame: frames.schedule, cancelFrame: frames.cancel, onFixedStep: (sample) => samples.push(sample) })
+    runtime.setInputSource('keyboard')
+    runtime.start()
+    frames.run(0)
+    frames.run(1_000 / 240)
+    const contact = samples.at(-1)!
+    expect(contact.state.velocityMps.y).toBe(0)
+    expect(contact.state.positionM.y).toBeGreaterThan(support + DRONE_GROUND_CLEARANCE_M + 1e-5)
+    expect(contact.groundContact?.touching).toBe(true)
+    runtime.dispose()
+  })
+
   it('clears a prepared hold when replay exits through the normal live reset boundary', () => {
     const frames = nextFrameRunner()
     const drone = { ...DEFAULT_DRONE_CONFIG, spawnPositionM: { x: 0, y: 3, z: 0 } }

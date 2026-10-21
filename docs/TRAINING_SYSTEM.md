@@ -231,3 +231,24 @@ preferences use a separate validated storage document; answering a quiz or
 watching a demonstration never writes a flight result. Result coaching states
 final observations, one measured gap and one next action without inferring a
 cause, independent mastery or hardware skill.
+
+
+## Learner-feedback revision and result review
+
+Following manual feedback, display order is now L01 Takeoff, L02 Hover, L03
+Straight Line, L04 Landing, while stable lesson IDs stay unchanged. Rules version
+3 starts both revised lessons on the actual supported ground. Straight requires
+manual takeoff then ordered travel, measured deceleration inside 5–8 m and a settled
+stop. Landing requires manual takeoff and travel to a separately marked zone 8 m
+forward. Low-altitude teaching geometry is configured-ground-relative rather
+than inherited from an arbitrary elevated free-flight spawn. Ground-contact
+telemetry now uses the same slop as the physical solver.
+
+Result review captures an immutable, session-bound recording once at the terminal
+UI boundary. `resultReplay.ts` trims it to the attempt window, projects checkpoint
+and finish times relative to its first retained sample, and explicitly disables
+missing/overwritten events. A tail within 50 ms can use an honestly labelled last
+frame. The UI opens exactly that recording, pauses and seeks through the existing
+ghost player. Later free flight or demonstrations cannot rebind those markers.
+This remains in-memory presentation; it grants no progress and is not a complete
+log of every recoverable excursion.

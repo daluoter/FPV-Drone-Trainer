@@ -11,7 +11,10 @@ import { LANDING_LESSON, landingEvaluator } from './landing'
 import { STRAIGHT_LINE_LESSON, straightLineEvaluator } from './straightLine'
 import { takeoffEvaluator } from './takeoff'
 import { TrainingSession } from './machine'
-import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample } from './types'
+import { CURRENT_TRAINING_RULES_VERSION } from './attempt'
+import { createTrainingFieldAnchors } from './field'
+import { GROUND_CONTACT_SLOP_M } from '../simulation/dynamics'
+import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample, TrainingSceneReference } from './types'
 
 function at(samples: readonly ReplaySample[], timeSeconds: number): ReplaySample {
   const sample = samples.reduce((closest, candidate) => (
@@ -33,7 +36,7 @@ function geometricSample(settings: TuningSettings, pose: ReplaySample): Training
     groundContact: {
       heightM: settings.drone.ground.heightM,
       supportOffsetM,
-      touching: pose.positionM.y - supportOffsetM <= settings.drone.ground.heightM + 0.002,
+      touching: pose.positionM.y - supportOffsetM <= settings.drone.ground.heightM + GROUND_CONTACT_SLOP_M + 1e-5,
     },
     state: {
       ...createInitialDroneState(settings.drone),
@@ -42,6 +45,16 @@ function geometricSample(settings: TuningSettings, pose: ReplaySample): Training
       stepIndex: Math.round(pose.timestampSeconds * 240),
     },
   }
+}
+
+
+function referencesFor(settings: TuningSettings): readonly TrainingSceneReference[] {
+  const { pad, launch, landing } = createTrainingFieldAnchors(settings.drone)
+  return [
+    { id: 'takeoff-pad', kind: 'pad', positionM: pad },
+    { id: 'training-launch', kind: 'spawn', positionM: launch },
+    { id: 'landing-surface', kind: 'ground', positionM: landing },
+  ]
 }
 
 describe('bounded simulation teaching recordings', () => {
@@ -84,14 +97,14 @@ describe('bounded simulation teaching recordings', () => {
     const settings = createTuningPreset('beginner')
     for (const kind of ['landing', 'straight-line'] as const) {
       const demo = createTeachingDemonstration(settings, kind)
-      expect(demo).toMatchObject({ schemaVersion: 1, rulesVersion: 2, physicsVersion: 1, presetId: 'beginner' })
+      expect(demo).toMatchObject({ schemaVersion: 1, rulesVersion: CURRENT_TRAINING_RULES_VERSION, physicsVersion: 1, presetId: 'beginner' })
       expect(demo.settingsFingerprint).toContain('settings.v1:')
       expect(Object.isFrozen(demo)).toBe(true)
       expect(Object.isFrozen(demo.cues)).toBe(true)
       expect(demo.cues.every(Object.isFrozen)).toBe(true)
-      expect(demo.recording.durationSeconds).toBeGreaterThanOrEqual(13.9)
-      expect(demo.recording.durationSeconds).toBeLessThanOrEqual(18.01)
-      expect(demo.recording.samples.length).toBeLessThanOrEqual(1_200)
+      expect(demo.recording.durationSeconds).toBeGreaterThanOrEqual(26.9)
+      expect(demo.recording.durationSeconds).toBeLessThanOrEqual(32.01)
+      expect(demo.recording.samples.length).toBeLessThanOrEqual(2_100)
       expect(demo.recording.droppedSamples).toBe(0)
       expect(Object.isFrozen(demo.recording.samples)).toBe(true)
     }
@@ -103,6 +116,10 @@ describe('bounded simulation teaching recordings', () => {
   ] as const)('flies a continuous real %s recording which passes its evaluator', (kind, lesson, evaluator) => {
     const settings = createTuningPreset('beginner')
     const demo = createTeachingDemonstration(settings, kind)
+    const first = geometricSample(settings, demo.recording.samples[0]!)
+    expect(first.groundContact?.touching).toBe(true)
+    expect(at(demo.recording.samples, 3).positionM.y).toBeGreaterThan(first.state.positionM.y + 0.8)
+    expect(at(demo.recording.samples, 3).positionM.z).toBeCloseTo(settings.drone.spawnPositionM.z, 3)
     const checkpoints: Record<string, TrainingCheckpointState> = Object.fromEntries(lesson.checkpoints.map((checkpoint) => [
       checkpoint.id, { id: checkpoint.id, completed: false, completedAtSeconds: null, metrics: {} },
     ]))
@@ -116,16 +133,13 @@ describe('bounded simulation teaching recordings', () => {
         elapsedSeconds: pose.timestampSeconds,
         trajectory: [],
         checkpoints,
-        sceneReferences: [
-          { id: 'takeoff-pad', kind: 'pad', positionM: settings.drone.spawnPositionM },
-          { id: 'landing-surface', kind: 'ground', positionM: { ...settings.drone.spawnPositionM, y: settings.drone.ground.heightM } },
-        ],
+        sceneReferences: referencesFor(settings),
         previousSample,
         previousFlightSample: previousSample,
         previousEvaluation,
         mode: 'challenge',
       })
-      expect(evaluation.status, `${pose.timestampSeconds.toFixed(3)}s ${evaluation.message}`).not.toBe('failure')
+      expect(evaluation.status, JSON.stringify({ time: pose.timestampSeconds, message: evaluation.message, metrics: evaluation.metrics, contact: sample.groundContact, previousContact: previousSample?.groundContact, velocity: pose.velocityMps, previousVelocity: previousSample?.state.velocityMps })).not.toBe('failure')
       for (const id of evaluation.checkpointIds ?? []) {
         checkpoints[id] = { id, completed: true, completedAtSeconds: pose.timestampSeconds, metrics: evaluation.metrics ?? {} }
       }
@@ -159,19 +173,16 @@ describe('bounded simulation teaching recordings', () => {
     }
   })
 
-  it('keeps all foundational demonstrations aligned with normalized anchors above raised ground', () => {
+  it.each([[5, 0], [0, 10]])('keeps ground-start demonstrations independent of free-flight spawn (ground %s, spawn %s)', (groundHeight, spawnHeight) => {
     const defaults = createTuningPreset('beginner')
-    const settings = { ...defaults, drone: { ...defaults.drone, ground: { ...defaults.drone.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 0, z: -3 } } }
-    const pad = createInitialDroneState(settings.drone).positionM
+    const settings = { ...defaults, drone: { ...defaults.drone, ground: { ...defaults.drone.ground, heightM: groundHeight }, spawnPositionM: { x: 6, y: spawnHeight, z: -3 } } }
+    const { pad, launch } = createTrainingFieldAnchors(settings.drone)
     for (const kind of ['takeoff', 'landing', 'straight-line'] as const) {
       const demo = createTeachingDemonstration(settings, kind)
-      expect(demo.recording.samples[0]!.positionM).toEqual({ ...pad, y: pad.y + (kind === 'takeoff' ? 0 : 2.5) })
+      expect(demo.recording.samples[0]!.positionM).toEqual(kind === 'takeoff' ? pad : launch)
       const session = new TrainingSession({
         initialLessonId: kind, countdownDurationSeconds: 0,
-        sceneReferences: [
-          { id: 'takeoff-pad', kind: 'pad', positionM: pad },
-          { id: 'landing-surface', kind: 'zone', positionM: { ...pad, y: 5 } },
-        ],
+        sceneReferences: referencesFor(settings),
       })
       session.start(0)
       session.tick(0)
@@ -181,7 +192,7 @@ describe('bounded simulation teaching recordings', () => {
       }
       expect(session.getState().phase, `${kind}: ${session.getState().result?.message}`).toBe('SUCCESS')
     }
-    expect(settings.drone.spawnPositionM.y).toBe(0)
+    expect(settings.drone.spawnPositionM.y).toBe(spawnHeight)
   })
 
   it('flies an actual generated takeoff whose recorded geometry passes the takeoff checkpoints', () => {

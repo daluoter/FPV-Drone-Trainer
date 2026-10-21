@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatTrainingMetrics, trainingHint } from './feedback'
+import { formatTrainingMetrics, trainingHint, trainingObjective, trainingRouteGuide } from './feedback'
 
 describe('beginner-facing training feedback', () => {
   it('prioritizes lesson facts with Chinese names and units, without guessing error direction', () => {
@@ -46,7 +46,7 @@ describe('beginner-facing training feedback', () => {
     }
     expect(formatTrainingMetrics(metrics, 'landing').map((metric) => metric.key))
       .toEqual(['landingHeightM', 'landingPositionErrorM', 'verticalSpeedMps'])
-    expect(formatTrainingMetrics({ ...metrics, groundTouching: 1, touchdownDescentSpeedMps: 0.6 }, 'landing')[2])
+    expect(formatTrainingMetrics({ ...metrics, landingPhase: 4, groundTouching: 1, touchdownDescentSpeedMps: 0.6, contiguousDwellSeconds: 0.3 }, 'landing')[1])
       .toEqual({ key: 'touchdownDescentSpeedMps', label: '接地下降速度', value: '0.60 m/s' })
   })
 
@@ -62,11 +62,51 @@ describe('beginner-facing training feedback', () => {
       routePhase: 2,
     }
     expect(formatTrainingMetrics(metrics, 'straight-line').map((metric) => metric.key))
-      .toEqual(['alongTrackM', 'crossTrackErrorM', 'altitudeErrorM'])
+      .toEqual(['forwardSpeedMps', 'stopErrorM', 'altitudeErrorM'])
     expect(formatTrainingMetrics({ ...metrics, routePhase: 3 }, 'straight-line').map((metric) => metric.key))
       .toEqual(['stopErrorM', 'forwardSpeedMps', 'altitudeErrorM'])
     expect(formatTrainingMetrics({ ...metrics, routePhase: 4 }, 'straight-line').map((metric) => metric.key))
       .toEqual(['stopErrorM', 'horizontalSpeedMps', 'contiguousDwellSeconds'])
+  })
+
+  it('shows takeoff facts before a ground-start course instead of final stopping or touchdown metrics', () => {
+    expect(formatTrainingMetrics({ routePhase: 0, launchHeightM: 0.1, altitudeErrorM: 2.8,
+      verticalSpeedMps: 0.4, stopErrorM: 8, contiguousDwellSeconds: 0 }, 'straight-line').map((metric) => metric.key))
+      .toEqual(['launchHeightM', 'altitudeErrorM', 'verticalSpeedMps'])
+    expect(formatTrainingMetrics({ landingPhase: 1, landingHeightM: 0.1, launchDistanceM: 0,
+      verticalSpeedMps: 0.4, touchdownDescentSpeedMps: 0, groundTouching: 1 }, 'landing').map((metric) => metric.key))
+      .toEqual(['landingHeightM', 'launchDistanceM', 'verticalSpeedMps'])
+  })
+
+  it('explains each straight-line stage and explicitly distinguishes crossing gold from completion', () => {
+    expect(trainingRouteGuide('straight-line')).toMatch(/地面起飛.*藍色 3 m.*金色 5 m.*綠色 8 m.*1.2 秒/)
+    expect(trainingRouteGuide('straight-line')).toContain('穿圈不等於完成')
+    expect(trainingObjective('straight-line', { metrics: { routePhase: 0, altitudeErrorM: 2 } })?.detail)
+      .toContain('距目標高度 2.0 m')
+    expect(trainingObjective('straight-line', { metrics: { routePhase: 1, alongTrackM: 1 } })?.detail)
+      .toContain('距中途目標 2.0 m')
+    const gold = trainingObjective('straight-line', { metrics: { routePhase: 2, alongTrackM: 5.2, forwardSpeedMps: 1.2 } })
+    expect(gold?.detail).toContain('穿過金色環還未完成')
+    expect(gold?.detail).toContain('1.2 m/s')
+    expect(trainingObjective('straight-line', { metrics: { routePhase: 2, alongTrackM: 5.2, brakeEntrySpeedMps: 0 } })?.detail)
+      .toContain('至少 0.2 m/s')
+    expect(trainingObjective('straight-line', { metrics: { routePhase: 3, stopErrorM: 1.4, horizontalSpeedMps: 0.5 } })?.detail)
+      .toContain('距停點 1.4 m')
+    expect(trainingObjective('straight-line', { metrics: { routePhase: 4, contiguousDwellSeconds: 0.7 } })?.detail)
+      .toContain('再穩住 0.5 s')
+    expect(trainingHint('straight-line', { status: 'continue', metrics: { routePhase: 2, alongTrackM: 5.2, forwardSpeedMps: 1.2 } }))
+      .toContain('金色減速區')
+  })
+
+  it('directs landing learners from the launch pad to the separate marked target', () => {
+    expect(trainingRouteGuide('landing')).toContain('降落目標與起飛墊分開')
+    expect(trainingObjective('landing', { metrics: { landingPhase: 1 } })?.detail).toContain('先離地至少 0.8 m')
+    expect(trainingObjective('landing', { metrics: { landingPhase: 2, landingPositionErrorM: 6.4 } })?.detail)
+      .toContain('距降落區 6.4 m')
+    expect(trainingObjective('landing', { metrics: { landingPhase: 3, landingPositionErrorM: 0.3, landingHeightM: 0.4 } })?.detail)
+      .toContain('離地間隙 0.4 m')
+    expect(trainingObjective('landing', { metrics: { landingPhase: 4, contiguousDwellSeconds: 0.4 } })?.detail)
+      .toContain('再穩住 0.6 s')
   })
 
   it('uses the current evaluator hint rather than replacing it with generic coaching', () => {

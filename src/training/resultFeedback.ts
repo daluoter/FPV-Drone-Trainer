@@ -1,5 +1,5 @@
 import { trainingHint } from './feedback'
-import { LANDING_MAX_TOUCHDOWN_SPEED_MPS, LANDING_SETTLED_DWELL_SECONDS } from './landing'
+import { LANDING_LIFTOFF_HEIGHT_M, LANDING_MAX_TOUCHDOWN_SPEED_MPS, LANDING_SETTLED_DWELL_SECONDS } from './landing'
 import { STRAIGHT_LINE_SETTLED_DWELL_SECONDS, STRAIGHT_LINE_STOP_RADIUS_M } from './straightLine'
 import { TAKEOFF_SETTLED_DWELL_SECONDS } from './takeoff'
 import type { TrainingResult } from './types'
@@ -58,6 +58,36 @@ function scopeNote(result: TrainingResult): string {
     : '能力挑戰只比較相同條件的紀錄；完成一次挑戰不代表已熟練。'
 }
 
+function phaseProgress(result: TrainingResult): { observedGap: string; nextPractice: string } | null {
+  if (result.outcome === 'SUCCESS') return null
+  const metrics = result.metrics
+  if (result.lessonId === 'straight-line' && Number.isFinite(metrics.routePhase)) {
+    if (metrics.routePhase === 0) return {
+      observedGap: '本次尚未完成地面起飛並穩定到達起點高度。',
+      nextPractice: '先留在起飛墊上方，緩慢升至起點高度環，穩住後再前進。',
+    }
+    if (metrics.routePhase === 1) return {
+      observedGap: '本次尚未完成前往藍色中途目標的步驟。',
+      nextPractice: '保持高度沿直線前進到藍色中途環，之後再進入金色減速區。',
+    }
+    if (metrics.routePhase === 2) return {
+      observedGap: '本次尚未在金色減速區完成實際降速；穿過圓環不等於完成。',
+      nextPractice: '進入金色減速區後小幅反向修正，觀察前進速度確實降低，再接近綠色停點。',
+    }
+  }
+  if (result.lessonId === 'landing' && Number.isFinite(metrics.landingPhase)) {
+    if (metrics.landingPhase <= 1) return {
+      observedGap: '本次尚未完成從起飛墊離地的步驟。',
+      nextPractice: `先在起飛墊上方緩慢起飛，離地至少 ${LANDING_LIFTOFF_HEIGHT_M} m，再前往藍色降落區。`,
+    }
+    if (metrics.landingPhase === 2) return {
+      observedGap: '本次尚未完成從空中對準藍色降落區進場。',
+      nextPractice: '先保持高度飛向藍色光柱與地面標記，到達區域上方後減少側移，再開始下降。',
+    }
+  }
+  return null
+}
+
 /** Final-sample observations and checkpoint facts, never inferred causes or a claim about the whole flight. */
 export function summarizeTrainingResult(result: TrainingResult): TrainingResultFeedback {
   const scope = scopeNote(result)
@@ -70,7 +100,8 @@ export function summarizeTrainingResult(result: TrainingResult): TrainingResultF
     }
   }
 
-  const known = (GOALS[result.lessonId] ?? []).flatMap((goal) => {
+  const phase = phaseProgress(result)
+  const known = (phase ? [] : GOALS[result.lessonId] ?? []).flatMap((goal) => {
     if (goal.key === 'touchdownDescentSpeedMps' && result.metrics.groundTouching !== 1) return []
     const value = result.metrics[goal.key]
     if (!Number.isFinite(value) || value < 0) return []
@@ -86,11 +117,11 @@ export function summarizeTrainingResult(result: TrainingResult): TrainingResultF
   const observedStrength = strongest
     ? `${strongest.goal.minimum ? '已觀察到' : '結束時'}${strongest.goal.label} ${amount(strongest.value, strongest.goal.unit)}，此項達到本課目標。`
     : completed > 0 ? `本次已完成 ${completed} / ${total} 個步驟。` : null
-  const observedGap = gap
+  const observedGap = phase?.observedGap ?? (gap
     ? `${gap.goal.minimum ? '已累積的' : '結束時'}${gap.goal.label}為 ${amount(gap.value, gap.goal.unit)}；本課目標為${gap.goal.minimum ? '連續至少' : '不超過'} ${amount(gap.goal.target, gap.goal.unit)}。`
     : total > completed ? `本次尚有 ${total - completed} 個步驟未完成。`
-      : result.outcome === 'FAILED' ? '本次未通關；現有項目資料不足以判定操控原因。' : null
-  const nextPractice = gap?.goal.tip ?? (result.outcome === 'SUCCESS'
+      : result.outcome === 'FAILED' ? '本次未通關；現有項目資料不足以判定操控原因。' : null)
+  const nextPractice = phase?.nextPractice ?? gap?.goal.tip ?? (result.outcome === 'SUCCESS'
     ? '以相同條件再練一次，觀察能否持續完成相同步驟。'
     : trainingHint(result.lessonId, { status: 'failure', hint: result.hint ?? undefined }))
   return { observedStrength, observedGap, nextPractice, scopeNote: scope }
