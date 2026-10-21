@@ -171,6 +171,14 @@ export interface TrainingSetupRequest {
   readonly setup: LessonSetup
 }
 
+/** First observed cause of one local practice restart, retained for review. */
+export interface TrainingRecoverySnapshot {
+  readonly timestampSeconds: number
+  readonly message: string
+  readonly hint: string | null
+  readonly metrics: Readonly<Record<string, number>>
+}
+
 export interface TrainingMachineState {
   readonly attemptContext?: TrainingAttemptContext
   readonly phase: TrainingPhase
@@ -196,6 +204,10 @@ export interface TrainingMachineState {
   readonly trajectory: readonly TrainingSample[]
   readonly checkpoints: Readonly<Record<string, TrainingCheckpointState>>
   readonly lastEvaluation: TrainingEvaluation | null
+  /** Original restart cause; later return-to-start reminders do not replace it. */
+  readonly lastRecovery?: TrainingRecoverySnapshot | null
+  /** A new cause can be captured after a defined local checkpoint is observed again. */
+  readonly recoveryInProgress?: boolean
   readonly result: TrainingResult | null
   readonly setupRequest: TrainingSetupRequest | null
   readonly sceneReferences: readonly TrainingSceneReference[]

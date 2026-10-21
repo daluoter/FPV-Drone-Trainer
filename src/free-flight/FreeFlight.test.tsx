@@ -143,8 +143,12 @@ describe('Free Flight native navigation confirmation', () => {
     frame(200)
     frame(250)
     expect(onFixedStep).toHaveBeenCalledTimes(beforePlayback)
+    const recordedAltitude = screen.getByTestId('flight-altitude').textContent
+    const recordedRight = screen.getByTestId('flight-position-right').textContent
 
     fireEvent.click(screen.getByRole('button', { name: '結束回放' }))
+    const changed = { ...settings, drone: { ...settings.drone, ground: { ...settings.drone.ground, heightM: 10 }, spawnPositionM: { x: 5, y: 10, z: 8 } } }
+    rerender(<FreeFlight {...props} settings={changed} trainingState={terminal} />)
     fireEvent.click(screen.getByRole('button', { name: /^Arm$/ }))
     frame(300)
     frame(1_000 / 60 + 300)
@@ -152,11 +156,54 @@ describe('Free Flight native navigation confirmation', () => {
     expect(frames.runtime!.getReplayRecording()!.durationSeconds).toBeLessThan(source.durationSeconds)
     fireEvent.click(within(review).getByRole('button', { name: '回放：練習結束' }))
     expect(frames.runtime!.getReplayPlayback()?.getState().durationSeconds).toBeCloseTo(source.durationSeconds)
+    // Result review uses the old ground and launch origin after tuning changes.
+    expect(screen.getByTestId('flight-altitude')).toHaveTextContent(recordedAltitude!)
+    expect(screen.getByTestId('flight-position-right')).toHaveTextContent(recordedRight!)
     fireEvent.click(screen.getByRole('button', { name: '結束回放' }))
     fireEvent.click(screen.getByRole('button', { name: '橫滾 Roll' }))
     expect(screen.queryByRole('region', { name: '本次結果回放' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
     fireEvent.click(within(screen.getByRole('region', { name: '本次結果回放' })).getByRole('button', { name: '回放：練習結束' }))
     expect(frames.runtime!.getReplayPlayback()?.getState().durationSeconds).toBeCloseTo(source.durationSeconds)
+  })
+
+  it('shows ground-relative altitude and launch-relative coordinates from the paused replay ghost', () => {
+    const defaults = createDefaultTuningSettings()
+    const settings = { ...defaults, drone: { ...defaults.drone,
+      ground: { ...defaults.drone.ground, heightM: 10 }, spawnPositionM: { x: 5, y: 10, z: 8 } } }
+    render(<FreeFlight poller={createBrowserGamepadPoller()} profile={null} settings={settings} />)
+    const hud = screen.getByRole('group', { name: '飛行位置' })
+    expect(within(hud).getByTestId('flight-altitude')).toHaveTextContent('0.0 m')
+    expect(within(hud).getByTestId('flight-position-right')).toHaveTextContent('0.0 m')
+    expect(within(hud).getByTestId('flight-position-forward')).toHaveTextContent('0.0 m')
+    fireEvent.click(screen.getByRole('button', { name: 'L03 直線示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    fireEvent.change(screen.getByRole('slider'), { target: { value: frames.runtime!.getReplayPlayback()!.getState().durationSeconds } })
+    expect(within(hud).getByText('回放高度')).toBeInTheDocument()
+    expect(within(hud).getByTestId('flight-altitude')).toHaveTextContent('3.0 m')
+    expect(within(hud).getByTestId('flight-position-forward')).toHaveTextContent('+8.0 m')
+    expect(within(hud).getByTestId('flight-position-up')).toHaveTextContent('+3.0 m')
+    const paused = hud.textContent
+    frame(200)
+    frame(500)
+    expect(hud.textContent).toBe(paused)
+    fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
+    expect(within(hud).getByTestId('flight-altitude')).toHaveTextContent('0.0 m')
+    expect(within(hud).getByTestId('flight-position-forward')).toHaveTextContent('0.0 m')
+  })
+
+  it('keeps the original recovery cause on the viewport until a valid lesson checkpoint resumes', () => {
+    const state: TrainingMachineState = { ...createTrainingMachineState({ initialLessonId: 'straight-line' }),
+      phase: 'ACTIVE', recoveryInProgress: true,
+      lastRecovery: { timestampSeconds: 3, message: '偏離中心線 1.40 m，允許最多 1.25 m。', hint: '先減少側移，再回起飛區接地。', metrics: {} },
+      lastEvaluation: { status: 'continue', recovery: 'restart', message: '尚未完成地面準備。', metrics: { routePhase: 0 } },
+    }
+    const props = { poller: createBrowserGamepadPoller(), profile: null, settings: createDefaultTuningSettings() }
+    const { container, rerender } = render(<FreeFlight {...props} trainingState={state} />)
+    expect(container.querySelector('.school-viewport-hint')).toHaveTextContent('偏離中心線 1.40 m')
+    expect(container.querySelector('.school-viewport-hint')).not.toHaveTextContent('尚未完成地面準備')
+    rerender(<FreeFlight {...props} trainingState={{ ...state, recoveryInProgress: false, lastEvaluation: { status: 'continue', checkpointIds: ['straight-ground'], metrics: { routePhase: 0 } } }} />)
+    expect(container.querySelector('.school-viewport-hint')).not.toHaveTextContent('偏離中心線')
+    expect(container.querySelector('.school-viewport-hint')).toHaveTextContent('起飛')
   })
 })

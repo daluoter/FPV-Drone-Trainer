@@ -5,7 +5,7 @@ import type { NormalizedRcInput } from '../flight-controller'
 import { createTrainingMachineState, reduceTrainingState, TrainingSession } from './machine'
 import { TRAINING_TRAJECTORY_MAX_POINTS } from './trajectory'
 import type { TrainingAttemptContext } from './attempt'
-import type { LessonDefinition, TrainingSample, TrainingSceneReference } from './types'
+import type { LessonDefinition, TrainingEvaluation, TrainingSample, TrainingSceneReference } from './types'
 
 const input: NormalizedRcInput = { roll: 0, pitch: 0, yaw: 0, throttle: 0.4 }
 const practiceContext: TrainingAttemptContext = {
@@ -118,6 +118,89 @@ describe('training state machine', () => {
     expect(rewound.phase).toBe('FAILED')
     expect(rewound.result?.message).toMatch(/reset|rewound/i)
     expect(rewound.sampleCount).toBe(1)
+  })
+
+  it('retains the first restart cause until local checkpoint progress permits a new cause', () => {
+    const altitudeMetrics = { altitudeM: 4.1, altitudeLimitM: 3.7, invalid: Number.NaN }
+    const speedMetrics = { horizontalSpeedMps: 4.8, speedLimitMps: 4 }
+    const lesson: LessonDefinition = {
+      ...testLesson,
+      evaluator: (current): TrainingEvaluation => {
+        switch (current.state.stepIndex) {
+          case 2: return { status: 'continue', recovery: 'restart', message: '高度 4.1 m，超過上限 3.7 m。', hint: '先降低高度。', metrics: altitudeMetrics }
+          case 3:
+          case 5: return { status: 'continue', recovery: 'restart', message: '請回起飛區地面。', hint: '先接地再起飛。', metrics: { altitudeM: 0.3 } }
+          case 4: return { status: 'continue', checkpointIds: ['unknown-checkpoint'], metrics: {} }
+          case 6: return { status: 'continue', checkpointIds: ['hold'], metrics: {} }
+          case 7: return { status: 'continue', recovery: 'restart', message: '水平速度 4.8 m/s，超過上限 4.0 m/s。', hint: '先減少水平速度。', metrics: speedMetrics }
+          case 9: return { status: 'failure', message: 'Stopped after the second recovery.' }
+          default: return { status: 'continue', metrics: {} }
+        }
+      },
+    }
+    const session = new TrainingSession({ lessons: [lesson], initialLessonId: lesson.id, countdownDurationSeconds: 0, attemptContext: practiceContext })
+    session.start(0)
+    session.tick(0)
+    session.consumeSample(indexedSample(1, 1))
+    const first = session.consumeSample(indexedSample(1.1, 2)).lastRecovery!
+    expect(first).toEqual({ timestampSeconds: 1.1, message: '高度 4.1 m，超過上限 3.7 m。', hint: '先降低高度。', metrics: { altitudeM: 4.1, altitudeLimitM: 3.7 } })
+    expect(Object.isFrozen(first)).toBe(true)
+    expect(Object.isFrozen(first.metrics)).toBe(true)
+    altitudeMetrics.altitudeM = 99
+    for (let index = 3; index <= 5; index += 1) {
+      const waiting = session.consumeSample(indexedSample(1 + (index - 1) * 0.1, index))
+      expect(waiting.lastRecovery).toBe(first)
+      expect(waiting.recoveryInProgress).toBe(true)
+      expect(waiting.lastRecovery?.metrics.altitudeM).toBe(4.1)
+    }
+    const progressed = session.consumeSample(indexedSample(1.5, 6))
+    expect(progressed.recoveryInProgress).toBe(false)
+    expect(progressed.lastRecovery).toBe(first)
+    const second = session.consumeSample(indexedSample(1.6, 7)).lastRecovery!
+    expect(second).not.toBe(first)
+    expect(second.message).toContain('水平速度 4.8 m/s')
+    expect(second.timestampSeconds).toBe(1.6)
+    speedMetrics.horizontalSpeedMps = 99
+    expect(second.metrics.horizontalSpeedMps).toBe(4.8)
+    const idleRecovery = session.consumeSample(indexedSample(1.7, 8))
+    expect(idleRecovery.lastRecovery).toBe(second)
+    expect(idleRecovery.recoveryInProgress).toBe(true)
+    const stopped = session.consumeSample(indexedSample(1.8, 9))
+    expect(stopped.phase).toBe('FAILED')
+    expect(stopped.lastRecovery).toBe(second)
+  })
+
+  it('clears recovery history for retry, reset, lesson selection and a fresh start', () => {
+    const lesson: LessonDefinition = { ...testLesson, evaluator: () => ({ status: 'continue', recovery: 'restart', message: '高度超標。' }) }
+    const session = new TrainingSession({ lessons: [lesson], initialLessonId: lesson.id, countdownDurationSeconds: 0, attemptContext: practiceContext })
+    const trigger = (): void => {
+      session.start(0)
+      session.tick(0)
+      session.consumeSample(indexedSample(1, 1))
+      expect(session.getState().lastRecovery?.message).toBe('高度超標。')
+      expect(session.getState().lastRecovery?.hint).toBeNull()
+    }
+    trigger()
+    const retried = session.retry()
+    expect(retried.lastRecovery).toBeNull()
+    expect(retried.recoveryInProgress).toBe(false)
+    trigger()
+    const reset = session.reset()
+    expect(reset.lastRecovery).toBeNull()
+    expect(reset.recoveryInProgress).toBe(false)
+    trigger()
+    session.abort('Stopped for selection', 1.1)
+    session.showResult()
+    const selected = session.selectLesson(lesson.id)
+    expect(selected.lastRecovery).toBeNull()
+    expect(selected.recoveryInProgress).toBe(false)
+    trigger()
+    const staleRecovery = session.getState().lastRecovery
+    const readyWithStaleRecovery = { ...session.reset(), lastRecovery: staleRecovery, recoveryInProgress: true }
+    const started = reduceTrainingState(readyWithStaleRecovery, { type: 'START', timestampSeconds: 0 }, [lesson])
+    expect(started.phase).toBe('COUNTDOWN')
+    expect(started.lastRecovery).toBeNull()
+    expect(started.recoveryInProgress).toBe(false)
   })
 
   it('stops frozen or relabelled physics before an evaluator can accumulate dwell', () => {

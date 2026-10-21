@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import type { ControllerProfile, GamepadPoller } from '../controller'
+import type { DroneConfig } from '../drone'
 import {
   FlightRenderer,
   FlightRendererInitializationError,
@@ -18,8 +19,9 @@ import { trainingHint, trainingObjective } from '../training/feedback'
 import { createResultReplaySnapshot, type ResultReplayMarker, type ResultReplaySnapshot } from '../training/resultReplay'
 import { createTeachingDemonstration, teachingCueAt, type TeachingDemonstration, type TeachingDemonstrationKind } from '../training/demonstrations'
 import type { TrainingMachineState, TrainingSample, TrainingSceneReference, TrainingSetupRequest } from '../training/types'
-import { flightSimulationConfigFromTuning, type TuningSettings } from '../tuning'
+import { copyTuningSettings, flightSimulationConfigFromTuning, type TuningSettings } from '../tuning'
 import { REPLAY_SPEEDS, type ReplaySpeed } from '../replay'
+import { makePositionReadout } from './positionTelemetry'
 
 export interface FreeFlightProps {
   readonly poller: GamepadPoller
@@ -43,6 +45,12 @@ export interface FreeFlightProps {
 
 function format(value: number | undefined, digits = 2): string {
   return value !== undefined && Number.isFinite(value) ? value.toFixed(digits) : '—'
+}
+
+function positionValue(value: number | null, signed = false): string {
+  if (value === null) return '—'
+  const rounded = Math.round(value * 10) / 10
+  return `${signed && rounded > 0 ? '+' : ''}${rounded.toFixed(1)} m`
 }
 
 function vector(values: { x: number; y: number; z: number } | undefined, digits = 2): string {
@@ -115,6 +123,9 @@ export default function FreeFlight({
   const [demoError, setDemoError] = useState<string | null>(null)
   const [resultReplay, setResultReplay] = useState<ResultReplaySnapshot | null>(null)
   const capturedResultSessionRef = useRef<string | null>(null)
+  const lastFlightConfigRef = useRef<DroneConfig>(settings.drone)
+  const capturedResultConfigRef = useRef<DroneConfig | null>(null)
+  const [replayCoordinateConfig, setReplayCoordinateConfig] = useState<DroneConfig | null>(null)
   const [playingResultSession, setPlayingResultSession] = useState<string | null>(null)
   const [source, setSource] = useState<FlightInputSource>('controller')
   const [cameraMode, setCameraMode] = useState<CameraMode>('fpv')
@@ -303,6 +314,7 @@ export default function FreeFlight({
     // Capture this session once. Later flights, clock resets and demonstrations
     // must never supply a replacement recording for these result markers.
     capturedResultSessionRef.current = result.sessionId
+    capturedResultConfigRef.current = lastFlightConfigRef.current
     setResultReplay(createResultReplaySnapshot(trainingState, runtimeRef.current?.getReplayRecording?.() ?? null))
   }, [trainingState?.result?.sessionId])
 
@@ -330,6 +342,7 @@ export default function FreeFlight({
     const runtime = runtimeRef.current
     if (!runtime || renderingState !== 'ready') return
     runtime.arm()
+    if (runtime.getTelemetry().armed) lastFlightConfigRef.current = copyTuningSettings(appliedSettingsRef.current).drone
     setTelemetry(runtime.getTelemetry())
   }
 
@@ -337,13 +350,15 @@ export default function FreeFlight({
     const runtime = runtimeRef.current
     if (!runtime) return
     setPlayingResultSession(null)
-    runtime.enterReplay()
+    if (!runtime.enterReplay()) return
+    setReplayCoordinateConfig(lastFlightConfigRef.current)
     setTelemetry(runtime.getTelemetry())
   }
 
   const exitReplay = (): void => {
     setDemonstration(null)
     setPlayingResultSession(null)
+    setReplayCoordinateConfig(null)
     const runtime = runtimeRef.current
     if (!runtime) return
     runtime.exitReplay()
@@ -359,6 +374,7 @@ export default function FreeFlight({
     if (!runtime || !resultReplay?.recording || marker.timeSeconds === null || trainingSettingsLocked) return
     if (runtime.getTelemetry().replay.active && playingResultSession !== resultReplay.sessionId) runtime.exitReplay()
     if (!runtime.getTelemetry().replay.active && !runtime.enterReplay(resultReplay.recording)) return
+    setReplayCoordinateConfig(capturedResultConfigRef.current)
     setDemonstration(null)
     runtime.pauseReplay()
     runtime.seekReplay(marker.timeSeconds)
@@ -403,6 +419,7 @@ export default function FreeFlight({
 
   const reset = (): void => {
     setDemonstration(null)
+    setReplayCoordinateConfig(null)
     if (trainingSettingsLocked && onTrainingReset) { onTrainingReset(); return }
     const runtime = runtimeRef.current
     if (!runtime) return
@@ -417,6 +434,7 @@ export default function FreeFlight({
       if (runtime.isReplayActive?.()) runtime.exitReplay()
       const demo = createTeachingDemonstration(settings, kind)
       if (!runtime.enterReplay(demo.recording)) return
+      setReplayCoordinateConfig(copyTuningSettings(settings).drone)
       setDemonstration(demo)
       setDemoError(null)
       runtime.playReplay()
@@ -440,7 +458,14 @@ export default function FreeFlight({
       setFullscreenError(null)
     } catch { setFullscreenError('瀏覽器未提供全螢幕；仍可在目前畫面練習。') }
   }
-  const playbackInput = telemetry?.replay.active ? runtimeRef.current?.getReplayPlayback?.()?.getGhostState()?.normalizedInput ?? null : telemetry?.normalizedInput
+  const replayGhost = telemetry?.replay.active ? runtimeRef.current?.getReplayPlayback?.()?.getGhostState() ?? null : null
+  const playbackInput = telemetry?.replay.active ? replayGhost?.normalizedInput ?? null : telemetry?.normalizedInput
+  const positionConfig = telemetry?.replay.active ? replayCoordinateConfig : appliedSettingsRef.current.drone
+  const position = makePositionReadout(
+    positionConfig ? telemetry?.replay.active ? replayGhost : telemetry?.state ?? null : null,
+    positionConfig ?? settings.drone,
+  )
+  const recovery = trainingState?.recoveryInProgress ? trainingState.lastRecovery : null
   const currentObjective = trainingObjective(trainingState?.lessonId ?? null, trainingState?.lastEvaluation)
   const visibleResultReplay = resultReplay?.sessionId === trainingState?.result?.sessionId && !demonstration ? resultReplay : null
   const channels = channelValues(telemetry)
@@ -478,11 +503,20 @@ export default function FreeFlight({
             <button className="lab-button lab-button-primary" type="button" onClick={exitReplay}>{demonstration ? '結束示範' : '結束回放'}</button>
             <span>結束後回到練習，仍需自行解鎖。</span>
           </div>}
-          <div className="free-flight-viewport" role="img" aria-label="Three.js Free Flight simulation viewport">
+          <div className="free-flight-viewport" role="group" aria-label="Three.js Free Flight simulation viewport">
             <canvas key={rendererRetryKey} ref={canvasRef} className="flight-canvas" aria-label="Free Flight 3D scene" />
             <div className="flight-viewport-overlay" aria-hidden="true">
               <span>{telemetry?.replay.active ? 'PLAYBACK GHOST' : 'LIVE SIM'} / {telemetry?.cameraMode?.toUpperCase() ?? 'FPV'}</span>
               <span>{format(telemetry?.metrics.fps, 0)} FPS · {format(telemetry?.metrics.simHz, 0)} SIM HZ</span>
+            </div>
+            <div className="flight-position-hud" role="group" aria-label="飛行位置">
+              <div className="flight-altitude"><span>{telemetry?.replay.active ? '回放高度' : '高度'} <small>地面上方</small></span><strong data-testid="flight-altitude">{positionValue(position.altitudeAboveGroundM)}</strong></div>
+              <div className="flight-position-coordinates">
+                <span>X 右 <b data-testid="flight-position-right">{positionValue(position.rightM, true)}</b></span>
+                <span>前（−Z） <b data-testid="flight-position-forward">{positionValue(position.forwardM, true)}</b></span>
+                <span>Y 上 <b data-testid="flight-position-up">{positionValue(position.upM, true)}</b></span>
+              </div>
+              <small>相對起飛點 · 固定場地方向 · 單位 m</small>
             </div>
             {renderingState !== 'ready' && (
               <div className="flight-rendering-error" role="alert" data-testid="flight-rendering-error">
@@ -500,7 +534,9 @@ export default function FreeFlight({
               </div>
             )}
             {renderingState === 'ready' && telemetry?.replay.active && <div className="flight-safe-overlay">{demonstration ? demonstration.title : '飛行回放'} · 真人飛行已停止</div>}
-            {trainingState?.phase === 'ACTIVE' && <div className="school-viewport-hint">{currentObjective && trainingState.lastEvaluation?.recovery !== 'restart' ? <><strong>{currentObjective.title}</strong><span>{currentObjective.detail}</span></> : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>}
+            {trainingState?.phase === 'ACTIVE' && <div tabIndex={0} aria-label="目前練習提示" className={`school-viewport-hint${recovery ? ' is-recovering' : ''}`}>{recovery
+              ? <><strong>重練原因（當時數值）：{recovery.message}</strong><span>{recovery.hint}</span></>
+              : currentObjective && trainingState.lastEvaluation?.recovery !== 'restart' ? <><strong>{currentObjective.title}</strong><span>{trainingState.lastEvaluation?.hint ? trainingHint(trainingState.lessonId, trainingState.lastEvaluation) : currentObjective.detail}</span></> : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>}
           </div>
           <div className="flight-controls" aria-label="Flight controls">
             <div className="flight-control-group">

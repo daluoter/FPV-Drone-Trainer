@@ -125,6 +125,17 @@ describe('beginner-facing training feedback', () => {
     expect(trainingHint('hover', { status: 'success' })).toContain('解除解鎖')
   })
 
+  it('shows the measured restart or failure cause before the corrective action', () => {
+    const message = '偏離直線走廊：距中心線 1.40 m，允許最多 1.25 m。'
+    const hint = '先減少側移，再回起飛區平穩接地。'
+    expect(trainingHint('straight-line', { status: 'continue', recovery: 'restart', message, hint }))
+      .toBe(`${message} ${hint}`)
+    expect(trainingHint('landing', { status: 'failure', message: '接地下降速度 1.20 m/s，允許最多 0.80 m/s。', hint }))
+      .toContain('接地下降速度 1.20 m/s')
+    expect(trainingHint('straight-line', { status: 'continue', recovery: 'restart', message: 'internal accumulator failed', hint }))
+      .toBe(hint)
+  })
+
   it('keeps restart guidance in the approved reset → countdown → explicit arm order', () => {
     const hint = trainingHint('hover', {
       status: 'failure',

@@ -1774,18 +1774,43 @@ h1 em {
 
 .flight-safe-overlay {
   position: absolute;
-  top: 50%;
+  box-sizing: border-box;
+  top: max(126px, 52%);
   left: 50%;
+  width: max-content;
+  max-width: calc(100% - 32px);
   padding: 9px 12px;
   border: 1px solid rgba(255, 201, 120, 0.34);
   color: var(--warning);
   background: rgba(8, 13, 19, 0.78);
   font-size: 0.61rem;
   letter-spacing: 0.1em;
-  transform: translate(-50%, -50%);
+  transform: translateX(-50%);
   text-transform: uppercase;
-  white-space: nowrap;
+  text-align: center;
 }
+
+.flight-position-hud {
+  position: absolute;
+  box-sizing: border-box;
+  top: 35px;
+  left: 14px;
+  max-width: calc(100% - 28px);
+  padding: 7px 10px;
+  border: 1px solid rgba(178, 223, 193, 0.3);
+  border-radius: 6px;
+  background: rgba(8, 18, 22, 0.86);
+  color: #e8f5ed;
+  font-size: 11px;
+  line-height: 1.5;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+.flight-altitude { display: flex; align-items: baseline; gap: 16px; }
+.flight-altitude strong { color: #c5f783; font-size: 20px; line-height: 1.25; }
+.flight-altitude small, .flight-position-hud > small { color: #afc6c5; font-size: 10px; }
+.flight-position-coordinates { display: flex; flex-wrap: wrap; column-gap: 14px; }
+.flight-position-coordinates b { font-weight: 500; }
 
 .flight-rendering-error {
   position: absolute;
@@ -2752,7 +2777,10 @@ h1 em {
 .school-metrics > div { display: flex; justify-content: space-between; gap: 12px; }
 .school-metrics dd { margin: 0; font-variant-numeric: tabular-nums; }
 .school-live-hint, .school-demo-cue { background: #e9f2e9; color: #264e3c; border-radius: 8px; padding: 10px; line-height: 1.7; font-size: 12px; }
-.school-viewport-hint { position: absolute; left: 12px; right: 12px; bottom: 12px; background: #203b35e8; color: #fff; padding: 10px 14px; border-radius: 8px; font-size: 13px; line-height: 1.6; }
+.school-recovery-history { margin: 10px 0; padding: 10px; border: 1px solid #d7a94c; border-radius: 8px; background: #30281c; color: #ffdf9b; font-size: 12px; line-height: 1.65; }
+.school-recovery-history p { margin: 5px 0 0; }
+.school-viewport-hint { position: absolute; left: 12px; right: 12px; bottom: 12px; box-sizing: border-box; max-height: calc(100% - 125px); overflow-y: auto; background: #203b35e8; color: #fff; padding: 10px 14px; border-radius: 8px; font-size: 13px; line-height: 1.6; }
+.school-viewport-hint.is-recovering { background: #392c16ed; color: #ffdf9b; font-size: 12px; }
 .school-result { padding: 12px; border-radius: 8px; background: #203d31; color: #e0f5dc; font-size: 12px; line-height: 1.6; }
 .school-result-feedback { font-size: 12px; line-height: 1.7; }
 .school-objective { margin: 10px 0; padding: 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-raised); font-size: 12px; line-height: 1.65; }

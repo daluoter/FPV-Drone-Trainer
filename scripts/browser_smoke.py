@@ -135,6 +135,14 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 raise AssertionError(f"No usable WebGL2 drawing buffer: {webgl}")
             report["webgl"] = webgl
             checks.append("initialized WebGL2 viewport")
+            position_hud = flight.get_by_role("group", name="飛行位置", exact=True)
+            altitude = flight.get_by_test_id("flight-altitude")
+            expect(position_hud).to_be_visible()
+            expect(altitude).to_have_text(re.compile(r"^-?\d+\.\d m$"))
+            for coordinate in ("right", "forward", "up"):
+                expect(flight.get_by_test_id(f"flight-position-{coordinate}")).to_have_text(re.compile(r"^[+-]?\d+\.\d m$"))
+            expect(position_hud).to_contain_text("相對起飛點")
+            checks.append("always-visible altitude and launch-relative position without developer HUD")
             for control in (flight.locator('.flight-controls'), page.locator('#training').get_by_role('button', name='開始課程', exact=True)):
                 bounds = control.bounding_box()
                 if not bounds or bounds['y'] < 0 or bounds['y'] + bounds['height'] > 720:
@@ -220,6 +228,16 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
 
             timeline.press("End")
             expect(cue).to_contain_text("連續穩住")
+            expect(position_hud).to_contain_text("回放高度")
+            end_altitude = float(altitude.inner_text().split()[0])
+            if not 2.3 <= end_altitude <= 2.7:
+                raise AssertionError(f"Replay HUD used live ground pose instead of takeoff ghost: {end_altitude}")
+            paused_position = position_hud.inner_text()
+            page.wait_for_timeout(200)
+            if position_hud.inner_text() != paused_position:
+                raise AssertionError("Paused replay position HUD kept changing.")
+            if screenshot:
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "replay-position-hud.png"))
             if abs(float(timeline.input_value()) - float(timeline.get_attribute("max"))) > 0.02:
                 raise AssertionError("Seeking did not reach the end of the demonstration.")
             dots = demonstration_sticks.locator(".mode2-stick-dot").evaluate_all(
@@ -235,6 +253,9 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             timeline.press("Home")
             expect(cue).to_contain_text("先確認機身水平")
             expect(timeline).to_have_value("0")
+            if float(altitude.inner_text().split()[0]) >= end_altitude - 1:
+                raise AssertionError("Seeking the ghost did not update altitude HUD.")
+            checks.append("replay altitude follows seek and freezes while paused")
             half_speed = flight.get_by_role("button", name="0.5×", exact=True)
             half_speed.click()
             expect(half_speed).to_have_attribute("aria-pressed", "true")
@@ -445,6 +466,27 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 raise AssertionError("The logo navigated outside the Pages project path.")
             expect(page.locator("#free-flight canvas")).to_be_visible()
             checks.append("logo reload preserves project path")
+
+            report["position_hud_layouts"] = {}
+            for width, height in ((1280, 720), (1280, 600), (375, 720)):
+                page.set_viewport_size({"width": width, "height": height})
+                position_hud.scroll_into_view_if_needed()
+                hud_bounds = position_hud.bounding_box()
+                banner_bounds = flight.locator(".flight-safe-overlay").bounding_box()
+                viewport_bounds = flight.locator(".free-flight-viewport").bounding_box()
+                if not hud_bounds or not banner_bounds or not viewport_bounds:
+                    raise AssertionError("Position HUD or safe banner has no layout bounds.")
+                if hud_bounds['x'] < viewport_bounds['x'] or hud_bounds['x'] + hud_bounds['width'] > viewport_bounds['x'] + viewport_bounds['width']:
+                    raise AssertionError(f"Position HUD overflows viewport at {width}x{height}.")
+                overlap_x = min(hud_bounds['x'] + hud_bounds['width'], banner_bounds['x'] + banner_bounds['width']) - max(hud_bounds['x'], banner_bounds['x'])
+                overlap_y = min(hud_bounds['y'] + hud_bounds['height'], banner_bounds['y'] + banner_bounds['height']) - max(hud_bounds['y'], banner_bounds['y'])
+                if overlap_x > 0 and overlap_y > 0:
+                    raise AssertionError(f"Position HUD overlaps safe banner at {width}x{height}.")
+                report["position_hud_layouts"][f"{width}x{height}"] = {"hud": hud_bounds, "safe_banner": banner_bounds}
+                if screenshot and width == 375:
+                    flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "position-hud-375.png"))
+            page.set_viewport_size({"width": 1280, "height": 720})
+            checks.append("position HUD fits desktop, short desktop and mobile without overlapping safe banner")
 
             if screenshot:
                 page.evaluate("window.scrollTo({top: 0, behavior: 'instant'})")

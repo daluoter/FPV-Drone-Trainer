@@ -148,7 +148,7 @@ describe('ground-start straight line and deceleration lesson', () => {
     expect(passThrough.checkpoints['straight-transit']?.completed).toBe(true)
     expect(passThrough.checkpoints['straight-brake']?.completed).toBe(false)
     expect(passThrough.checkpoints['straight-stop']?.completed).toBe(false)
-    expect(passThrough.result?.message).toMatch(/降速/)
+    expect(passThrough.result?.message).toMatch(/減速|降速/)
   })
 
   it('counts observed braking while crossing the brake plane without requiring an exact five-metre sample', () => {
@@ -296,6 +296,69 @@ describe('ground-start straight line and deceleration lesson', () => {
     const inAir = straightLineEvaluator.evaluate(sample(1, 0), context({ mode: 'practice', previousEvaluation: practice }))
     expect(inAir.recovery).toBe('restart')
     expect(inAir.checkpointIds).toBeUndefined()
+  })
+
+  it.each([
+    { label: '走廊寬度', current: { ...sample(0, 2), state: { ...sample(0, 2).state, positionM: { x: PAD.x + 1.5, y: ALTITUDE, z: PAD.z - 2 } } }, expected: ['中心線', '1.50 m', '1.25 m'] },
+    { label: '高度上限', current: sample(0, 2, 0, GROUND_HEIGHT + 4), expected: ['高度', '4.00 m', '3.70 m'] },
+    { label: '航線高度偏低', current: sample(0, 2, 0, GROUND_HEIGHT + 2), expected: ['高度', '2.00 m', '2.30～3.70 m'] },
+    { label: '水平速度', current: sample(0, 2, 4.5), expected: ['水平速度', '4.50 m/s', '4.00 m/s'] },
+    { label: '下降速度', current: sample(0, 2, 0, ALTITUDE, -2.4), expected: ['下降速度', '2.40 m/s', '2.00 m/s'] },
+    { label: '傾角', current: { ...sample(0, 2), state: { ...sample(0, 2).state, orientation: quaternionFromRotationVector({ x: 50 * Math.PI / 180, y: 0, z: 0 }) } }, expected: ['傾角', '50.0°', '40.0°'] },
+    { label: '路線前後範圍', current: sample(0, 9.5), expected: ['前後範圍', '9.50 m', '9.25 m'] },
+  ])('explains the measured $label violation without changing practice/challenge outcomes', ({ current, expected }) => {
+    for (const mode of ['practice', 'challenge'] as const) {
+      const evaluation = straightLineEvaluator.evaluate(current, context({ mode, checkpoints: routeCheckpoints() }))
+      expect(evaluation.status).toBe(mode === 'practice' ? 'continue' : 'failure')
+      expect(evaluation.recovery).toBe(mode === 'practice' ? 'restart' : undefined)
+      for (const detail of expected) expect(evaluation.message).toContain(detail)
+      expect(evaluation.hint).toBeTruthy()
+    }
+  })
+
+  it('distinguishes an ungrounded start from moving away before the start hover is ready', () => {
+    const airborne = straightLineEvaluator.evaluate(sample(0, 0), context({ mode: 'practice' }))
+    expect(airborne.message).toContain('未接地')
+    expect(airborne.message).toContain(`${(ALTITUDE - GROUND_COM).toFixed(2)} m`)
+    const earlyTranslation = straightLineEvaluator.evaluate(sample(0, 1.3, 0.5, GROUND_HEIGHT + 1), context({
+      mode: 'practice', checkpoints: { 'straight-ground': checkpoint('straight-ground') },
+    }))
+    expect(earlyTranslation.message).toContain('起點尚未穩住')
+    expect(earlyTranslation.message).toContain('1.30 m')
+    expect(earlyTranslation.message).toContain('1.25 m')
+  })
+
+  it('reports the missing ordered gate and the actual in-zone braking shortfall', () => {
+    const missedGate = straightLineEvaluator.evaluate(sample(0, 6, 1), context({
+      mode: 'practice', checkpoints: routeCheckpoints(),
+    }))
+    for (const detail of ['中途環', '6.00 m', '3.00 m', '5.00 m']) expect(missedGate.message).toContain(detail)
+    const evaluation = straightLineEvaluator.evaluate(sample(53, 8.7, 2.3), context({
+      mode: 'practice', previousSample: sample(50, 7.9, 3), checkpoints: routeCheckpoints(true),
+      previousEvaluation: { status: 'continue', metrics: { brakeEntrySpeedMps: 2, furthestProgressM: 7.9 } },
+    }))
+    expect(evaluation.recovery).toBe('restart')
+    for (const detail of ['減速不足', '2.00 m/s', '2.91 m/s', '30%', '0.10 m/s', '1.40 m/s', '8.70 m', '8.65 m']) {
+      expect(evaluation.message).toContain(detail)
+    }
+    expect(evaluation.metrics?.observedBrakeEntrySpeedMps).toBe(2)
+    expect(evaluation.metrics?.inZoneHorizontalSpeedMps).toBeCloseTo(2.9125)
+    expect(evaluation.metrics?.brakeEntrySpeedMps).toBe(0)
+  })
+
+  it('describes current speed honestly when the missed-brake sample is already beyond the zone', () => {
+    const evaluation = straightLineEvaluator.evaluate(sample(51, 8.7, 1), context({
+      mode: 'practice', previousSample: sample(50, 8.6, 1), checkpoints: routeCheckpoints(true),
+      previousEvaluation: { status: 'continue', metrics: { brakeEntrySpeedMps: 2, furthestProgressM: 8.6 } },
+    }))
+    expect(evaluation.recovery).toBe('restart')
+    for (const detail of ['未確認有效減速', '8.70 m', '8.65 m', '目前水平速度 1.00 m/s', '區外速度不採計', '2.00 m/s', '1.40 m/s']) {
+      expect(evaluation.message).toContain(detail)
+    }
+    expect(evaluation.message).not.toContain('區內水平速度 1.00 m/s')
+    expect(evaluation.message).not.toContain('未記錄降速路段')
+    expect(evaluation.metrics?.inZoneHorizontalSpeedMps).toBeUndefined()
+    expect(evaluation.metrics?.horizontalSpeedMps).toBe(1)
   })
 
   it('rejects teleports, sample gaps, clock rewind and physics reset even after practice recovery', () => {

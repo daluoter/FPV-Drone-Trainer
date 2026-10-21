@@ -50,6 +50,11 @@ export default function TrainingPanel({ mode = 'challenge', lessons = DEFAULT_LE
         {terminal && <button className="lab-button lab-button-primary" type="button" disabled={playbackActive} onClick={onRetry}>再練一次</button>}
         <button className="lab-button" type="button" disabled={state.phase === 'READY'} onClick={onReset}>{locked ? '停止練習' : '重設課程'}</button>
       </div>
+      {state.lastRecovery && <div className="school-recovery-history" role="region" aria-label="最近重練原因">
+        <strong>最近重練原因（當時數值）</strong>
+        <p>{state.lastRecovery.message}</p>
+        {state.lastRecovery.hint && <p>下一步：{state.lastRecovery.hint}</p>}
+      </div>}
       <div className="school-current-lesson"><span className="school-phase" role="status">{PHASE_LABELS[state.phase]}</span><h3>{content?.title ?? selected?.title ?? '選擇課程'}</h3><p>{content?.objectives[0] ?? selected?.description}</p></div>
       {routeGuide && state.phase === 'READY' && <p className="school-route-guide">{routeGuide}</p>}
       {objective && !terminal && <div className="school-objective" aria-label="目前任務" aria-live="polite"><strong>{objective.title}</strong><p>{objective.detail}</p></div>}

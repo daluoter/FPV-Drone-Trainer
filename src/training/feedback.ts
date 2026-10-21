@@ -252,9 +252,17 @@ export function trainingRouteGuide(lessonId: string | null): string | null {
 /** Reuse evaluator guidance without inventing a cause from unsigned error metrics. */
 export function trainingHint(
   lessonId: string | null,
-  evaluation: Pick<TrainingEvaluation, 'status' | 'hint' | 'metrics' | 'recovery'> | null | undefined,
+  evaluation: Pick<TrainingEvaluation, 'status' | 'message' | 'hint' | 'metrics' | 'recovery'> | null | undefined,
 ): string {
   const hint = evaluation?.hint?.trim()
+  const message = evaluation?.message?.trim()
+  // Show the measured cause before its corrective action. Internal English
+  // diagnostics still use the localized fallback rather than leaking into UI.
+  if ((evaluation?.recovery === 'restart' || evaluation?.status === 'failure')
+    && message && /[\u3400-\u9fff]/u.test(message)) {
+    const action = hint ? HINT_TRANSLATIONS[hint] ?? (/[\u3400-\u9fff]/u.test(hint) ? hint : null) : null
+    return action && action !== message ? `${message} ${action}` : message
+  }
   if (hint) {
     const translated = HINT_TRANSLATIONS[hint]
     if (translated) return translated

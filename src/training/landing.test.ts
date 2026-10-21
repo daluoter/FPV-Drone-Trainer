@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { createInitialDroneState, DEFAULT_DRONE_CONFIG, DRONE_GROUND_CLEARANCE_M, droneGroundSupport } from '../drone'
-import { IDENTITY_QUATERNION } from '../math/quaternion'
+import { IDENTITY_QUATERNION, quaternionFromRotationVector } from '../math/quaternion'
 import { LANDING_LESSON, LANDING_SETTLED_DWELL_SECONDS, landingEvaluator } from './landing'
 import { TrainingSession } from './machine'
 import type { TrainingAttemptContext } from './attempt'
@@ -126,6 +126,8 @@ describe('ground-to-separate-zone landing lesson', () => {
     const result = run(rough)
     expect(result.phase).toBe('FAILED')
     expect(result.result?.message).toMatch(/接地前|歸零/)
+    expect(result.result?.message).toContain('1.80 m/s')
+    expect(result.result?.message).toContain('0.80 m/s')
     expect(result.result?.metrics.touchdownDescentSpeedMps).toBeCloseTo(1.8)
   })
 
@@ -133,6 +135,8 @@ describe('ground-to-separate-zone landing lesson', () => {
     const wrong = run(successFixture(1))
     expect(wrong.phase).toBe('FAILED')
     expect(wrong.result?.message).toMatch(/降落區|其他位置/)
+    expect(wrong.result?.message).toContain('1.00 m')
+    expect(wrong.result?.message).toContain('0.85 m')
     const trace = successFixture()
     const liftEnd = trace.findIndex((current) => current.state.positionM.y === 3)
     const atLaunch = [
@@ -141,6 +145,46 @@ describe('ground-to-separate-zone landing lesson', () => {
       sample(liftEnd + 61, CONTACT_HEIGHT),
     ]
     expect(run(atLaunch).phase).toBe('FAILED')
+  })
+
+  it.each([
+    { label: '路線偏離', current: sample(0, 3, 0, -4, 4.5), expected: ['距路線', '4.50 m', '4.00 m'] },
+    { label: '高度', current: sample(0, CONTACT_HEIGHT + 7.5), expected: ['高度', '7.50 m', '7.00 m'] },
+    { label: '水平速度', current: sample(0, 3, 0, -4, 0, -3.5), expected: ['水平速度', '3.50 m/s', '3.00 m/s'] },
+    { label: '下降速度', current: sample(0, 3, -2.4, -4), expected: ['下降速度', '2.40 m/s', '2.00 m/s'] },
+    { label: '傾角', current: { ...sample(0, 3, 0, -4), state: { ...sample(0, 3, 0, -4).state, orientation: quaternionFromRotationVector({ x: 50 * Math.PI / 180, y: 0, z: 0 }) } }, expected: ['傾角', '50.0°', '40.0°'] },
+  ])('explains the measured $label practice limit and retains the challenge failure', ({ current, expected }) => {
+    for (const mode of ['practice', 'challenge'] as const) {
+      const evaluation = landingEvaluator.evaluate(current, context({ mode }))
+      expect(evaluation.status).toBe(mode === 'practice' ? 'continue' : 'failure')
+      expect(evaluation.recovery).toBe(mode === 'practice' ? 'restart' : undefined)
+      for (const detail of expected) expect(evaluation.message).toContain(detail)
+      expect(evaluation.hint).toBeTruthy()
+    }
+  })
+
+  it('reports the concrete hard safety limit instead of restarting practice', () => {
+    const evaluation = landingEvaluator.evaluate(sample(0, 3, -5.5, -4), context({ mode: 'practice' }))
+    expect(evaluation.status).toBe('failure')
+    expect(evaluation.recovery).toBeUndefined()
+    for (const detail of ['下降速度', '5.50 m/s', '安全上限 5.00 m/s']) expect(evaluation.message).toContain(detail)
+  })
+
+  it('distinguishes excessive pre-impact lateral speed from descent speed when contact zeroes velocity', () => {
+    const previous = sample(0, CONTACT_HEIGHT + 0.02, -0.5, -8, 0, -1.2)
+    const current = sample(1, CONTACT_HEIGHT, 0, -8)
+    const checkpoints = Object.fromEntries(['landing-launch', 'landing-liftoff', 'landing-approach'].map((id) => [
+      id, { id, completed: true, completedAtSeconds: 0.1, metrics: {} },
+    ]))
+    const evaluation = landingEvaluator.evaluate(current, context({
+      mode: 'practice', previousSample: previous, checkpoints,
+      previousEvaluation: { status: 'continue', metrics: { descentObserved: 1 } },
+    }))
+    expect(evaluation.recovery).toBe('restart')
+    for (const detail of ['接地前水平速度', '1.20 m/s', '0.80 m/s']) expect(evaluation.message).toContain(detail)
+    expect(evaluation.metrics?.preImpactDescentSpeedMps).toBe(0.5)
+    expect(evaluation.metrics?.preImpactHorizontalSpeedMps).toBe(1.2)
+    expect(evaluation.metrics?.horizontalSpeedMps).toBe(0)
   })
 
   it('resets grounded continuous dwell after a speed excursion', () => {
@@ -183,6 +227,22 @@ describe('ground-to-separate-zone landing lesson', () => {
     const gentle = fixture.map((current, index) => index === contact + 2 ? sample(index, CONTACT_HEIGHT + 0.02, -0.4, -8) : current)
     expect(run(gentle.slice(0, contact + 13)).phase).toBe('ACTIVE')
     expect(run(gentle).phase).toBe('SUCCESS')
+  })
+
+  it('explains a small loss of contact and the reset dwell instead of claiming the drone is grounded', () => {
+    const checkpoints = Object.fromEntries(['landing-launch', 'landing-liftoff', 'landing-approach', 'landing-touchdown'].map((id) => [
+      id, { id, completed: true, completedAtSeconds: 0.1, metrics: {} },
+    ]))
+    const evaluation = landingEvaluator.evaluate(sample(1, CONTACT_HEIGHT + 0.02, -0.1, -8), context({
+      mode: 'practice', previousSample: sample(0, CONTACT_HEIGHT, 0, -8), checkpoints,
+      previousEvaluation: { status: 'continue', metrics: { descentObserved: 1, landingSettled: 1, contiguousDwellSeconds: 0.5 } },
+    }))
+    expect(evaluation.status).toBe('continue')
+    expect(evaluation.recovery).toBeUndefined()
+    expect(evaluation.metrics?.landingSettled).toBe(0)
+    expect(evaluation.metrics?.contiguousDwellSeconds).toBe(0)
+    for (const detail of ['目前未接地', '0.02 m', '計時已歸零', '重新接地']) expect(evaluation.hint).toContain(detail)
+    expect(evaluation.hint).not.toContain('已接地，連續穩住')
   })
 
   it('rejects crash, disarm, missing or invalid actual-contact data and nonfinite state', () => {

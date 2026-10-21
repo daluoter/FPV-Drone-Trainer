@@ -123,6 +123,8 @@ function clearSession(
     trajectory: EMPTY_TRAJECTORY,
     checkpoints: {},
     lastEvaluation: null,
+    lastRecovery: null,
+    recoveryInProgress: false,
     result: null,
     setupRequest: null,
     armedAtLeastOnce: false,
@@ -312,6 +314,8 @@ function startSession(
     trajectory: EMPTY_TRAJECTORY,
     checkpoints: initialCheckpoints(lesson),
     lastEvaluation: null,
+    lastRecovery: null,
+    recoveryInProgress: false,
     result: null,
     setupRequest,
     lastError: null,
@@ -500,16 +504,32 @@ function sampleActiveState(
   }
 
   if (context.mode === 'practice' && evaluation.recovery === 'restart') {
+    const lastRecovery = state.recoveryInProgress && state.lastRecovery
+      ? state.lastRecovery
+      : Object.freeze({
+        timestampSeconds: sample.timestampSeconds,
+        message: typeof evaluation.message === 'string' && evaluation.message.trim()
+          ? evaluation.message.trim() : '本次局部目標已重新開始；請依提示回到起點。',
+        hint: typeof evaluation.hint === 'string' && evaluation.hint.trim() ? evaluation.hint.trim() : null,
+        metrics: Object.freeze(finiteMetrics(evaluation.metrics)),
+      })
     return {
       ...baseState,
       checkpoints: initialCheckpoints(lesson),
       previousSample: null,
       lastEvaluation: evaluation,
+      lastRecovery,
+      recoveryInProgress: true,
     }
   }
 
   const checkpoints = updateCheckpoints(baseState, lesson, evaluation, sample.timestampSeconds)
-  const checkpointState = { ...baseState, checkpoints, lastEvaluation: evaluation }
+  const localProgressObserved = evaluation.status !== 'failure'
+    && evaluation.checkpointIds?.some((id) => lesson.checkpoints.some((checkpoint) => checkpoint.id === id)) === true
+  const checkpointState = {
+    ...baseState, checkpoints, lastEvaluation: evaluation,
+    recoveryInProgress: localProgressObserved ? false : state.recoveryInProgress,
+  }
   if (evaluation.status === 'failure') {
     const terminalState = publishTrajectorySnapshot(checkpointState, trajectoryBuffer, sample.timestampSeconds)
     return {
@@ -573,6 +593,8 @@ export function createTrainingMachineState(
     trajectory: EMPTY_TRAJECTORY,
     checkpoints: {},
     lastEvaluation: null,
+    lastRecovery: null,
+    recoveryInProgress: false,
     result: null,
     setupRequest: null,
     sceneReferences: copySceneReferences(options.sceneReferences ?? []),

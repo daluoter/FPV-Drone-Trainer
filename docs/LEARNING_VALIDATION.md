@@ -114,3 +114,23 @@
 最終診斷：`/tmp/fpv-browser-smoke/run-tyn800w8/`，包含 report、console、preview log，以及 `l00-inline-exit.png`、`landing-ground-start.png`、`straight-line-ground-start.png`、`result-marker-replay.png` 和工作區截圖。修正階段的 14 項紀錄另在 `/tmp/fpv-browser-smoke/run-x6hvqw14/`。
 
 新版 L00 退出、地面航線／降落與結果回放尚待使用者複驗；未自動勾選完整逐課真人開發包、硬體／飛手校準或遠端 UAT／正式發布。新版仍在功能分支，正式站未因本機驗證而更新。
+
+## 第二輪回饋：具體原因與常駐位置（2026-10-21）
+
+基準：`af36861`。使用者實際回報兩課只顯示一般重練指引，無法判斷錯誤；並要求飛行畫面顯示高度及位置。這次修正保留門檻與規則版本 3，未重算既有成績。
+
+- 呈現 evaluator 的原因及修正動作。直線／降落拆出各自量測與上限，保留接地前及減速區入口觀測；區外速度不能誤標為區內速度，小彈起不能誤稱仍接地。
+- machine 保存首次局部重練原因、觸發時間及有限數值的不可變快照；generic 提醒、沒有進度及未知 checkpoint 均不覆蓋。取得有效 checkpoint 後才允許記錄下一次原因；新次／重試／重設／選課清除。畫面重練中使用原始原因，側欄在恢復飛行及結果時仍保留。
+- 公開高度／相對位置 HUD 使用既有節流 telemetry，不增加物理或動畫迴圈。離地高度為質心相對地面，右／前／上座標以實際地面起飛點為原點。回放採 ghost 與該段錄影設定；舊結果在地面／起飛點設定改變及另一段飛行後仍讀取原錄影座標。
+
+| 最終檢查 | 結果 |
+| --- | --- |
+| `npm test -- --maxWorkers=2` | PASS：48 檔、317 項，22.09 秒。新增測量原因正反例、彈跳／區外減速反例、復原 latch／清除、UI 原因保留、非零地面／旋轉支撐／無效位置、真實 runtime 暫停／seek／舊結果設定隔離。 |
+| `npm run lint` | PASS，零警告規則。 |
+| `npm run build -- --base=/FPV-Drone-Trainer/` | PASS，含嚴格 TypeScript；entry 1,018.38 kB／gzip 287.37 kB，既知 >500 kB 建議仍存在。 |
+| 正式產物 Chromium smoke | PASS：18 項，Chromium 154.0.8037.57，無頁面／console error／資源錯誤。原 15 項持續通過，新增公開 HUD、回放位置同步／暫停固定及三種視窗配置。 |
+| 視覺／差異 | 已檢視回放高度 2.5 m 及 375 px 寬的 HUD 截圖；1280 × 720、1280 × 600、375 × 720 位置欄位均不超出畫面或重疊 SAFE 提示；`git diff --check` 通過。 |
+
+瀏覽器產物：`/tmp/fpv-browser-smoke/run-necfarwk/`，含 `report.json`、`console.json`、preview log、`replay-position-hud.png`、`position-hud-375.png` 及既有逐流程截圖。新的錯誤呈現由純 evaluator、machine 與 React 整合測試驗證；未以 UI fixture 宣稱真人已飛完課程。初次嚴格建置抓到測試 fixture 的 TypeScript 推導問題，補上明確回傳型別後建置通過。
+
+本輪程式與文件推送至 `feat/beginner-flight-school`；GitHub Pages 正式站、遠端 CI／UAT 與使用者再次試飛尚未驗證。本紀錄不取代後續集中真人複驗。

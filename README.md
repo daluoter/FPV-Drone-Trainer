@@ -6,6 +6,7 @@ A browser-based FPV flight school and freestyle trick trainer focused on trustwo
 
 ## Implemented
 
+- Always-visible altitude and launch-relative right/forward/up coordinates, using the recorded ghost and original field settings during replay; measured straight-line/landing recovery causes remain available after the next frame or resumed flight.
 - Vite + React + strict TypeScript application scaffold
 - Direct Three.js dependency reserved for the renderer boundary
 - Vitest + Testing Library and ESLint foundation
