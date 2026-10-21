@@ -1,6 +1,9 @@
+/** Strict physical-clock and continuous settled-hover rules introduced in batch two. */
+export const CURRENT_TRAINING_RULES_VERSION = 2
+
 /** Conditions which must match before two attempts can share a progress view. */
 export interface TrainingAttemptContext {
-  readonly rulesVersion: 1
+  readonly rulesVersion: 1 | 2
   readonly physicsVersion: 1
   readonly presetId: 'beginner' | 'standard' | 'custom'
   readonly settingsFingerprint: string
@@ -33,7 +36,7 @@ export function fingerprintTrainingSettings(settings: unknown): string {
 export function isTrainingAttemptContext(value: unknown): value is TrainingAttemptContext {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const context = value as Record<string, unknown>
-  return context.rulesVersion === 1
+  return (context.rulesVersion === 1 || context.rulesVersion === 2)
     && context.physicsVersion === 1
     && ['beginner', 'standard', 'custom'].includes(context.presetId as string)
     && typeof context.settingsFingerprint === 'string'

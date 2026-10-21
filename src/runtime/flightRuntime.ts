@@ -16,7 +16,7 @@ import {
   type FlightTelemetry,
   type NormalizedRcInput,
 } from '../flight-controller'
-import type { DroneState } from '../drone'
+import { droneGroundContactRadius, droneGroundSupport, DRONE_GROUND_CLEARANCE_M, type DroneState } from '../drone'
 import type { LessonSetup } from '../training/types'
 import { FlightRenderer } from '../rendering'
 import {
@@ -52,6 +52,13 @@ export interface FlightRuntimeFixedStepSample {
   /** Explicit arm state prevents disarmed/reset telemetry from producing a pass. */
   readonly armed: boolean
   readonly telemetry: FlightTelemetry
+  /** Configured ground height; exact pose support is queried only near ground. */
+  readonly groundContact?: {
+    readonly heightM: number
+    /** Raw geometry support; zero outside the possible ground-contact envelope. */
+    readonly supportOffsetM: number
+    readonly touching: boolean
+  }
 }
 
 export interface FlightRuntimeReplayTelemetry {
@@ -497,6 +504,7 @@ export class FlightRuntime {
       setup.spawnPositionM ?? this.simulation.droneConfig.spawnPositionM,
       setup.spawnOrientation,
       'Training setup applied through an explicit disarmed reset.',
+      true,
     )
   }
 
@@ -504,6 +512,7 @@ export class FlightRuntime {
     positionM: { readonly x: number; readonly y: number; readonly z: number },
     orientation: { readonly x: number; readonly y: number; readonly z: number; readonly w: number } | undefined,
     reason: string,
+    holdTrainingPreparation = false,
   ): DroneState {
     this.keyboard.releaseKeys()
     this.signalHistory.reset()
@@ -517,7 +526,8 @@ export class FlightRuntime {
     this.lastSafetyReasons = [reason]
     this.replayRecorder.endFlight()
     this.simulation.disarm(reason)
-    this.simulation.resetAt(positionM, orientation)
+    if (holdTrainingPreparation) this.simulation.resetForTraining(positionM, orientation)
+    else this.simulation.resetAt(positionM, orientation)
     this.refreshTelemetry(0, 0, 0)
     this.emitTelemetry(true)
     return this.simulation.getState()
@@ -578,6 +588,7 @@ export class FlightRuntime {
         normalizedInput: copyNormalizedInput(sample.input),
         armed: step.telemetry.armed,
         telemetry: step.telemetry,
+        groundContact: this.groundContactFor(step.state),
       }
       if (fixedStepSample.armed) this.replayRecorder.record(fixedStepSample)
       this.fixedStepListener?.(fixedStepSample)
@@ -604,6 +615,22 @@ export class FlightRuntime {
     const ghost = playback.getGhostState()
     if (!ghost) return
     this.renderer?.renderGhost(ghost)
+  }
+
+  private groundContactFor(state: DroneState): NonNullable<FlightRuntimeFixedStepSample['groundContact']> {
+    const config = this.simulation.droneConfig
+    const heightM = config.ground.heightM
+    // droneGroundContactRadius caches the configured geometry's bound. Only
+    // samples inside that envelope need a full orientation support query.
+    if (state.positionM.y > heightM + droneGroundContactRadius(config) + DRONE_GROUND_CLEARANCE_M + 1e-5) {
+      return { heightM, supportOffsetM: 0, touching: false }
+    }
+    const supportOffsetM = droneGroundSupport(config, state.orientation).supportOffsetM
+    return {
+      heightM,
+      supportOffsetM,
+      touching: state.positionM.y <= heightM + supportOffsetM + DRONE_GROUND_CLEARANCE_M + 1e-5,
+    }
   }
 
   private sampleInput(): SampledInput {

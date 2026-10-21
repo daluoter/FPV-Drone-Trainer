@@ -11,9 +11,10 @@ import {
   type RawGamepadSnapshot,
 } from '../controller'
 import { createDefaultFlightControllerConfig, FlightSimulation } from '../flight-controller'
+import { DEFAULT_DRONE_CONFIG, droneGroundSupport, DRONE_GROUND_CLEARANCE_M } from '../drone'
 import { DEFAULT_LESSONS, TRAINING_SCENE_REFERENCES, TrainingSession } from '../training'
 import type { LessonSetup } from '../training/types'
-import { FlightRuntime } from './flightRuntime'
+import { FlightRuntime, type FlightRuntimeFixedStepSample } from './flightRuntime'
 
 const neutralReport = {
   sampleCount: 100,
@@ -95,6 +96,98 @@ function nextFrameRunner() {
 }
 
 describe('Free Flight runtime safety transitions', () => {
+  it('holds an airborne lesson pose for ten seconds without inventing armed samples, then releases on arm', () => {
+    const frames = nextFrameRunner()
+    const samples: FlightRuntimeFixedStepSample[] = []
+    const runtime = new FlightRuntime({ scheduleFrame: frames.schedule, cancelFrame: frames.cancel, onFixedStep: (sample) => samples.push(sample) })
+    runtime.setInputSource('keyboard')
+    runtime.start()
+    frames.run(0)
+    runtime.resetForTraining({ requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: [], spawnPositionM: { x: 1, y: 3, z: -2 } })
+    runtime.setTrainingArmBlocked(true)
+    expect(runtime.arm()).toBe(false)
+    for (let frame = 1; frame <= 600; frame += 1) frames.run(frame * 1_000 / 60)
+    expect(runtime.simulation.getState().positionM).toEqual({ x: 1, y: 3, z: -2 })
+    expect(runtime.simulation.getState().timeSeconds).toBeCloseTo(10, 8)
+    expect(samples).toHaveLength(2_400)
+    expect(samples.every((sample, index) => !sample.armed && sample.state.stepIndex === index + 1)).toBe(true)
+    expect(runtime.replayRecorder.isFlightActive()).toBe(false)
+    runtime.setTrainingArmBlocked(false)
+    expect(runtime.arm()).toBe(true)
+    frames.run(10_000 + 1_000 / 60)
+    expect(runtime.simulation.getState().positionM.y).toBeLessThan(3)
+    expect(samples.at(-1)?.armed).toBe(true)
+    runtime.dispose()
+  })
+
+  it('keeps preparation after a failed device arm, while reset and reconfigure restore ordinary disarmed gravity', () => {
+    const frames = nextFrameRunner()
+    const drone = { ...DEFAULT_DRONE_CONFIG, spawnPositionM: { x: 0, y: 3, z: 0 } }
+    const runtime = new FlightRuntime({ simulation: { drone }, scheduleFrame: frames.schedule, cancelFrame: frames.cancel })
+    runtime.start()
+    frames.run(0)
+    runtime.resetForTraining({ requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: [], spawnPositionM: { x: 0, y: 5, z: 0 } })
+    expect(runtime.arm()).toBe(false)
+    for (let frame = 1; frame <= 60; frame += 1) frames.run(frame * 1_000 / 60)
+    expect(runtime.simulation.getState().positionM.y).toBe(5)
+    runtime.reset()
+    frames.run(1_000 + 1_000 / 60)
+    expect(runtime.simulation.getState().positionM.y).toBeLessThan(3)
+
+    runtime.resetForTraining({ requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: [], spawnPositionM: { x: 0, y: 5, z: 0 } })
+    expect(runtime.reconfigure({ drone })).toBe(true)
+    frames.run(1_000 + 2_000 / 60)
+    expect(runtime.simulation.getState().positionM.y).toBeLessThan(3)
+    runtime.dispose()
+  })
+
+  it('reports actual configured ground contact and does not confuse a low hover with touchdown', () => {
+    const frames = nextFrameRunner()
+    const samples: FlightRuntimeFixedStepSample[] = []
+    const drone = { ...DEFAULT_DRONE_CONFIG, ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 2 }, spawnPositionM: { x: 0, y: 2, z: 0 } }
+    const runtime = new FlightRuntime({ simulation: { drone }, scheduleFrame: frames.schedule, cancelFrame: frames.cancel, onFixedStep: (sample) => samples.push(sample) })
+    runtime.setInputSource('keyboard')
+    runtime.start()
+    frames.run(0)
+    const orientation = { x: 0, y: 0, z: Math.sin(Math.PI / 12), w: Math.cos(Math.PI / 12) }
+    const support = droneGroundSupport(drone, orientation).supportOffsetM
+    runtime.resetForTraining({ requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: [], spawnPositionM: { x: 0, y: 2, z: 0 }, spawnOrientation: orientation })
+    frames.run(1_000 / 60)
+    expect(samples.at(-1)?.groundContact).toEqual({ heightM: 2, supportOffsetM: support, touching: true })
+
+    runtime.resetForTraining({ requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: [], spawnPositionM: { x: 0, y: 2 + support + DRONE_GROUND_CLEARANCE_M + 0.02, z: 0 }, spawnOrientation: orientation })
+    frames.run(2_000 / 60)
+    expect(samples.at(-1)?.groundContact?.touching).toBe(false)
+    expect(samples.at(-1)?.groundContact?.supportOffsetM).toBeCloseTo(support, 12)
+    runtime.resetForTraining({ requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: [], spawnPositionM: { x: 0, y: 5, z: 0 } })
+    frames.run(3_000 / 60)
+    expect(samples.at(-1)?.groundContact).toEqual({ heightM: 2, supportOffsetM: 0, touching: false })
+    runtime.dispose()
+  })
+
+  it('clears a prepared hold when replay exits through the normal live reset boundary', () => {
+    const frames = nextFrameRunner()
+    const drone = { ...DEFAULT_DRONE_CONFIG, spawnPositionM: { x: 0, y: 3, z: 0 } }
+    const runtime = new FlightRuntime({ simulation: { drone }, scheduleFrame: frames.schedule, cancelFrame: frames.cancel })
+    runtime.setInputSource('keyboard')
+    runtime.start()
+    frames.run(0)
+    expect(runtime.arm()).toBe(true)
+    for (let frame = 1; frame <= 6; frame += 1) frames.run(frame * 1_000 / 60)
+    runtime.disarm()
+    const recording = runtime.getReplayRecording()
+    expect(recording?.samples.length).toBeGreaterThan(1)
+    runtime.resetForTraining({ requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: [], spawnPositionM: { x: 0, y: 5, z: 0 } })
+    expect(runtime.enterReplay(recording)).toBe(true)
+    expect(runtime.exitReplay()).toBe(true)
+    expect(runtime.simulation.getState().positionM.y).toBe(3)
+    frames.run(200)
+    frames.run(200 + 1_000 / 60)
+    expect(runtime.simulation.getState().positionM.y).toBeLessThan(3)
+    expect(runtime.getTelemetry().armed).toBe(false)
+    runtime.dispose()
+  })
+
   it.each(['controller', 'keyboard'] as const)('blocks direct %s arm requests during countdown until an explicit fresh arm', (source) => {
     const handoff = createHandoff()
     const frames = nextFrameRunner()

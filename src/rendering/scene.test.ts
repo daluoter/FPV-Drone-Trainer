@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { createDefaultDroneConfig } from '../drone'
+import { createDefaultDroneConfig, createInitialDroneState } from '../drone'
 
 import { createFlightScene } from './scene'
 
@@ -25,8 +25,8 @@ describe('flight scene reference contract', () => {
       expect(scene.getReference('takeoff-height-target')).toBeNull()
       expect(scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM, sizeM }))).toEqual(anchors)
       expect(scene.drone.position.toArray()).toEqual(dronePosition)
-      expect(scene.getReference('turn-entry')?.object.visible).toBe(true)
-      expect(scene.getReference('orbit-poi')?.object.visible).toBe(true)
+      expect(scene.getReference('turn-entry')?.object.visible).toBe(false)
+      expect(scene.getReference('orbit-poi')?.object.visible).toBe(false)
 
       scene.setLessonTarget('hover')
       expect(target?.visible).toBe(false)
@@ -53,6 +53,83 @@ describe('flight scene reference contract', () => {
     }
   })
 
+  it('normalizes teaching spawn against raised ground and shifts visual and evaluator anchors together', () => {
+    const defaults = createDefaultDroneConfig()
+    const config = {
+      ...defaults,
+      ground: { ...defaults.ground, heightM: 5 },
+      spawnPositionM: { x: 6, y: 0, z: -3 },
+    }
+    const initialSpawn = createInitialDroneState(config).positionM
+    const scene = createFlightScene(config)
+    try {
+      expect(scene.getReference('takeoff-pad')?.positionM).toEqual(initialSpawn)
+      expect(initialSpawn.y).toBeGreaterThan(5)
+      expect(scene.scene.getObjectByName('takeoff-height-target')?.position.toArray()).toEqual([6, initialSpawn.y + 2, -3])
+      expect(scene.scene.getObjectByName('straight-line-targets')?.children.map((ring) => ring.position.y))
+        .toEqual([initialSpawn.y + 2.5, initialSpawn.y + 2.5, initialSpawn.y + 2.5, initialSpawn.y + 2.5])
+      expect(scene.getReference('hover-zone')?.positionM).toEqual({ x: 6, y: 8, z: -3 })
+      expect(scene.getReference('hover-zone')?.object.position.y).toBe(8)
+      for (const id of ['turn-entry', 'turn-apex', 'turn-exit']) {
+        expect(scene.getReference(id)?.positionM.y).toBeCloseTo(5.45)
+        expect(scene.getReference(id)?.object.position.y).toBeCloseTo(5.45)
+      }
+      expect(scene.getReference('orbit-poi')?.positionM.y).toBe(7.5)
+      expect(scene.getReference('orbit-poi')?.object.position.y).toBe(7.5)
+      const orbitCircle = scene.scene.getObjectByName('reference-orbit-circle')
+      expect((orbitCircle?.parent?.position.y ?? 0) + (orbitCircle?.position.y ?? 0)).toBeCloseTo(5.02)
+      expect(scene.getReference('split-s-reference')?.positionM.y).toBe(5.9)
+      expect(scene.getReference('split-s-reference')?.object.position.y).toBe(5)
+      expect(scene.getReference('landing-surface')?.positionM).toEqual({ x: 6, y: 5, z: -3 })
+      expect(scene.ground.position.y).toBe(5)
+      expect(config.spawnPositionM).toEqual({ x: 6, y: 0, z: -3 })
+      expect(config.ground.heightM).toBe(5)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('shows only the selected beginner guide and restores advanced references on exit', () => {
+    const scene = createFlightScene()
+    const takeoff = scene.scene.getObjectByName('takeoff-height-target')
+    const landing = scene.scene.getObjectByName('landing-target')
+    const straight = scene.scene.getObjectByName('straight-line-targets')
+    const anchors = scene.sceneReferences.map(({ id, positionM }) => ({ id, positionM: { ...positionM } }))
+    try {
+      scene.setLessonTarget('landing')
+      expect(landing?.visible).toBe(true)
+      expect(takeoff?.visible).toBe(false)
+      expect(straight?.visible).toBe(false)
+      expect(scene.getReference('hover-zone')?.object.visible).toBe(false)
+      expect(scene.getReference('split-s-reference')?.object.visible).toBe(false)
+
+      scene.setLessonTarget('straight-line')
+      expect(straight?.visible).toBe(true)
+      expect(straight?.children).toHaveLength(4)
+      expect(landing?.visible).toBe(false)
+      expect(takeoff?.visible).toBe(false)
+      expect(scene.getReference('turn-entry')?.object.visible).toBe(false)
+      expect(scene.getReference('orbit-poi')?.object.visible).toBe(false)
+
+      scene.setLessonTarget('takeoff')
+      expect(takeoff?.visible).toBe(true)
+      expect(landing?.visible).toBe(false)
+      expect(straight?.visible).toBe(false)
+
+      scene.setLessonTarget(null)
+      expect(takeoff?.visible).toBe(false)
+      expect(landing?.visible).toBe(false)
+      expect(straight?.visible).toBe(false)
+      expect(scene.getReference('hover-zone')?.object.visible).toBe(true)
+      expect(scene.getReference('turn-entry')?.object.visible).toBe(true)
+      expect(scene.getReference('orbit-poi')?.object.visible).toBe(true)
+      expect(scene.getReference('split-s-reference')?.object.visible).toBe(true)
+      expect(scene.sceneReferences.map(({ id, positionM }) => ({ id, positionM }))).toEqual(anchors)
+    } finally {
+      scene.dispose()
+    }
+  })
+
   it('exposes stable lesson reference IDs without coupling evaluators to Three.js names', () => {
     const scene = createFlightScene()
     try {
@@ -64,6 +141,7 @@ describe('flight scene reference contract', () => {
         'turn-exit',
         'orbit-poi',
         'split-s-reference',
+        'landing-surface',
       ])
       expect(scene.getReference('hover-zone')?.kind).toBe('zone')
       expect(scene.getReference('hover-zone')?.positionM).toEqual({ x: 0, y: 3, z: 0 })

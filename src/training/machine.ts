@@ -71,6 +71,7 @@ function copySample(sample: TrainingSample): TrainingSample {
     state: copyState(sample.state),
     normalizedInput: normalizedInput ? Object.freeze(normalizedInput) : null,
     ...(sample.armed === undefined ? {} : { armed: sample.armed }),
+    ...(sample.groundContact ? { groundContact: Object.freeze({ ...sample.groundContact }) } : {}),
   })
 }
 
@@ -126,6 +127,7 @@ function clearSession(
     setupRequest: null,
     armedAtLeastOnce: false,
     previousSample: null,
+    previousFlightSample: null,
     lastError: null,
   }
 }
@@ -146,6 +148,12 @@ function validSample(sample: TrainingSample): boolean {
   if (!validTimestamp(sample.timestampSeconds) || !isFiniteDroneState(sample.state)) return false
   if (sample.normalizedInput !== null && !isFiniteNormalizedRcInput(sample.normalizedInput)) return false
   if (sample.armed !== undefined && typeof sample.armed !== 'boolean') return false
+  if (sample.groundContact !== undefined && (
+    !Number.isFinite(sample.groundContact.heightM)
+    || !Number.isFinite(sample.groundContact.supportOffsetM)
+    || sample.groundContact.supportOffsetM < 0
+    || typeof sample.groundContact.touching !== 'boolean'
+  )) return false
   return true
 }
 
@@ -159,7 +167,7 @@ function evaluatorFor(lesson: LessonDefinition): ((sample: TrainingSample, conte
 function isValidEvaluation(value: TrainingEvaluation): boolean {
   return value !== null && typeof value === 'object' && (
     value.status === 'continue' || value.status === 'success' || value.status === 'failure'
-  )
+  ) && (value.recovery === undefined || (value.recovery === 'restart' && value.status === 'continue'))
 }
 
 function updateCheckpoints(
@@ -299,6 +307,7 @@ function startSession(
     lastSampleTimestampSeconds: null,
     armedAtLeastOnce: false,
     previousSample: null,
+    previousFlightSample: null,
     sampleCount: 0,
     trajectory: EMPTY_TRAJECTORY,
     checkpoints: initialCheckpoints(lesson),
@@ -369,7 +378,8 @@ function sampleActiveState(
   sample: TrainingSample,
   trajectoryBuffer?: TrainingTrajectoryBuffer,
 ): TrainingMachineState {
-  if (!validSample(sample)) return stateError(state, 'Training sample is invalid or contains non-finite values.')
+  if (!validSample(sample)) return abortSession(state, [lesson], state.lastTimestampSeconds ?? 0,
+    'Attempt stopped: training sample is invalid or contains non-finite values.', trajectoryBuffer)
   if (state.activeStartedAtSeconds === null || sample.timestampSeconds < state.activeStartedAtSeconds) {
     return stateError(state, 'Training samples are not accepted before ACTIVE begins.')
   }
@@ -395,25 +405,7 @@ function sampleActiveState(
     return stateError(state, 'Explicit armed telemetry is required for each scored training sample.')
   }
   const previousSample = state.previousSample
-  if (
-    previousSample && sample.state.stepIndex < previousSample.state.stepIndex
-  ) {
-    const failure: TrainingEvaluation = {
-      status: 'failure',
-      message: 'The flight runtime reset or rewound during the attempt; the lesson was stopped safely.',
-      hint: 'Retry to apply the lesson setup while disarmed, then arm explicitly after the countdown.',
-    }
-    const terminalState = publishTrajectorySnapshot(state, trajectoryBuffer, sample.timestampSeconds)
-    const result = createResult(terminalState, lesson, 'FAILED', sample.timestampSeconds, failure, state.checkpoints)
-    return {
-      ...terminalState,
-      phase: 'FAILED',
-      lastEvaluation: failure,
-      result,
-      setupRequest: null,
-      lastError: failure.message ?? null,
-    }
-  }
+  const previousFlightSample = state.previousFlightSample ?? previousSample
   if (
     state.lastTimestampSeconds !== null &&
     sample.timestampSeconds < state.lastTimestampSeconds
@@ -427,6 +419,30 @@ function sampleActiveState(
     return stateError(state, 'Training sample timestamps must increase for each sample.')
   }
 
+  if (
+    previousFlightSample && (
+      sample.state.stepIndex <= previousFlightSample.state.stepIndex
+      || sample.state.timeSeconds <= previousFlightSample.state.timeSeconds
+      || Math.abs((sample.state.timeSeconds - previousFlightSample.state.timeSeconds)
+        - (sample.timestampSeconds - previousFlightSample.timestampSeconds)) > 1e-6
+    )
+  ) {
+    const failure: TrainingEvaluation = {
+      status: 'failure',
+      message: 'The flight runtime reset, rewound or stopped advancing its physical clock; the lesson was stopped safely.',
+      hint: 'Retry to apply the lesson setup while disarmed, then arm explicitly after the countdown.',
+    }
+    const terminalState = publishTrajectorySnapshot(state, trajectoryBuffer, sample.timestampSeconds)
+    const result = createResult(terminalState, lesson, 'FAILED', sample.timestampSeconds, failure, state.checkpoints)
+    return {
+      ...terminalState,
+      phase: 'FAILED',
+      lastEvaluation: failure,
+      result,
+      setupRequest: null,
+      lastError: failure.message ?? null,
+    }
+  }
   const storedSample = copySample(sample)
   const sampleCount = state.sampleCount + 1
   trajectoryBuffer?.append(storedSample, sampleCount)
@@ -441,6 +457,7 @@ function sampleActiveState(
     lastSampleTimestampSeconds: sample.timestampSeconds,
     armedAtLeastOnce: state.armedAtLeastOnce === true || sample.armed === true,
     previousSample: storedSample,
+    previousFlightSample: storedSample,
     sampleCount,
     trajectory,
     lastError: null,
@@ -450,6 +467,7 @@ function sampleActiveState(
 
   const elapsedSeconds = Math.max(0, sample.timestampSeconds - (state.activeStartedAtSeconds ?? sample.timestampSeconds))
   const context: TrainingEvaluationContext = {
+    mode: state.attemptContext?.mode ?? 'challenge',
     lesson,
     elapsedSeconds,
     sampleCount,
@@ -457,7 +475,8 @@ function sampleActiveState(
     checkpoints: state.checkpoints,
     sceneReferences: state.sceneReferences,
     previousSample,
-    previousEvaluation: state.lastEvaluation,
+    previousFlightSample,
+    previousEvaluation: state.lastEvaluation?.recovery === 'restart' ? undefined : state.lastEvaluation,
   }
   let evaluation: TrainingEvaluation
   try {
@@ -477,6 +496,15 @@ function sampleActiveState(
       lastEvaluation: failure,
       result,
       setupRequest: null,
+    }
+  }
+
+  if (context.mode === 'practice' && evaluation.recovery === 'restart') {
+    return {
+      ...baseState,
+      checkpoints: initialCheckpoints(lesson),
+      previousSample: null,
+      lastEvaluation: evaluation,
     }
   }
 
@@ -550,6 +578,7 @@ export function createTrainingMachineState(
     sceneReferences: copySceneReferences(options.sceneReferences ?? []),
     armedAtLeastOnce: false,
     previousSample: null,
+    previousFlightSample: null,
     lastError: null,
   }
 }
@@ -619,7 +648,12 @@ function reduceTrainingStateInternal(
           }
           : next
       }
-      if (!validSample(action.sample)) return stateError(state, 'Training sample is invalid or contains non-finite values.')
+      if (!validSample(action.sample)) {
+        return state.phase === 'ACTIVE'
+          ? abortSession(state, lessons, state.lastTimestampSeconds ?? 0,
+            'Attempt stopped: training sample is invalid or contains non-finite values.', trajectoryBuffer)
+          : stateError(state, 'Training sample is invalid or contains non-finite values.')
+      }
       if (state.phase === 'WAITING_FOR_ARM' && state.lastTimestampSeconds !== null && action.sample.timestampSeconds < state.lastTimestampSeconds) {
         return stateError(state, 'Training sample timestamps must be monotonic.')
       }

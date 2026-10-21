@@ -21,7 +21,11 @@ import {
   type TuningSettings,
 } from '../tuning'
 import type { FlightRuntimeFixedStepSample, FlightRuntimeTelemetry } from '../runtime'
-import { fingerprintTrainingSettings, type TrainingAttemptContext } from '../training/attempt'
+import IntroLesson from '../training/IntroLesson'
+import type { TeachingDemonstrationKind } from '../training/demonstrations'
+import { loadLearningPreferences, saveLearningPreferences, type LearningPreferences } from '../training/learningPreferences'
+import { CURRENT_TRAINING_RULES_VERSION, fingerprintTrainingSettings, type TrainingAttemptContext } from '../training/attempt'
+import { prepareTrainingSetup } from '../training/setup'
 
 function resultStateForUi(session: TrainingSession, state: TrainingMachineState): TrainingMachineState {
   return state.result && (state.phase === 'SUCCESS' || state.phase === 'FAILED')
@@ -30,6 +34,11 @@ function resultStateForUi(session: TrainingSession, state: TrainingMachineState)
 }
 
 export default function App() {
+  const initialLearning = useMemo(() => loadLearningPreferences(), [])
+  const [learningPreferences, setLearningPreferences] = useState(initialLearning.preferences)
+  const [preferencesNotice, setPreferencesNotice] = useState(initialLearning.error)
+  const [showIntro, setShowIntro] = useState(false)
+  const [demonstrationRequest, setDemonstrationRequest] = useState<{ sequence: number; kind: TeachingDemonstrationKind } | null>(null)
   const poller = useMemo(() => createBrowserGamepadPoller(), [])
   const tuningStore = useMemo(() => new TuningSettingsStore(), [])
   const initialTuningLoad = useMemo(() => tuningStore.load(), [tuningStore])
@@ -43,7 +52,7 @@ export default function App() {
   const initialProgressLoad = useMemo(() => progressStore.load(), [progressStore])
   const trainingSessionRef = useRef<TrainingSession | null>(null)
   if (trainingSessionRef.current === null) {
-    trainingSessionRef.current = new TrainingSession({ lessons: DEFAULT_LESSONS, initialLessonId: 'takeoff' })
+    trainingSessionRef.current = new TrainingSession({ lessons: DEFAULT_LESSONS, initialLessonId: DEFAULT_LESSONS.some((lesson) => lesson.id === initialLearning.preferences.lastLessonId) ? initialLearning.preferences.lastLessonId : 'takeoff' })
   }
   const [trainingState, setTrainingState] = useState<TrainingMachineState>(
     () => trainingSessionRef.current?.getState() ?? new TrainingSession({ lessons: DEFAULT_LESSONS }).getState(),
@@ -56,7 +65,7 @@ export default function App() {
   const [workspace, setWorkspace] = useState<'learning' | 'free'>('learning')
   const [showSetup, setShowSetup] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const attemptContext = useMemo<TrainingAttemptContext>(() => ({ rulesVersion: 1, physicsVersion: 1, presetId: identifyTuningPreset(tuningSettings), settingsFingerprint: fingerprintTrainingSettings(tuningSettings), inputSource, mode: 'challenge', assistance: 'none' }), [tuningSettings, inputSource])
+  const attemptContext = useMemo<TrainingAttemptContext>(() => ({ rulesVersion: CURRENT_TRAINING_RULES_VERSION, physicsVersion: 1, presetId: identifyTuningPreset(tuningSettings), settingsFingerprint: fingerprintTrainingSettings(tuningSettings), inputSource, mode: learningPreferences.mode, assistance: 'none' }), [tuningSettings, inputSource, learningPreferences.mode])
   const progressContext = trainingState.result?.attemptContext ?? attemptContext
   const progressLoad = useMemo(() => progressStore.load(progressContext), [progressStore, progressContext, progressRevision])
   const trainingProgress = progressLoad.progress
@@ -94,6 +103,7 @@ export default function App() {
       state: sample.state,
       normalizedInput: sample.normalizedInput,
       armed: sample.armed,
+      groundContact: sample.groundContact,
     })
     if (next === previous) return
     const displayState = resultStateForUi(session, next)
@@ -151,22 +161,28 @@ export default function App() {
       syncTrainingState(resultStateForUi(session, aborted))
     }
   }, [syncTrainingState])
+  const persistLearning = useCallback((next: LearningPreferences) => {
+    setLearningPreferences(next)
+    setPreferencesNotice(saveLearningPreferences(next).error)
+  }, [])
   const selectTrainingLesson = useCallback((lessonId: string) => {
     const session = trainingSessionRef.current
     if (!session) return
     trainingUiLastPublishedSecondsRef.current = null
     trainingUiCheckpointKeyRef.current = ''
+    persistLearning({ ...learningPreferences, lastLessonId: lessonId })
     syncTrainingState(session.selectLesson(lessonId))
     setTrainingDisarmKey((value) => value + 1)
-  }, [syncTrainingState])
+  }, [syncTrainingState, learningPreferences, persistLearning])
   const startTraining = useCallback(() => {
     const session = trainingSessionRef.current
     if (!session) return
     trainingUiLastPublishedSecondsRef.current = null
     trainingUiCheckpointKeyRef.current = ''
+    persistLearning({ ...learningPreferences, lastLessonId: session.getState().lessonId ?? 'takeoff' })
     setPersistenceNotice(null)
     syncTrainingState(session.start(0, attemptContext))
-  }, [syncTrainingState, attemptContext])
+  }, [syncTrainingState, attemptContext, learningPreferences, persistLearning])
   const retryTraining = useCallback(() => {
     const session = trainingSessionRef.current
     if (!session) return
@@ -204,6 +220,7 @@ export default function App() {
     return result
   }, [trainingSettingsLocked, tuningStore])
 
+  const preparedSetupRequest = useMemo(() => prepareTrainingSetup(trainingState.setupRequest, trainingState.sceneReferences), [trainingState.setupRequest, trainingState.sceneReferences])
   const selectedPreset = identifyTuningPreset(tuningSettings)
   const busy = trainingSettingsLocked || flightBusy
   const changePreset = (id: 'beginner' | 'standard' | 'custom'): void => {
@@ -223,7 +240,7 @@ export default function App() {
           <span className="brand-name">FPV <strong>飛行學校</strong></span>
         </a>
         <nav className="school-navigation" aria-label="練習模式">
-          <button type="button" aria-pressed={workspace === 'learning'} disabled={busy} onClick={() => setWorkspace('learning')}>開始學飛</button>
+          <button type="button" aria-pressed={workspace === 'learning'} disabled={busy} onClick={() => { setWorkspace('learning'); setShowIntro(false) }}>{initialLearning.loaded ? '繼續練習' : '開始學飛'}</button>
           <button type="button" aria-pressed={workspace === 'free'} disabled={busy} onClick={() => setWorkspace('free')}>自由飛行</button>
           <button type="button" disabled={busy} onClick={revealSetup}>設備與校正</button>
         </nav>
@@ -238,21 +255,29 @@ export default function App() {
           <select id="school-preset" value={selectedPreset} disabled={busy} onChange={(event) => changePreset(event.target.value as 'beginner' | 'standard' | 'custom')}>
             <option value="beginner">新手：低轉速、低鏡頭角度</option><option value="standard">一般：標準 Acro</option><option value="custom">原有自訂設定</option>
           </select>
+          <label htmlFor="school-mode">學習方式</label>
+          <select id="school-mode" value={learningPreferences.mode} disabled={busy} onChange={(event) => persistLearning({ ...learningPreferences, mode: event.target.value as 'practice' | 'challenge' })}>
+            <option value="practice">引導練習（不限時）</option><option value="challenge">能力挑戰</option>
+          </select>
+          <button className="lab-button lab-button-small" id="school-open-intro" type="button" disabled={busy} onClick={() => setShowIntro((value) => !value)}>{showIntro ? '返回飛行課程' : learningPreferences.introCompleted ? 'L00 觀念複習 ✓' : 'L00 互動觀念課'}</button>
           <span>{inputSource === 'keyboard' ? '鍵盤體驗' : 'USB 遙控器'} · 成績依操控設定與輸入方式分開保存</span>
         </div>
+        {preferencesNotice && <p className="school-help" role="status">{preferencesNotice}</p>}
         <FreeFlight
           poller={poller}
           profile={flightProfile}
           settings={tuningSettings}
+          demonstrationRequest={demonstrationRequest}
           trainingResetKey={trainingResetKey}
           trainingDisarmKey={trainingDisarmKey}
           trainingSettingsLocked={trainingSettingsLocked}
           trainingArmBlocked={trainingState.phase === 'COUNTDOWN'}
-          trainingSetupRequest={trainingState.phase === 'COUNTDOWN' ? trainingState.setupRequest : null}
+          trainingSetupRequest={trainingState.phase === 'COUNTDOWN' ? preparedSetupRequest : null}
           trainingPath={trainingState.trajectory}
           onTrainingReset={resetTraining}
-          trainingState={workspace === 'learning' ? trainingState : null}
-          lessonPanel={workspace === 'learning' ? <TrainingPanel
+          trainingState={workspace === 'learning' && !showIntro ? trainingState : null}
+          lessonPanel={workspace === 'learning' ? <div className="school-learning-sidebar"><div hidden={!showIntro}><IntroLesson disabled={busy} completed={learningPreferences.introCompleted} onDemonstrate={(kind) => setDemonstrationRequest((previous) => ({ sequence: (previous?.sequence ?? 0) + 1, kind }))} onComplete={() => { persistLearning({ ...learningPreferences, introCompleted: true }); setShowIntro(false) }} /></div><div hidden={showIntro}><TrainingPanel
+            mode={learningPreferences.mode}
             state={trainingState}
             progress={trainingProgress}
             progressNotice={persistenceNotice ?? (progressLoad.errors.length > 0 ? '讀取紀錄遇到問題，原始資料仍保留。' : null)}
@@ -261,7 +286,7 @@ export default function App() {
             onRetry={retryTraining}
             onReset={resetTraining}
             playbackActive={playbackActive}
-          /> : null}
+          /></div></div> : null}
           onSceneReferences={onTrainingSceneReferences}
           onFixedStep={onTrainingFixedStep}
           onTelemetry={onTrainingTelemetry}

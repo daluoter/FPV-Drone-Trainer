@@ -48,6 +48,49 @@ function mixerSaturationControllerConfig() {
 }
 
 describe('flight simulation integration', () => {
+  it('holds a disarmed lesson spawn through countdown and releases physics only after explicit arm', () => {
+    const runtime = new FlightSimulation()
+    const prepared = runtime.resetForTraining({ x: 1, y: 3, z: 2 })
+    let samples = 0
+    for (let frame = 0; frame < 600; frame += 1) {
+      runtime.advance(1 / 60, null, (step) => {
+        samples += 1
+        expect(step.telemetry.armed).toBe(false)
+      })
+    }
+    expect(samples).toBe(2_400)
+    expect(runtime.getState().timeSeconds).toBeCloseTo(10, 8)
+    expect(runtime.getState().positionM).toEqual(prepared.positionM)
+    expect(runtime.getState().motors).toEqual(prepared.motors)
+
+    runtime.arm()
+    expect(runtime.isArmed()).toBe(true)
+    const flying = runtime.step({ roll: 0, pitch: 0, yaw: 0, throttle: 0 }).state
+    expect(flying.positionM.y).toBeLessThan(3)
+    runtime.disarm()
+    const falling = runtime.step({ roll: 0, pitch: 0, yaw: 0, throttle: 0 }).state
+    expect(falling.positionM.y).toBeLessThan(flying.positionM.y)
+  })
+
+  it('does not hold ordinary disarmed flight or retain preparation after a normal reset', () => {
+    const runtime = new FlightSimulation()
+    runtime.resetAt({ x: 0, y: 3, z: 0 })
+    expect(runtime.step({ roll: 0, pitch: 0, yaw: 0, throttle: 0 }).state.positionM.y).toBeLessThan(3)
+    runtime.resetForTraining({ x: 0, y: 5, z: 0 })
+    runtime.resetAt({ x: 0, y: 3, z: 0 })
+    expect(runtime.step({ roll: 0, pitch: 0, yaw: 0, throttle: 0 }).state.positionM.y).toBeLessThan(3)
+  })
+
+  it('retains the prepared pose if an invalid configuration prevents arming', () => {
+    const runtime = new FlightSimulation({ drone: { ...DEFAULT_DRONE_CONFIG, massKg: 0 } })
+    runtime.resetForTraining({ x: 0, y: 3, z: 0 })
+    runtime.arm()
+    expect(runtime.isArmed()).toBe(false)
+    for (let frame = 0; frame < 60; frame += 1) runtime.advance(1 / 60, null)
+    expect(runtime.getState().positionM.y).toBe(3)
+    expect(runtime.getState().timeSeconds).toBeCloseTo(1, 8)
+  })
+
   it('holds hover and is equivalent across render rates', () => {
     const input = { roll: 0, pitch: 0, yaw: 0, throttle: hoverThrottle() }
     const at60 = runAtRenderRate(60, input)

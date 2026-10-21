@@ -39,6 +39,7 @@ function sample(
       positionM: { ...positionM },
       velocityMps: { ...velocityMps },
       stepIndex,
+      timeSeconds: timestampSeconds,
     },
     normalizedInput: NEUTRAL_INPUT,
     armed,

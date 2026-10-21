@@ -1,3 +1,6 @@
+import { LANDING_LEARNING_CONTENT } from './landing'
+import { STRAIGHT_LINE_LEARNING_CONTENT } from './straightLine'
+
 export interface LessonLearningContent {
   readonly code: string
   readonly title: string
@@ -9,6 +12,8 @@ export interface LessonLearningContent {
 }
 
 const LEARNING_CONTENT: Readonly<Record<string, LessonLearningContent>> = {
+  landing: LANDING_LEARNING_CONTENT,
+  'straight-line': STRAIGHT_LINE_LEARNING_CONTENT,
   takeoff: {
     code: 'L01',
     title: '穩定起飛',

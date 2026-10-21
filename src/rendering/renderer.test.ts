@@ -47,6 +47,31 @@ describe('FlightRenderer lifecycle and failure contract', () => {
     })).toThrowError(FlightRendererInitializationError)
   })
 
+  it('replaces configured anchors without replacing the WebGL owner and preserves the active lesson guide', () => {
+    const canvas = document.createElement('canvas')
+    const rendererStub = createRendererStub()
+    const renderer = new FlightRenderer(canvas, { rendererFactory: () => rendererStub })
+    const previous = renderer.flightScene
+    const disposePrevious = vi.spyOn(previous, 'dispose')
+    renderer.setLessonTarget('landing')
+    renderer.reconfigureScene({
+      ...DEFAULT_DRONE_CONFIG,
+      ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 2 },
+      spawnPositionM: { x: 4, y: 2.5, z: -3 },
+    })
+
+    expect(renderer.flightScene).not.toBe(previous)
+    expect(renderer.renderer).toBe(rendererStub)
+    expect(renderer.flightScene.getReference('landing-surface')?.positionM).toEqual({ x: 4, y: 2, z: -3 })
+    expect(renderer.flightScene.getReference('landing-surface')?.object.visible).toBe(true)
+    expect(renderer.flightScene.getReference('hover-zone')?.object.visible).toBe(false)
+    expect(disposePrevious).toHaveBeenCalledOnce()
+    renderer.render(createInitialDroneState(DEFAULT_DRONE_CONFIG))
+    expect(rendererStub.render).toHaveBeenCalledOnce()
+    expect(rendererStub.dispose).not.toHaveBeenCalled()
+    renderer.dispose()
+  })
+
   it('reports context loss, skips invisible rendering, and resumes after restoration', () => {
     const canvas = document.createElement('canvas')
     const rendererStub = createRendererStub()

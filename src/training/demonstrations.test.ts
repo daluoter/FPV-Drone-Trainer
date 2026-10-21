@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
-import { createInitialDroneState } from '../drone'
+import { createInitialDroneState, droneGroundSupport } from '../drone'
 import { quaternionNorm } from '../math/quaternion'
 import { ReplayPlayback, type ReplaySample } from '../replay'
-import { createDefaultTuningSettings } from '../tuning/config'
+import { createDefaultTuningSettings, type TuningSettings } from '../tuning/config'
 import { createTuningPreset } from '../tuning/presets'
 import { createTeachingDemonstration, teachingCueAt } from './demonstrations'
 import { DEFAULT_LESSONS } from './lessons'
+import { LANDING_LESSON, landingEvaluator } from './landing'
+import { STRAIGHT_LINE_LESSON, straightLineEvaluator } from './straightLine'
 import { takeoffEvaluator } from './takeoff'
+import { TrainingSession } from './machine'
 import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample } from './types'
 
 function at(samples: readonly ReplaySample[], timeSeconds: number): ReplaySample {
@@ -19,6 +22,26 @@ function at(samples: readonly ReplaySample[], timeSeconds: number): ReplaySample
 
 function orientationAngleDegrees(sample: ReplaySample): number {
   return 2 * Math.acos(Math.min(1, Math.abs(sample.orientation.w))) * 180 / Math.PI
+}
+
+function geometricSample(settings: TuningSettings, pose: ReplaySample): TrainingSample {
+  const supportOffsetM = droneGroundSupport(settings.drone, pose.orientation).supportOffsetM
+  return {
+    timestampSeconds: pose.timestampSeconds,
+    armed: true,
+    normalizedInput: pose.normalizedInput,
+    groundContact: {
+      heightM: settings.drone.ground.heightM,
+      supportOffsetM,
+      touching: pose.positionM.y - supportOffsetM <= settings.drone.ground.heightM + 0.002,
+    },
+    state: {
+      ...createInitialDroneState(settings.drone),
+      ...pose,
+      timeSeconds: pose.timestampSeconds,
+      stepIndex: Math.round(pose.timestampSeconds * 240),
+    },
+  }
 }
 
 describe('bounded simulation teaching recordings', () => {
@@ -57,6 +80,71 @@ describe('bounded simulation teaching recordings', () => {
     expect(JSON.stringify(settings)).toBe(before)
   })
 
+  it('records versioned immutable metadata and retains complete landing/straight examples within a fixed bound', () => {
+    const settings = createTuningPreset('beginner')
+    for (const kind of ['landing', 'straight-line'] as const) {
+      const demo = createTeachingDemonstration(settings, kind)
+      expect(demo).toMatchObject({ schemaVersion: 1, rulesVersion: 2, physicsVersion: 1, presetId: 'beginner' })
+      expect(demo.settingsFingerprint).toContain('settings.v1:')
+      expect(Object.isFrozen(demo)).toBe(true)
+      expect(Object.isFrozen(demo.cues)).toBe(true)
+      expect(demo.cues.every(Object.isFrozen)).toBe(true)
+      expect(demo.recording.durationSeconds).toBeGreaterThanOrEqual(13.9)
+      expect(demo.recording.durationSeconds).toBeLessThanOrEqual(18.01)
+      expect(demo.recording.samples.length).toBeLessThanOrEqual(1_200)
+      expect(demo.recording.droppedSamples).toBe(0)
+      expect(Object.isFrozen(demo.recording.samples)).toBe(true)
+    }
+  })
+
+  it.each([
+    ['landing', LANDING_LESSON, landingEvaluator],
+    ['straight-line', STRAIGHT_LINE_LESSON, straightLineEvaluator],
+  ] as const)('flies a continuous real %s recording which passes its evaluator', (kind, lesson, evaluator) => {
+    const settings = createTuningPreset('beginner')
+    const demo = createTeachingDemonstration(settings, kind)
+    const checkpoints: Record<string, TrainingCheckpointState> = Object.fromEntries(lesson.checkpoints.map((checkpoint) => [
+      checkpoint.id, { id: checkpoint.id, completed: false, completedAtSeconds: null, metrics: {} },
+    ]))
+    let previousSample: TrainingSample | null = null
+    let previousEvaluation: TrainingEvaluation | null = null
+    let success = false
+    for (const pose of demo.recording.samples) {
+      const sample = geometricSample(settings, pose)
+      const evaluation = evaluator.evaluate(sample, {
+        lesson,
+        elapsedSeconds: pose.timestampSeconds,
+        trajectory: [],
+        checkpoints,
+        sceneReferences: [
+          { id: 'takeoff-pad', kind: 'pad', positionM: settings.drone.spawnPositionM },
+          { id: 'landing-surface', kind: 'ground', positionM: { ...settings.drone.spawnPositionM, y: settings.drone.ground.heightM } },
+        ],
+        previousSample,
+        previousFlightSample: previousSample,
+        previousEvaluation,
+        mode: 'challenge',
+      })
+      expect(evaluation.status, `${pose.timestampSeconds.toFixed(3)}s ${evaluation.message}`).not.toBe('failure')
+      for (const id of evaluation.checkpointIds ?? []) {
+        checkpoints[id] = { id, completed: true, completedAtSeconds: pose.timestampSeconds, metrics: evaluation.metrics ?? {} }
+      }
+      if (evaluation.status === 'success') {
+        success = true
+        break
+      }
+      previousSample = sample
+      previousEvaluation = evaluation
+    }
+    expect(success, JSON.stringify(previousEvaluation)).toBe(true)
+    expect(Object.values(checkpoints).every((checkpoint) => checkpoint.completed)).toBe(true)
+    if (kind === 'landing') {
+      const final = geometricSample(settings, demo.recording.samples[demo.recording.samples.length - 1])
+      expect(final.groundContact?.touching).toBe(true)
+      expect(Math.abs(final.state.velocityMps.y)).toBeLessThan(0.2)
+    }
+  })
+
   it('shows that centered Acro sticks stop rotation without automatically restoring attitude', () => {
     for (const kind of ['roll', 'pitch', 'yaw'] as const) {
       const { recording } = createTeachingDemonstration(createDefaultTuningSettings(), kind)
@@ -69,6 +157,31 @@ describe('bounded simulation teaching recordings', () => {
       expect(orientationAngleDegrees(centered)).toBeGreaterThan(5)
       expect(orientationAngleDegrees(restored)).toBeLessThan(orientationAngleDegrees(centered) * 0.4)
     }
+  })
+
+  it('keeps all foundational demonstrations aligned with normalized anchors above raised ground', () => {
+    const defaults = createTuningPreset('beginner')
+    const settings = { ...defaults, drone: { ...defaults.drone, ground: { ...defaults.drone.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 0, z: -3 } } }
+    const pad = createInitialDroneState(settings.drone).positionM
+    for (const kind of ['takeoff', 'landing', 'straight-line'] as const) {
+      const demo = createTeachingDemonstration(settings, kind)
+      expect(demo.recording.samples[0]!.positionM).toEqual({ ...pad, y: pad.y + (kind === 'takeoff' ? 0 : 2.5) })
+      const session = new TrainingSession({
+        initialLessonId: kind, countdownDurationSeconds: 0,
+        sceneReferences: [
+          { id: 'takeoff-pad', kind: 'pad', positionM: pad },
+          { id: 'landing-surface', kind: 'zone', positionM: { ...pad, y: 5 } },
+        ],
+      })
+      session.start(0)
+      session.tick(0)
+      for (const pose of demo.recording.samples) {
+        session.consumeSample(geometricSample(settings, pose))
+        if (['SUCCESS', 'FAILED'].includes(session.getState().phase)) break
+      }
+      expect(session.getState().phase, `${kind}: ${session.getState().result?.message}`).toBe('SUCCESS')
+    }
+    expect(settings.drone.spawnPositionM.y).toBe(0)
   })
 
   it('flies an actual generated takeoff whose recorded geometry passes the takeoff checkpoints', () => {

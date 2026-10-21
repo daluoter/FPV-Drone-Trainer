@@ -158,8 +158,13 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             training = page.locator("#training")
             phase = training.locator(".school-phase")
             source = page.locator("#flight-input-source")
+            mode = page.locator("#school-mode")
+            expect(mode).to_have_value("practice")
             expect(lesson).to_have_value("takeoff")
             expect(lesson.locator("option:checked")).to_contain_text("L01")
+            expect(lesson.locator("option")).to_have_count(7)
+            expect(lesson.locator("option[value='landing']")).to_contain_text("L03")
+            expect(lesson.locator("option[value='straight-line']")).to_contain_text("L04")
             progress_before_waiting = training_progress(page)
             training.get_by_role("button", name="開始課程", exact=True).click()
             expect(phase).to_have_text("倒數準備")
@@ -248,6 +253,133 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if training_progress(page) != progress_before_demo:
                 raise AssertionError("Demonstration playback modified training progress.")
             checks.append("synchronized L01 demo pause, seek, speed, recorded sticks and progress isolation")
+
+            # Produce a real interrupted attempt through the UI, then verify
+            # practice/challenge summaries use their own persisted conditions.
+            training.get_by_role("button", name="開始課程", exact=True).click()
+            expect(phase).to_have_text("等待解鎖", timeout=10_000)
+            arm.click()
+            expect(phase).to_have_text("練習進行中")
+            disarm.click()
+            expect(phase).to_have_text("練習結果")
+            expect(training.locator(".school-result")).to_contain_text("引導練習")
+            expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
+            stored_attempts = training_progress(page)
+            contexts = [json.loads(document).get("context") for document in stored_attempts.values()]
+            if len(contexts) != 1 or contexts[0]["mode"] != "practice" or contexts[0]["inputSource"] != "keyboard":
+                raise AssertionError("The real interrupted attempt did not retain practice/keyboard provenance.")
+            training.get_by_role("button", name="重設課程", exact=True).click()
+            expect(phase).to_have_text("準備選課")
+            mode.select_option("challenge")
+            expect(training.locator(".school-progress")).to_contain_text("已練 0 次")
+            mode.select_option("practice")
+            expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
+            if training_progress(page) != stored_attempts:
+                raise AssertionError("Changing learning mode modified stored flight results.")
+            checks.append("default practice mode, seven lessons and persisted practice/challenge isolation")
+
+            # Answer the actual radios/form. Wrong answers must not unlock the
+            # next step; knowledge completion is separate from flight progress.
+            page.locator("#school-open-intro").click()
+            intro = page.locator(".intro-lesson")
+            expect(intro).to_be_visible()
+            next_intro = intro.get_by_role("button", name="下一步", exact=True)
+            check_answer = intro.get_by_role("button", name="檢查答案", exact=True)
+            expect(next_intro).to_be_disabled()
+            expect(check_answer).to_be_disabled()
+            intro.get_by_role("radio", name="偏航 Yaw：轉動機頭方向", exact=True).check()
+            check_answer.click()
+            expect(intro.locator(".intro-lesson-feedback")).to_contain_text("再試一次")
+            expect(next_intro).to_be_disabled()
+            answers = (
+                "橫滾 Roll：讓機身向左或右傾斜",
+                "要求停止旋轉，但不會自動回平或煞停",
+                "不一定，需觀察姿態與高度，再小量修正油門",
+                "先確認狀態、低油門與中立，再明確按 Arm 解鎖",
+            )
+            for index, answer in enumerate(answers):
+                intro.get_by_role("radio", name=answer, exact=True).check()
+                check_answer.click()
+                expect(intro.locator(".intro-lesson-feedback")).to_contain_text("答對了")
+                if index < len(answers) - 1:
+                    next_intro.click()
+            intro.get_by_role("button", name="完成觀念練習", exact=True).click()
+            expect(page.locator("#school-open-intro")).to_have_text("L00 觀念複習 ✓")
+            expect(training).to_be_visible()
+            if training_progress(page) != stored_attempts:
+                raise AssertionError("Knowledge completion wrote a flight result.")
+            page.reload(wait_until="networkidle")
+            expect(page.locator("#school-open-intro")).to_have_text("L00 觀念複習 ✓")
+            expect(mode).to_have_value("practice")
+            source.select_option("keyboard")
+            expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
+            checks.append("L00 wrong-answer gating, full knowledge completion and reload persistence")
+
+            for demo_name, first_cue, final_cue in (
+                ("L03 降落示範", "從空中對準降落區", "平穩接地後"),
+                ("L04 直線示範", "先在起點穩住高度", "在終點附近連續穩住"),
+            ):
+                before_demo = training_progress(page)
+                flight.get_by_role("button", name=demo_name, exact=True).click()
+                expect(arm).to_be_disabled()
+                expect(source).to_be_disabled()
+                expect(demonstration_sticks).to_be_visible()
+                flight.get_by_role("button", name="Pause", exact=True).click()
+                timeline.press("Home")
+                expect(cue).to_contain_text(first_cue)
+                expect(timeline).to_have_value("0")
+                timeline.press("End")
+                expect(cue).to_contain_text(final_cue)
+                expect(flight.get_by_role("button", name="Play", exact=True)).to_be_enabled()
+                expect(phase).to_have_text("準備選課")
+                flight.get_by_role("button", name="Exit playback", exact=True).click()
+                expect(disarm).to_be_disabled()
+                expect(arm).to_be_enabled()
+                if training_progress(page) != before_demo:
+                    raise AssertionError(f"{demo_name} modified flight progress.")
+            checks.append("L03/L04 demonstration cue synchronization and progress isolation")
+
+            # Observe public telemetry while waiting: airborne setup must not
+            # fall to the ground before the learner explicitly arms the drone.
+            hud = flight.get_by_role("checkbox", name="Developer HUD", exact=True)
+            hud.check()
+            position = flight.locator(".flight-data-row").filter(
+                has=page.get_by_text("Position m", exact=True)
+            ).locator("code")
+            report["airborne_wait_positions"] = {}
+            for lesson_id in ("landing", "straight-line"):
+                lesson.select_option(lesson_id)
+                training.get_by_role("button", name="開始課程", exact=True).click()
+                expect(position).to_have_text("0.00, 3.00, 0.00")
+                expect(phase).to_have_text("等待解鎖", timeout=10_000)
+                page.wait_for_timeout(500)
+                expect(position).to_have_text("0.00, 3.00, 0.00")
+                expect(disarm).to_be_disabled()
+                expect(training.locator(".school-result")).to_have_count(0)
+                report["airborne_wait_positions"][lesson_id] = position.inner_text()
+                training.get_by_role("button", name="停止練習", exact=True).click()
+                expect(phase).to_have_text("準備選課")
+                expect(source).to_be_enabled()
+            hud.uncheck()
+            checks.append("L03/L04 airborne setup stays at three metres through countdown and arm wait")
+
+            fullscreen = flight.locator(".school-fullscreen")
+            fullscreen.click()
+            page.wait_for_function(
+                "Boolean(document.fullscreenElement) || document.body.innerText.includes('瀏覽器未提供全螢幕')"
+            )
+            if page.evaluate("Boolean(document.fullscreenElement)"):
+                expect(fullscreen).to_have_text("離開全螢幕")
+                fullscreen.click()
+                page.wait_for_function("!document.fullscreenElement")
+                expect(fullscreen).to_have_text("全螢幕練習")
+                report["fullscreen"] = "entered and exited"
+            else:
+                expect(flight.get_by_text("瀏覽器未提供全螢幕；仍可在目前畫面練習。", exact=True)).to_be_visible()
+                report["fullscreen"] = "unsupported with actionable fallback"
+            expect(disarm).to_be_disabled()
+            expect(arm).to_be_enabled()
+            checks.append("fullscreen entry/exit or graceful browser fallback")
 
             for camera_name in ("Chase", "Free / debug", "FPV"):
                 camera = flight.get_by_role("button", name=camera_name, exact=True)

@@ -2711,6 +2711,11 @@ h1 em {
 .school-toolbar select, .school-course-panel select { max-width: 100%; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface-raised); padding: 9px; color: var(--text); font: inherit; }
 .school-toolbar > span { color: var(--muted); }
 .school-flight { margin-top: 8px; padding-top: 12px; }
+.school-learning-sidebar { min-width: 0; }
+.school-flight:fullscreen { box-sizing: border-box; margin: 0; padding: 16px 22px; width: 100%; height: 100%; overflow: auto; background: var(--background, #0a1017); }
+.school-flight:fullscreen .free-flight-viewport { height: clamp(280px, 54vh, 720px); }
+.school-flight:fullscreen .school-course-panel, .school-flight:fullscreen .intro-lesson { max-height: calc(100vh - 160px); }
+.school-fullscreen { flex-shrink: 0; }
 .school-flight .free-flight-heading { margin-bottom: 10px; }
 .school-flight .free-flight-heading h2 { font-size: 18px; margin: 3px 0; }
 .school-flight .free-flight-heading p:not(.panel-kicker) { font-size: 12px; margin: 4px 0; }
@@ -2749,6 +2754,7 @@ h1 em {
 .school-live-hint, .school-demo-cue { background: #e9f2e9; color: #264e3c; border-radius: 8px; padding: 10px; line-height: 1.7; font-size: 12px; }
 .school-viewport-hint { position: absolute; left: 12px; right: 12px; bottom: 12px; background: #203b35e8; color: #fff; padding: 10px 14px; border-radius: 8px; font-size: 13px; line-height: 1.6; }
 .school-result { padding: 12px; border-radius: 8px; background: #203d31; color: #e0f5dc; font-size: 12px; line-height: 1.6; }
+.school-result-feedback { font-size: 12px; line-height: 1.7; }
 .school-progress, .school-prototype-note, .school-lesson-notes { font-size: 11px; line-height: 1.7; color: var(--muted); }
 .school-lesson-notes summary, .school-settings summary { cursor: pointer; padding: 8px 0; }
 .school-lesson-notes ul { padding-left: 18px; }

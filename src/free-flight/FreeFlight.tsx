@@ -29,6 +29,7 @@ export interface FreeFlightProps {
   readonly trainingSettingsLocked?: boolean
   readonly trainingSetupRequest?: TrainingSetupRequest | null
   readonly trainingPath?: readonly TrainingSample[]
+  readonly demonstrationRequest?: { readonly sequence: number; readonly kind: TeachingDemonstrationKind } | null
   readonly onTrainingReset?: () => void
   readonly trainingArmBlocked?: boolean
   readonly trainingState?: TrainingMachineState | null
@@ -87,6 +88,7 @@ export default function FreeFlight({
   trainingSettingsLocked = false,
   trainingSetupRequest = null,
   trainingPath = [],
+  demonstrationRequest = null,
   onTrainingReset,
   trainingArmBlocked = false,
   trainingState = null,
@@ -95,6 +97,9 @@ export default function FreeFlight({
   onFixedStep,
   onTelemetry,
 }: FreeFlightProps) {
+  const workspaceRef = useRef<HTMLElement | null>(null)
+  const [fullscreen, setFullscreen] = useState(false)
+  const [fullscreenError, setFullscreenError] = useState<string | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const appliedSettingsRef = useRef(settings)
   const runtimeRef = useRef<FlightRuntime | null>(null)
@@ -111,6 +116,18 @@ export default function FreeFlight({
   const fixedStepListenerRef = useRef(onFixedStep)
   const telemetryListenerRef = useRef(onTelemetry)
   const sceneReferencesListenerRef = useRef(onSceneReferences)
+  const shouldConfirmExit = Boolean(telemetry?.armed || trainingSettingsLocked)
+
+  useEffect(() => {
+    if (!shouldConfirmExit) return
+    const confirmExit = (event: BeforeUnloadEvent): void => {
+      event.preventDefault()
+      // The browser controls the native prompt and may require prior interaction.
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', confirmExit)
+    return () => window.removeEventListener('beforeunload', confirmExit)
+  }, [shouldConfirmExit])
 
   useEffect(() => {
     sceneReferencesListenerRef.current = onSceneReferences
@@ -148,6 +165,7 @@ export default function FreeFlight({
     try {
       renderer = new FlightRenderer(canvas, {
         ...settings.camera,
+        droneConfig: settings.drone,
         onStatusChange: onRendererStatus,
       })
     } catch (error) {
@@ -234,6 +252,9 @@ export default function FreeFlight({
     if (!runtime || trainingSettingsLocked || telemetry?.replay.active || appliedSettingsRef.current === settings) return
     if (runtime.reconfigure(flightSimulationConfigFromTuning(settings)) === false) return
     rendererRef.current?.setCameraOptions(settings.camera)
+    rendererRef.current?.reconfigureScene?.(settings.drone)
+    const nextReferences = rendererRef.current?.flightScene.sceneReferences
+    if (nextReferences) sceneReferencesListenerRef.current?.(nextReferences.map(({ id, kind, positionM, sizeM }) => ({ id, kind, positionM: { ...positionM }, sizeM: sizeM ? { ...sizeM } : undefined })))
     appliedSettingsRef.current = settings
     setTelemetry(runtime.getTelemetry())
   }, [settings, telemetry?.replay.active, trainingSettingsLocked])
@@ -366,6 +387,23 @@ export default function FreeFlight({
       setTelemetry(runtime.getTelemetry())
     } catch { setDemoError('目前設定無法建立示範，請選擇新手預設後再試。') }
   }
+  useEffect(() => {
+    if (demonstrationRequest) startDemonstration(demonstrationRequest.kind)
+  }, [demonstrationRequest])
+  useEffect(() => {
+    const syncFullscreen = (): void => setFullscreen(document.fullscreenElement === workspaceRef.current)
+    document.addEventListener('fullscreenchange', syncFullscreen)
+    return () => document.removeEventListener('fullscreenchange', syncFullscreen)
+  }, [])
+  const toggleFullscreen = async (): Promise<void> => {
+    if (telemetry?.armed || trainingSettingsLocked || telemetry?.replay.active) return
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen()
+      else if (workspaceRef.current?.requestFullscreen) await workspaceRef.current.requestFullscreen()
+      else throw new Error('unsupported')
+      setFullscreenError(null)
+    } catch { setFullscreenError('瀏覽器未提供全螢幕；仍可在目前畫面練習。') }
+  }
   const playbackInput = telemetry?.replay.active ? runtimeRef.current?.getReplayPlayback?.()?.getGhostState()?.normalizedInput ?? null : telemetry?.normalizedInput
   const channels = channelValues(telemetry)
   const rawAxes = telemetry?.rawInput?.axes ?? []
@@ -374,13 +412,14 @@ export default function FreeFlight({
   const pid = telemetry?.pid
 
   return (
-    <section className={`free-flight-section school-flight ${lessonPanel ? 'has-lessons' : ''}`} id="free-flight" aria-labelledby="free-flight-title">
+    <section ref={workspaceRef} className={`free-flight-section school-flight ${lessonPanel ? 'has-lessons' : ''}`} id="free-flight" aria-labelledby="free-flight-title">
       <div className="free-flight-heading">
         <div>
           <p className="panel-kicker">練習工作區 · Acro</p>
           <h2 id="free-flight-title">看懂動作，再親手試一次。</h2>
           <p>Arm 解鎖開始飛行，Disarm 停止馬達；課程倒數後等待你準備完成。示範與回放不會累積成績。</p>
         </div>
+        <button className="lab-button lab-button-small school-fullscreen" type="button" disabled={trainingSettingsLocked || Boolean(telemetry?.armed || telemetry?.replay.active)} onClick={() => void toggleFullscreen()}>{fullscreen ? '離開全螢幕' : '全螢幕練習'}</button>
         <div className={`flight-state-badge ${renderingState === 'ready' && telemetry?.armed ? 'flight-state-armed' : ''}`}>
           <span aria-hidden="true" /> {fallbackTelemetryLabel(telemetry, renderingState)}
         </div>
@@ -388,9 +427,10 @@ export default function FreeFlight({
 
       <div className="school-demo-bar" aria-label="L00 四軸與起飛示範">
         <strong>L00 看懂四軸</strong>
-        {([['roll', '橫滾 Roll'], ['pitch', '俯仰 Pitch'], ['yaw', '偏航 Yaw'], ['takeoff', 'L01 起飛示範']] as const).map(([kind, label]) => <button className="lab-button lab-button-small" type="button" key={kind} disabled={trainingSettingsLocked || Boolean(telemetry?.armed) || renderingState !== 'ready'} onClick={() => startDemonstration(kind)}>{label}</button>)}
+        {([['roll', '橫滾 Roll'], ['pitch', '俯仰 Pitch'], ['yaw', '偏航 Yaw'], ['takeoff', 'L01 起飛示範'], ['landing', 'L03 降落示範'], ['straight-line', 'L04 直線示範']] as const).map(([kind, label]) => <button className="lab-button lab-button-small" type="button" key={kind} disabled={trainingSettingsLocked || Boolean(telemetry?.armed) || renderingState !== 'ready'} onClick={() => startDemonstration(kind)}>{label}</button>)}
         <span>左桿：油門／偏航 · 右桿：橫滾／俯仰</span>
       </div>
+      {fullscreenError && <p role="status">{fullscreenError}</p>}
       {demoError && <p role="alert">{demoError}</p>}
       <div className="free-flight-layout">
         {lessonPanel && <aside className="school-lesson-slot">{lessonPanel}</aside>}

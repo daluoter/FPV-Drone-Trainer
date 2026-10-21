@@ -62,6 +62,47 @@ function context(overrides: Partial<TrainingEvaluationContext> = {}): TrainingEv
 }
 
 describe('takeoff lesson', () => {
+  it('allows unlimited explicit practice and restarts ordinary takeoff errors while preserving challenge failures', () => {
+    const initial = sample(0, PAD_HEIGHT)
+    const practice = context({ mode: 'practice', elapsedSeconds: 120 })
+    expect(takeoffEvaluator.evaluate(initial, practice).status).toBe('continue')
+    const challenge = takeoffEvaluator.evaluate(initial, context({ elapsedSeconds: 120 }))
+    expect(challenge.status).toBe('failure')
+    expect(challenge.message).toMatch(/逾時/)
+
+    const ready = { id: 'takeoff-ready', completed: true, completedAtSeconds: 0.1, metrics: {} }
+    const lifted = { id: 'takeoff-liftoff', completed: true, completedAtSeconds: 0.8, metrics: {} }
+    for (const [current, overrides] of [
+      [{ ...initial, state: { ...initial.state, positionM: { x: 4.1, y: PAD_HEIGHT, z: 0 } } }, {}],
+      [sample(0, PAD_HEIGHT + TAKEOFF_TARGET_HEIGHT_M), {}],
+      [initial, { checkpoints: { 'takeoff-ready': ready, 'takeoff-liftoff': lifted } }],
+    ] as const) {
+      const recovered = takeoffEvaluator.evaluate(current, context({ ...overrides, mode: 'practice' }))
+      expect(recovered.status).toBe('continue')
+      expect(recovered.recovery).toBe('restart')
+      expect(takeoffEvaluator.evaluate(current, context(overrides)).status).toBe('failure')
+    }
+  })
+
+  it('retains continuous-flight integrity checks after a practice restart clears the local previous sample', () => {
+    const previousFlightSample = sample(0, PAD_HEIGHT)
+    const practice = context({ mode: 'practice', previousSample: null, previousFlightSample })
+    const teleport = takeoffEvaluator.evaluate(sample(1, PAD_HEIGHT + TAKEOFF_TARGET_HEIGHT_M), practice)
+    expect(teleport.status).toBe('failure')
+    expect(teleport.recovery).toBeUndefined()
+    const gap = takeoffEvaluator.evaluate({ ...sample(1, PAD_HEIGHT), timestampSeconds: 1 }, practice)
+    expect(gap.status).toBe('failure')
+    expect(gap.recovery).toBeUndefined()
+  })
+
+  it('rejects frozen target states with relabelled timestamps', () => {
+    const before = sample(0, PAD_HEIGHT + TAKEOFF_TARGET_HEIGHT_M)
+    expect(takeoffEvaluator.evaluate({ ...before, timestampSeconds: 0.2 }, context({ previousFlightSample: before })).status).toBe('failure')
+    const fixture = takeoffFixture()
+    const frozen = fixture[22]!
+    expect(run(fixture.map((current, index) => index > 22 ? { ...current, state: frozen.state } : current)).phase).toBe('FAILED')
+  })
+
   it('requires a real pad departure and a continuous settled target-altitude dwell', () => {
     const result = run(takeoffFixture())
     expect(result.phase).toBe('SUCCESS')
@@ -115,7 +156,8 @@ describe('takeoff lesson', () => {
     } }, context({ previousSample: first }))
     expect(inconsistent.status).toBe('failure')
     expect(inconsistent.metrics?.velocityConsistencyErrorM).toBeGreaterThan(inconsistent.metrics?.integrationToleranceM ?? Infinity)
-    const gap = run([first, { ...sample(1, PAD_HEIGHT), timestampSeconds: 1 }])
+    const later = sample(1, PAD_HEIGHT)
+    const gap = run([first, { ...later, timestampSeconds: 1, state: { ...later.state, timeSeconds: 1 } }])
     expect(gap.phase).toBe('FAILED')
     expect(gap.result?.message).toMatch(/中斷/)
   })

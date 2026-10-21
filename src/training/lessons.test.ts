@@ -5,14 +5,16 @@ import { lessonLearningContent } from './catalog'
 
 
 describe('lesson catalog', () => {
-  it('keeps the four geometric lesson IDs stable and adds an enabled takeoff lesson', () => {
-    expect(DEFAULT_LESSONS).toHaveLength(5)
+  it('keeps the original lesson IDs stable and enables the three foundational flight lessons', () => {
+    expect(DEFAULT_LESSONS).toHaveLength(7)
     expect(DEFAULT_LESSONS.map((lesson) => lesson.id)).toEqual([
       'hover',
       'coordinated-turn',
       'split-s',
       'orbit',
       'takeoff',
+      'landing',
+      'straight-line',
     ])
     expect(DEFAULT_LESSONS.map((lesson) => lesson.title)).toEqual([
       'Hover',
@@ -20,8 +22,9 @@ describe('lesson catalog', () => {
       'Split-S',
       'Orbit / 刷鍋',
       '穩定起飛',
+      '定點降落',
+      'Straight Line and Stop',
     ])
-    expect(DEFAULT_LESSONS.map((lesson) => lesson.priority)).toEqual([1, 2, 3, 4, 0])
     expect(DEFAULT_LESSONS.every((lesson) => lesson.available && lesson.availability === 'available' && lesson.evaluator)).toBe(true)
     expect(DEFAULT_LESSONS.map((lesson) => lesson.setup.sceneReferenceIds)).toEqual([
       ['takeoff-pad', 'hover-zone'],
@@ -29,12 +32,14 @@ describe('lesson catalog', () => {
       ['split-s-reference'],
       ['takeoff-pad', 'orbit-poi'],
       ['takeoff-pad'],
+      ['takeoff-pad', 'landing-surface'],
+      ['takeoff-pad'],
     ])
   })
 
   it('offers learning content in prerequisite order without requiring completion to select a lesson', () => {
     const ordered = [...DEFAULT_LESSONS].sort((left, right) => left.priority - right.priority)
-    expect(ordered.map((lesson) => lessonLearningContent(lesson.id)?.code)).toEqual(['L01', 'L02', 'L06', 'L13', 'L14'])
+    expect(ordered.map((lesson) => lessonLearningContent(lesson.id)?.code)).toEqual(['L01', 'L02', 'L03', 'L04', 'L06', 'L13', 'L14'])
     expect(lessonLearningContent('takeoff')?.prerequisiteIds).toEqual(['intro'])
     expect(lessonLearningContent('hover')?.prerequisiteIds).toEqual(['takeoff'])
     expect(lessonLearningContent('unknown')).toBeNull()

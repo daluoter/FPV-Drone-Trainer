@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-import { DEFAULT_DRONE_CONFIG, type DroneState } from '../drone'
+import { DEFAULT_DRONE_CONFIG, type DroneConfig, type DroneState } from '../drone'
 import type { ReplayGhostState } from '../replay'
 import {
   activeCamera,
@@ -27,6 +27,7 @@ export type WebGLRendererFactory = (
 
 export interface FlightRendererOptions extends CameraRigOptions {
   readonly pixelRatio?: number
+  readonly droneConfig?: DroneConfig
   readonly scene?: FlightScene
   /** Called when the canvas stops being safe to use for visible flight. */
   readonly onStatusChange?: (status: FlightRendererStatus) => void
@@ -55,7 +56,9 @@ export class FlightRendererInitializationError extends Error {
 /** Three.js presentation owner for the Free Flight viewport. */
 export class FlightRenderer {
   public readonly canvas: HTMLCanvasElement
-  public readonly flightScene: FlightScene
+  private currentFlightScene: FlightScene
+  private lessonTarget: string | null = null
+  public get flightScene(): FlightScene { return this.currentFlightScene }
   public readonly cameraRig: FlightCameraRig
   public readonly renderer: THREE.WebGLRenderer
   private readonly statusListener: ((status: FlightRendererStatus) => void) | null
@@ -77,7 +80,7 @@ export class FlightRenderer {
 
   public constructor(canvas: HTMLCanvasElement, options: FlightRendererOptions = {}) {
     this.canvas = canvas
-    this.flightScene = options.scene ?? createFlightScene(DEFAULT_DRONE_CONFIG)
+    this.currentFlightScene = options.scene ?? createFlightScene(options.droneConfig ?? DEFAULT_DRONE_CONFIG)
     this.cameraRig = createCameraRig(options)
     this.statusListener = options.onStatusChange ?? null
     let renderer: THREE.WebGLRenderer | null = null
@@ -114,7 +117,17 @@ export class FlightRenderer {
   /** Update guidance without recreating the scene or changing simulation state. */
   public setLessonTarget(lessonId: string | null): void {
     if (this.disposed) return
+    this.lessonTarget = lessonId
     this.flightScene.setLessonTarget(lessonId)
+  }
+
+  /** Rebuild anchors only after the owner has explicitly reset and disarmed. */
+  public reconfigureScene(config: DroneConfig): void {
+    if (this.disposed) return
+    const previous = this.currentFlightScene
+    this.currentFlightScene = createFlightScene(config)
+    this.currentFlightScene.setLessonTarget(this.lessonTarget)
+    previous.dispose()
   }
 
   /** Apply camera presentation settings only when the owning runtime is reset. */

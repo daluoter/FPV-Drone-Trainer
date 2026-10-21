@@ -15,6 +15,15 @@ interface MetricDefinition {
 
 const METRICS: Readonly<Record<string, MetricDefinition>> = {
   altitudeM: { label: '起飛點上方', unit: 'm', digits: 2 },
+  landingHeightM: { label: '離地間隙', unit: 'm', digits: 2 },
+  landingPositionErrorM: { label: '落點偏差', unit: 'm', digits: 2 },
+  touchdownDescentSpeedMps: { label: '接地下降速度', unit: 'm/s', digits: 2 },
+  alongTrackM: { label: '前進距離', unit: 'm', digits: 2 },
+  crossTrackErrorM: { label: '偏離直線', unit: 'm', digits: 2 },
+  forwardSpeedMps: { label: '前進速度', unit: 'm/s', digits: 2 },
+  peakForwardSpeedMps: { label: '最高前進速度', unit: 'm/s', digits: 2 },
+  brakeEntrySpeedMps: { label: '進入減速區速度', unit: 'm/s', digits: 2 },
+  stopErrorM: { label: '距離停點', unit: 'm', digits: 2 },
   targetAltitudeM: { label: '目標高度', unit: 'm', digits: 2 },
   altitudeErrorM: { label: '高度偏差', unit: 'm', digits: 2 },
   horizontalDriftM: { label: '偏離中心', unit: 'm', digits: 2 },
@@ -49,10 +58,23 @@ const METRICS: Readonly<Record<string, MetricDefinition>> = {
 
 const LESSON_METRICS: Readonly<Record<string, readonly string[]>> = {
   takeoff: ['altitudeM', 'horizontalDriftM', 'contiguousDwellSeconds'],
+  landing: ['landingHeightM', 'landingPositionErrorM', 'verticalSpeedMps'],
+  'straight-line': ['alongTrackM', 'crossTrackErrorM', 'altitudeErrorM'],
   hover: ['altitudeErrorM', 'horizontalDriftM', 'contiguousDwellSeconds'],
   'coordinated-turn': ['routeCorridorErrorM', 'headingChangeDegrees', 'speedMps'],
   'split-s': ['entryAltitudeM', 'headingChangeDegrees', 'recoveryAltitudeErrorM'],
   orbit: ['orbitProgress', 'radialErrorM', 'altitudeErrorM'],
+}
+
+function metricPriorities(metrics: Readonly<Record<string, number>>, lessonId: string | null): readonly string[] {
+  if (lessonId === 'landing' && metrics.groundTouching > 0.5) {
+    return ['landingHeightM', 'landingPositionErrorM', 'touchdownDescentSpeedMps']
+  }
+  if (lessonId === 'straight-line') {
+    if (metrics.routePhase >= 4) return ['stopErrorM', 'horizontalSpeedMps', 'contiguousDwellSeconds']
+    if (metrics.routePhase >= 3) return ['stopErrorM', 'forwardSpeedMps', 'altitudeErrorM']
+  }
+  return lessonId ? LESSON_METRICS[lessonId] ?? [] : []
 }
 
 /** Show observations with units; internal accumulator keys are not teaching copy. */
@@ -63,7 +85,7 @@ export function formatTrainingMetrics(
 ): readonly TrainingMetricDisplay[] {
   if (!metrics) return []
   const maximum = Number.isFinite(limit) ? Math.max(0, Math.min(3, Math.floor(limit))) : 3
-  const priorities = lessonId ? LESSON_METRICS[lessonId] ?? [] : []
+  const priorities = metricPriorities(metrics, lessonId)
   const keys = [...new Set([...priorities, ...Object.keys(metrics)])]
   return keys.flatMap((key): TrainingMetricDisplay[] => {
     const definition = METRICS[key]
@@ -112,6 +134,8 @@ const HINT_TRANSLATIONS: Readonly<Record<string, string>> = {
 
 const LESSON_HINTS: Readonly<Record<string, string>> = {
   takeoff: '緩推油門，留在起飛區上方；接近目標高度時改用小量修正。',
+  landing: '先對準降落區並減少水平移動，再緩慢降低高度，接地前留意下降速度。',
+  'straight-line': '沿標示航線前進，接近停點前提早減速；Acro 回中不會自動煞停。',
   hover: '先減少水平移動，再用小量油門修正高度，避免連續大幅補桿。',
   'coordinated-turn': '先對準入口，再沿標示航線轉彎，同時留意高度。',
   'split-s': '先確認進入高度，再依序完成倒置、下降半圈與恢復正向。',

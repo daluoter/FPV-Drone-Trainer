@@ -159,12 +159,16 @@ describe('training progress persistence', () => {
     const base = context()
     store.recordResult(result({ attemptContext: base }))
     for (const variant of [
+      context({ rulesVersion: 2 }),
       context({ mode: 'practice' }),
       context({ presetId: 'standard' }),
       context({ settingsFingerprint: fingerprintTrainingSettings({ rates: 500, camera: 20 }) }),
     ]) {
       expect(store.load(variant).progress.lessons.hover?.completed).toBe(false)
     }
+    store.recordResult(result({ attemptContext: context({ rulesVersion: 2 }), score: 95 }))
+    expect(store.load(base).progress.lessons.hover?.best?.score).toBe(88)
+    expect(store.load(context({ rulesVersion: 2 })).progress.lessons.hover?.best?.score).toBe(95)
     expect(store.load().progress.lessons.hover?.completed).toBe(false)
   })
 
@@ -190,7 +194,7 @@ describe('training progress persistence', () => {
     storage.setItem(key, JSON.stringify({ schemaVersion: 1, context: context({ inputSource: 'keyboard' }), progress: createDefaultTrainingProgress() }))
     expect(store.load(source).loaded).toBe(false)
     expect(store.load(source).errors.join(' ')).toMatch(/context.*incompatible/i)
-    const invalid = { ...source, rulesVersion: 2 } as unknown as TrainingAttemptContext
+    const invalid = { ...source, rulesVersion: 3 } as unknown as TrainingAttemptContext
     expect(store.recordResult(result({ attemptContext: invalid })).saved).toBe(false)
     expect(storage.getItem(TRAINING_PROGRESS_STORAGE_KEY)).toBeNull()
   })

@@ -193,3 +193,41 @@ Four-axis and takeoff examples are bounded recordings generated through the real
 240 Hz simulator. They play through the existing independent ghost mechanism;
 pose, normalized input and captions share its timeline. They never feed training,
 never grant progress and remain labeled as simulated pending pilot review.
+
+
+## Beginner-school batch two
+
+The UI now defaults to `practice`, with explicit `challenge` selection. Practice
+skips challenge timeouts; an evaluator may return `recovery: restart` to clear
+local objectives/dwell without resetting the actual pose, global attempt clock,
+trajectory or continuous previous-flight sample. Crash, disarm/focus loss,
+invalid data and discontinuous physics remain terminal safety conditions.
+
+New attempts use rules version 2. Version 1 contextual documents and the original
+legacy document remain separately readable. Each accepted active sample needs a
+strictly increasing physical step and matching simulation/sample time deltas;
+relabelled frozen physics cannot accrue dwell. Hover now needs a full 3.2 seconds
+of consecutive settled position, altitude, speed and tilt.
+
+L03 Landing uses authoritative configured-ground contact metadata (ground height,
+raw orientation-dependent support offset and touching flag). It checks airborne
+approach, every actual contact transition's pre-impact speed, the specified pad,
+and a full grounded stable dwell. A small bounce resets dwell and rechecks speed.
+L04 Straight Line requires ordered start/transit, observed deceleration inside
+the brake zone, and a continuous settled stop on an eight-metre route.
+
+The scene's pad anchor matches the geometry-clamped initial state. References
+shift with configured ground; Split-S altitude gates use height above ground.
+Airborne lesson setup resolves from these same anchors. A disarmed preparation
+hold advances the authoritative fixed-step clock without falling from the lesson
+spawn; successful explicit arm releases it. Ordinary disarmed free flight still
+integrates gravity. Reset, reconfigure and playback boundaries clear the hold.
+
+Independent simulation-generated takeoff, landing and straight-line demos carry
+schema/lesson/kind, rules/physics version, exact settings identity and preset, with
+bounded immutable recordings and frozen time cues. They are presentation-only
+and remain pending human pilot review. L00 knowledge completion and last-lesson
+preferences use a separate validated storage document; answering a quiz or
+watching a demonstration never writes a flight result. Result coaching states
+final observations, one measured gap and one next action without inferring a
+cause, independent mastery or hardware skill.

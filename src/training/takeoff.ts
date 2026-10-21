@@ -25,6 +25,15 @@ function failure(message: string, metrics: Readonly<Record<string, number>> = {}
   }
 }
 
+function recoverableFailure(context: TrainingEvaluationContext, message: string, metrics: Readonly<Record<string, number>>): TrainingEvaluation {
+  return context.mode === 'practice'
+    ? {
+      status: 'continue', recovery: 'restart', metrics, message,
+      hint: '起飛步驟已重新開始；先恢復水平並緩慢回到起飛墊附近的低高度，再重新離地。',
+    }
+    : failure(message, metrics)
+}
+
 function evaluateTakeoff(sample: TrainingSample, context: TrainingEvaluationContext): TrainingEvaluation {
   if (!Number.isFinite(sample.timestampSeconds) || sample.timestampSeconds < 0 || !isFiniteDroneState(sample.state)) {
     return failure('起飛測驗停止：飛行狀態包含無效或非有限數值。')
@@ -63,33 +72,37 @@ function evaluateTakeoff(sample: TrainingSample, context: TrainingEvaluationCont
 
   const previous = context.previousSample
   const delta = previous ? sample.timestampSeconds - previous.timestampSeconds : 0
-  if (previous) {
-    if (!isFiniteDroneState(previous.state) || !Number.isFinite(delta) || delta <= 0 || delta > 0.35
-      || sample.state.stepIndex < previous.state.stepIndex) {
+  const previousFlight = context.previousFlightSample ?? previous
+  const flightDelta = previousFlight ? sample.timestampSeconds - previousFlight.timestampSeconds : 0
+  if (previousFlight) {
+    if (!isFiniteDroneState(previousFlight.state) || !Number.isFinite(flightDelta) || flightDelta <= 0 || flightDelta > 0.35
+      || sample.state.stepIndex <= previousFlight.state.stepIndex
+      || sample.state.timeSeconds <= previousFlight.state.timeSeconds
+      || Math.abs((sample.state.timeSeconds - previousFlight.state.timeSeconds) - flightDelta) > 1e-6) {
       return failure('起飛測驗停止：飛行資料中斷、時間倒退或模擬被重設。', metrics)
     }
     const displacement = {
-      x: position.x - previous.state.positionM.x,
-      y: position.y - previous.state.positionM.y,
-      z: position.z - previous.state.positionM.z,
+      x: position.x - previousFlight.state.positionM.x,
+      y: position.y - previousFlight.state.positionM.y,
+      z: position.z - previousFlight.state.positionM.z,
     }
-    const previousVelocity = previous.state.velocityMps
+    const previousVelocity = previousFlight.state.velocityMps
     const consistencyError = Math.hypot(
-      displacement.x - (velocity.x + previousVelocity.x) * 0.5 * delta,
-      displacement.y - (velocity.y + previousVelocity.y) * 0.5 * delta,
-      displacement.z - (velocity.z + previousVelocity.z) * 0.5 * delta,
+      displacement.x - (velocity.x + previousVelocity.x) * 0.5 * flightDelta,
+      displacement.y - (velocity.y + previousVelocity.y) * 0.5 * flightDelta,
+      displacement.z - (velocity.z + previousVelocity.z) * 0.5 * flightDelta,
     )
-    const tolerance = 0.04 + 10 * delta * delta
+    const tolerance = 0.04 + 10 * flightDelta * flightDelta
     metrics.velocityConsistencyErrorM = consistencyError
     metrics.integrationToleranceM = tolerance
-    if (consistencyError > tolerance || Math.hypot(displacement.x, displacement.y, displacement.z) / delta > 6) {
+    if (consistencyError > tolerance || Math.hypot(displacement.x, displacement.y, displacement.z) / flightDelta > 6) {
       return failure('起飛測驗停止：位置跳躍與實際速度不一致，無法計入起飛。', metrics)
     }
   }
 
   if (horizontalDrift > 4 || relativeAltitude > 6 || relativeAltitude < -0.55
     || horizontalSpeed > 4 || verticalSpeed > 3.5 || tilt > 45) {
-    return failure('起飛超出安全練習範圍：偏離、速度、高度或傾角過大。', metrics)
+    return recoverableFailure(context, '起飛超出安全練習範圍：偏離、速度、高度或傾角過大。', metrics)
   }
 
   const ready = context.checkpoints['takeoff-ready']?.completed === true
@@ -97,10 +110,10 @@ function evaluateTakeoff(sample: TrainingSample, context: TrainingEvaluationCont
   const padReady = horizontalDrift <= 0.8 && relativeAltitude >= -0.5 && relativeAltitude <= 0.35
     && horizontalSpeed <= 0.6 && verticalSpeed <= 0.8 && tilt <= 12
   if (!ready && !padReady) {
-    return failure('必須從起飛墊附近的低高度水平狀態開始，不能在空中跳過起飛。', metrics)
+    return recoverableFailure(context, '必須從起飛墊附近的低高度水平狀態開始，不能在空中跳過起飛。', metrics)
   }
   if (lifted && relativeAltitude < 0.15) {
-    return failure('離地後落回起飛墊，請重新起飛並在目標高度穩住。', metrics)
+    return recoverableFailure(context, '離地後落回起飛墊，請重新起飛並在目標高度穩住。', metrics)
   }
 
   const liftoff = ready && relativeAltitude >= 0.6
@@ -119,7 +132,7 @@ function evaluateTakeoff(sample: TrainingSample, context: TrainingEvaluationCont
   const score = Math.max(0, Math.min(100,
     100 - altitudeError * 15 - horizontalDrift * 8 - horizontalSpeed * 5 - verticalSpeed * 5 - tilt * 0.5,
   ))
-  if (context.elapsedSeconds > 25) {
+  if (context.mode !== 'practice' && context.elapsedSeconds > 25) {
     return { ...failure('起飛測驗逾時：尚未完成連續穩定停留。', metrics), checkpointIds, score }
   }
   if (settled && dwell >= TAKEOFF_SETTLED_DWELL_SECONDS && context.elapsedSeconds >= 3) {

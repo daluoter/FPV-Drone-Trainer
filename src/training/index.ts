@@ -11,3 +11,6 @@ export * from './types'
 export * from './attempt'
 export * from './catalog'
 export * from './takeoff'
+
+export * from './landing'
+export * from './straightLine'

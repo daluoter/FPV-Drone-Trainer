@@ -30,6 +30,12 @@ export interface TrainingSample {
   readonly normalizedInput: NormalizedRcInput | null
   /** Runtime arm state. Missing legacy telemetry never starts or scores a session. */
   readonly armed?: boolean
+  /** Configured ground contact telemetry, independent of a lesson's spawn/reference height. */
+  readonly groundContact?: {
+    readonly heightM: number
+    readonly supportOffsetM: number
+    readonly touching: boolean
+  }
 }
 
 export interface TrainingCheckpointDefinition {
@@ -82,6 +88,8 @@ export interface LessonScoringDefinition {
 }
 
 export interface TrainingEvaluationContext {
+  /** Omitted contexts retain the original timed challenge rules. */
+  readonly mode?: 'practice' | 'challenge'
   readonly lesson: LessonDefinition
   readonly elapsedSeconds: number
   /** Total accepted fixed-step samples; independent of the bounded path length. */
@@ -92,11 +100,15 @@ export interface TrainingEvaluationContext {
   readonly sceneReferences: readonly TrainingSceneReference[]
   /** O(1) incremental seam for evaluators; avoids rescanning the full 240 Hz trajectory. */
   readonly previousSample?: TrainingSample | null
+  /** Continuous actual flight sample, retained across local practice restarts for integrity guards. */
+  readonly previousFlightSample?: TrainingSample | null
   readonly previousEvaluation?: TrainingEvaluation | null
 }
 
 export interface TrainingEvaluation {
   readonly status: TrainingEvaluationStatus
+  /** A continuing practice evaluation may restart local goals without resetting live flight. */
+  readonly recovery?: 'restart'
   readonly checkpointIds?: readonly string[]
   readonly score?: number
   readonly metrics?: Readonly<Record<string, number>>
@@ -178,6 +190,8 @@ export interface TrainingMachineState {
   readonly sampleCount: number
   /** Most recent accepted sample; kept separately because trajectory is decimated. */
   readonly previousSample?: TrainingSample | null
+  /** Last actual armed sample; local practice restarts do not clear this safety boundary. */
+  readonly previousFlightSample?: TrainingSample | null
   /** Bounded immutable UI/evaluator path snapshot. */
   readonly trajectory: readonly TrainingSample[]
   readonly checkpoints: Readonly<Record<string, TrainingCheckpointState>>

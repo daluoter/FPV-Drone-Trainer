@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 
 import type { DroneConfig, DroneState } from '../drone'
-import { DEFAULT_DRONE_CONFIG, DRONE_GEOMETRY } from '../drone'
+import { createInitialDroneState, DEFAULT_DRONE_CONFIG, DRONE_GEOMETRY } from '../drone'
 import type { Vector3 } from '../math/vector'
 import type { ReplayGhostState } from '../replay'
 
@@ -99,7 +99,7 @@ function createQuadVisual(): THREE.Group {
   return quad
 }
 
-function createReferenceObjects(spawnPositionM: Vector3): {
+function createReferenceObjects(spawnPositionM: Vector3, groundHeightM: number): {
   readonly objects: readonly THREE.Object3D[]
   readonly contract: readonly FlightSceneReference[]
 } {
@@ -108,7 +108,7 @@ function createReferenceObjects(spawnPositionM: Vector3): {
 
   // The hover reference is deliberately above the pad. Its position is an
   // immutable evaluator anchor; the visual cylinder is presentation only.
-  const hoverZonePosition = { x: spawnPositionM.x, y: 3, z: spawnPositionM.z }
+  const hoverZonePosition = { x: spawnPositionM.x, y: groundHeightM + 3, z: spawnPositionM.z }
   const hoverZone = new THREE.Mesh(
     new THREE.CylinderGeometry(1.2, 1.2, 0.04, 32),
     new THREE.MeshStandardMaterial({
@@ -142,7 +142,7 @@ function createReferenceObjects(spawnPositionM: Vector3): {
     marker.name = markerDefinition.name
     marker.position.set(
       markerDefinition.position.x,
-      markerDefinition.position.y,
+      groundHeightM + markerDefinition.position.y,
       markerDefinition.position.z,
     )
     if (markerDefinition.id === 'orbit-poi') {
@@ -171,7 +171,7 @@ function createReferenceObjects(spawnPositionM: Vector3): {
       id: markerDefinition.id,
       kind: markerDefinition.id === 'orbit-poi' ? 'poi' : 'marker',
       object: marker,
-      positionM: { ...markerDefinition.position },
+      positionM: { ...markerDefinition.position, y: groundHeightM + markerDefinition.position.y },
       sizeM: markerDefinition.id === 'orbit-poi'
         ? { x: 0.36, y: 4, z: 0.36 }
         : { x: 0.36, y: 0.9, z: 0.36 },
@@ -180,6 +180,7 @@ function createReferenceObjects(spawnPositionM: Vector3): {
 
   const gate = new THREE.Group()
   gate.name = 'reference-split-s'
+  gate.position.y = groundHeightM
   const gateMaterial = material(0x334d58, 0.72, 0.05)
   for (const [x, z] of [[-2.5, -5], [2.5, -5]] as const) {
     const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.8, 0.12), gateMaterial)
@@ -194,7 +195,7 @@ function createReferenceObjects(spawnPositionM: Vector3): {
     id: 'split-s-reference',
     kind: 'gate',
     object: gate,
-    positionM: { x: 0, y: 0.9, z: -5 },
+    positionM: { x: 0, y: groundHeightM + 0.9, z: -5 },
     sizeM: { x: 5.12, y: 1.8, z: 0.12 },
   })
   return { objects: references, contract }
@@ -229,6 +230,9 @@ export function disposeFlightScene(scene: THREE.Scene): void {
  * presentation-only; the simulation owns ground contact and the quad state.
  */
 export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): FlightScene {
+  // Match the authoritative upright spawn clamp, including configured contact
+  // geometry. The pad's teaching anchor may not remain below raised ground.
+  const teachingSpawn = createInitialDroneState(config).positionM
   const scene = new THREE.Scene()
   scene.name = 'free-flight-scene'
   scene.background = new THREE.Color(0x080d13)
@@ -278,17 +282,17 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   takeoffPad.position.set(config.spawnPositionM.x, 0, config.spawnPositionM.z)
   scene.add(takeoffPad)
 
-  const referenceSet = createReferenceObjects(config.spawnPositionM)
+  const referenceSet = createReferenceObjects(teachingSpawn, config.ground.heightM)
   for (const reference of referenceSet.objects) scene.add(reference)
 
-  // Takeoff asks for +2 m relative to the pad's spawn anchor, while Hover's
-  // separate evaluator anchor stays at 3 m. This is a visual guide only.
+  // Takeoff asks for +2 m relative to the normalized spawn anchor. Hover's
+  // separate target remains 3 m above configured ground. These guides are visual.
   const takeoffHeightTarget = new THREE.Group()
   takeoffHeightTarget.name = 'takeoff-height-target'
   takeoffHeightTarget.position.set(
-    config.spawnPositionM.x,
-    config.spawnPositionM.y + 2,
-    config.spawnPositionM.z,
+    teachingSpawn.x,
+    teachingSpawn.y + 2,
+    teachingSpawn.z,
   )
   takeoffHeightTarget.visible = false
   const targetMaterial = new THREE.MeshBasicMaterial({
@@ -313,10 +317,27 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     id: 'takeoff-pad',
     kind: 'pad',
     object: takeoffPad,
-    positionM: { ...config.spawnPositionM },
+    positionM: { ...teachingSpawn },
     sizeM: { x: 2.4, y: 0.08, z: 2.4 },
   }
-  const sceneReferences = [padReference, ...referenceSet.contract]
+  const landingTarget = new THREE.Mesh(new THREE.RingGeometry(0.82, 0.94, 48), new THREE.MeshBasicMaterial({ color: 0x8abac4, side: THREE.DoubleSide, transparent: true, opacity: 0.8 }))
+  landingTarget.name = 'landing-target'
+  landingTarget.rotation.x = -Math.PI / 2
+  landingTarget.position.set(config.spawnPositionM.x, config.ground.heightM + 0.095, config.spawnPositionM.z)
+  landingTarget.visible = false
+  scene.add(landingTarget)
+  const straightTargets = new THREE.Group()
+  straightTargets.name = 'straight-line-targets'
+  straightTargets.visible = false
+  const routeAltitude = teachingSpawn.y + 2.5
+  for (const distance of [0, 3, 5, 8]) {
+    const ring = new THREE.Mesh(new THREE.RingGeometry(distance === 8 ? 0.6 : 0.9, distance === 8 ? 0.67 : 0.97, 48), new THREE.MeshBasicMaterial({ color: distance === 8 ? 0xffc978 : 0x8abac4, side: THREE.DoubleSide }))
+    ring.position.set(config.spawnPositionM.x, routeAltitude, config.spawnPositionM.z - distance)
+    straightTargets.add(ring)
+  }
+  scene.add(straightTargets)
+  const landingSurface: FlightSceneReference = { id: 'landing-surface', kind: 'zone', object: landingTarget, positionM: { x: config.spawnPositionM.x, y: config.ground.heightM, z: config.spawnPositionM.z }, sizeM: { x: 2.4, y: 0, z: 2.4 } }
+  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface]
   const referenceById = new Map(sceneReferences.map((reference) => [reference.id, reference]))
 
   const drone = createQuadVisual()
@@ -384,10 +405,13 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   }
 
   const setLessonTarget = (lessonId: string | null): void => {
-    const isTakeoff = lessonId === 'takeoff'
-    takeoffHeightTarget.visible = isTakeoff
-    const hoverZone = referenceById.get('hover-zone')
-    if (hoverZone) hoverZone.object.visible = !isTakeoff
+    takeoffHeightTarget.visible = lessonId === 'takeoff'
+    landingTarget.visible = lessonId === 'landing'
+    straightTargets.visible = lessonId === 'straight-line'
+    const beginner = ['takeoff', 'landing', 'straight-line'].includes(lessonId ?? '')
+    for (const reference of referenceSet.contract) {
+      reference.object.visible = !beginner
+    }
   }
 
   const setPath = (line: THREE.Line, path: readonly Vector3[], yOffset: number): void => {

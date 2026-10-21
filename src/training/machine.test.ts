@@ -4,9 +4,14 @@ import { createInitialDroneState, DEFAULT_DRONE_CONFIG } from '../drone'
 import type { NormalizedRcInput } from '../flight-controller'
 import { createTrainingMachineState, reduceTrainingState, TrainingSession } from './machine'
 import { TRAINING_TRAJECTORY_MAX_POINTS } from './trajectory'
+import type { TrainingAttemptContext } from './attempt'
 import type { LessonDefinition, TrainingSample, TrainingSceneReference } from './types'
 
 const input: NormalizedRcInput = { roll: 0, pitch: 0, yaw: 0, throttle: 0.4 }
+const practiceContext: TrainingAttemptContext = {
+  rulesVersion: 1, physicsVersion: 1, presetId: 'beginner', settingsFingerprint: 'settings.v1:{}',
+  inputSource: 'controller', mode: 'practice', assistance: 'none',
+}
 
 const testLesson: LessonDefinition = {
   id: 'test-lesson',
@@ -40,7 +45,7 @@ const testLesson: LessonDefinition = {
 function sample(timestampSeconds: number): TrainingSample {
   return {
     timestampSeconds,
-    state: createInitialDroneState(DEFAULT_DRONE_CONFIG),
+    state: { ...createInitialDroneState(DEFAULT_DRONE_CONFIG), timeSeconds: timestampSeconds, stepIndex: Math.round(timestampSeconds * 240) },
     normalizedInput: input,
     armed: true,
   }
@@ -56,6 +61,114 @@ function indexedSample(timestampSeconds: number, stepIndex: number): TrainingSam
 }
 
 describe('training state machine', () => {
+  it('restarts only local practice goals while preserving flight continuity, elapsed time and result provenance', () => {
+    const contexts: Array<{ elapsed: number; previous?: number; continuous?: number; accumulated?: number; checkpoints: number }> = []
+    const lesson: LessonDefinition = {
+      ...testLesson,
+      evaluator: (current, context) => {
+        contexts.push({
+          elapsed: context.elapsedSeconds,
+          previous: context.previousSample?.state.stepIndex,
+          continuous: context.previousFlightSample?.state.stepIndex,
+          accumulated: context.previousEvaluation?.metrics?.accumulated,
+          checkpoints: Object.values(context.checkpoints).filter((checkpoint) => checkpoint.completed).length,
+        })
+        expect(context.mode).toBe('practice')
+        if (current.state.stepIndex === 2) {
+          return { status: 'continue', recovery: 'restart', checkpointIds: ['hold'], metrics: { accumulated: 99 }, hint: 'Return to the entry and try again.' }
+        }
+        return {
+          status: current.state.stepIndex === 4 ? 'success' : 'continue',
+          checkpointIds: ['hold'], metrics: { accumulated: 1 }, score: 92,
+        }
+      },
+    }
+    const session = new TrainingSession({ lessons: [lesson], initialLessonId: lesson.id, countdownDurationSeconds: 0, attemptContext: practiceContext })
+    session.start(0)
+    session.tick(0)
+    const groundContact = { heightM: 0, supportOffsetM: 0.03, touching: false }
+    session.consumeSample({ ...indexedSample(1, 1), groundContact })
+    groundContact.heightM = 99
+    expect(session.getState().previousFlightSample?.groundContact?.heightM).toBe(0)
+    const recovered = session.consumeSample(indexedSample(1.1, 2))
+    expect(recovered.phase).toBe('ACTIVE')
+    expect(recovered.previousSample).toBeNull()
+    expect(recovered.previousFlightSample?.state.stepIndex).toBe(2)
+    expect(recovered.checkpoints.hold?.completed).toBe(false)
+    expect(recovered.activeStartedAtSeconds).toBe(1)
+    expect(recovered.sampleCount).toBe(2)
+    expect(recovered.result).toBeNull()
+    session.consumeSample(indexedSample(1.2, 3))
+    expect(contexts[2]).toEqual({ elapsed: expect.closeTo(0.2), previous: undefined, continuous: 2, accumulated: undefined, checkpoints: 0 })
+    const completed = session.consumeSample(indexedSample(1.6, 4))
+    expect(completed.phase).toBe('SUCCESS')
+    expect(completed.result?.elapsedSeconds).toBeCloseTo(0.6)
+    expect(completed.result?.attemptContext?.mode).toBe('practice')
+    expect(completed.sampleCount).toBe(4)
+  })
+
+  it('still catches a runtime step rewind immediately after a local practice restart', () => {
+    const lesson: LessonDefinition = { ...testLesson, evaluator: () => ({ status: 'continue', recovery: 'restart' }) }
+    const session = new TrainingSession({ lessons: [lesson], initialLessonId: lesson.id, countdownDurationSeconds: 0, attemptContext: practiceContext })
+    session.start(0)
+    session.tick(0)
+    session.consumeSample(indexedSample(1, 10))
+    expect(session.getState().previousSample).toBeNull()
+    const rewound = session.consumeSample(indexedSample(1.1, 1))
+    expect(rewound.phase).toBe('FAILED')
+    expect(rewound.result?.message).toMatch(/reset|rewound/i)
+    expect(rewound.sampleCount).toBe(1)
+  })
+
+  it('stops frozen or relabelled physics before an evaluator can accumulate dwell', () => {
+    for (const altered of ['frozen', 'different-clock'] as const) {
+      const evaluate = vi.fn(() => ({ status: 'continue' as const, recovery: 'restart' as const }))
+      const lesson = { ...testLesson, evaluator: evaluate }
+      const session = new TrainingSession({ lessons: [lesson], initialLessonId: lesson.id, countdownDurationSeconds: 0, attemptContext: practiceContext })
+      session.start(0)
+      session.tick(0)
+      const first = indexedSample(1, 1)
+      session.consumeSample(first)
+      const current = indexedSample(1.1, 2)
+      const invalid = { ...current, state: altered === 'frozen' ? first.state : { ...current.state, timeSeconds: 1.3 } }
+      const stopped = session.consumeSample(invalid)
+      expect(stopped.phase).toBe('FAILED')
+      expect(stopped.sampleCount).toBe(1)
+      expect(evaluate).toHaveBeenCalledTimes(1)
+      expect(stopped.result?.message).toMatch(/physical clock/)
+    }
+  })
+
+  it('ends active practice on invalid state or contact metadata without scoring the invalid sample', () => {
+    const base = sample(1.1)
+    for (const invalid of [
+      { ...base, state: { ...base.state, positionM: { x: Number.NaN, y: 3, z: 0 } } },
+      { ...base, groundContact: { heightM: Number.NaN, supportOffsetM: 0.04, touching: true } },
+    ]) {
+      const evaluate = vi.fn(() => ({ status: 'continue' as const }))
+      const lesson = { ...testLesson, evaluator: evaluate }
+      const session = new TrainingSession({ lessons: [lesson], initialLessonId: lesson.id, countdownDurationSeconds: 0, attemptContext: practiceContext })
+      session.start(0)
+      session.tick(0)
+      session.consumeSample(sample(1))
+      const stopped = session.consumeSample(invalid)
+      expect(stopped.phase).toBe('FAILED')
+      expect(stopped.sampleCount).toBe(1)
+      expect(stopped.result?.elapsedSeconds).toBe(0)
+      expect(stopped.result?.message).toMatch(/invalid|non-finite/)
+      expect(evaluate).toHaveBeenCalledTimes(1)
+      expect(session.consumeSample(sample(2))).toBe(stopped)
+    }
+  })
+
+  it('never converts an unmarked evaluator failure into practice recovery', () => {
+    const lesson: LessonDefinition = { ...testLesson, evaluator: () => ({ status: 'failure', message: 'Timed out or left the route.' }) }
+    const session = new TrainingSession({ lessons: [lesson], initialLessonId: lesson.id, countdownDurationSeconds: 0, attemptContext: practiceContext })
+    session.start(0)
+    session.tick(0)
+    expect(session.consumeSample(sample(1)).phase).toBe('FAILED')
+  })
+
   it('ignores runtime samples while idle or after a terminal result', () => {
     const session = new TrainingSession({ lessons: [testLesson], initialLessonId: testLesson.id, countdownDurationSeconds: 0 })
     const ready = session.getState()

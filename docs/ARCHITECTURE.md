@@ -82,3 +82,26 @@ The Controller Lab evaluates this boundary and displays each failure reason. Fre
 ## Testing strategy
 
 Pure controller transforms, calibration statistics, profile compatibility, poller disconnect behavior and the safety gate are tested with deterministic inputs. Phase 2 adds coordinate/quaternion, configuration validation, motor lag, mixer signs and saturation, `r × F` moments, gravity, hover sanity, attitude-transformed thrust, safety reset and fixed-step render-rate equivalence tests. Phase 3 adds pilot/body sign conversion, bounded rate PID response and antiwindup, derivative-on-measurement, invalid-input reset, complete calibrated-neutral integration, Acro release, hover and frame-rate equivalence telemetry tests. Phase 4 adds camera transform contracts, runtime arm/disarm transitions, disconnect/session/invalid-input handling, source/profile changes and focus safety. Phase 6/7 adds training phase/timestamp/session isolation, malformed progress rejection, per-fixed-step armed hook, scene/reference/path contracts, retry safety, and positive/negative geometric fixtures. Phase 8 adds bounded recorder capacity/decimation, immutable compact snapshots, invalid timing rejection, antipodal shortest-path interpolation, playback clocks, ghost rendering, and runtime arm/training isolation. UI tests cover application state and accessibility-facing behavior. Browser smoke tests and real transmitter checks remain separate evidence; passing unit tests never claims hardware validation or aerodynamic realism.
+
+
+## Explicit lesson preparation and observational contact
+
+Airborne lessons request a disarmed preparation reset through the existing
+runtime. `FlightSimulation` owns the preparation flag; `DroneSimulation.stepHeld`
+advances fixed-step simulation time/index while keeping the prepared physical
+state unchanged. Successful explicit arm releases the hold. Normal free flight,
+reset/reconfigure and replay boundaries preserve their ordinary safety semantics;
+no additional animation loop or live altitude controller is introduced.
+
+The runtime includes optional configured-ground contact in immutable training
+samples: actual ground height, raw orientation-dependent support offset, and a
+contact flag. Landing evaluators consume these observations independently of
+visual pad geometry. Renderer anchors normalize against the same configured
+initial state, and reconfiguration disposes the former scene while retaining the
+single WebGL owner.
+
+Practice local recovery clears only evaluator objectives and incremental dwell.
+A separate continuous previous-flight sample remains for physical-clock and path
+integrity checks. Rules version 2 separates these stricter acceptance rules from
+old contextual scores. Knowledge preferences, flight progress and presentation
+recordings remain separate data domains.

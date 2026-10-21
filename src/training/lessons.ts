@@ -1,3 +1,5 @@
+import { LANDING_LESSON } from './landing'
+import { STRAIGHT_LINE_LESSON } from './straightLine'
 import {
   coordinatedTurnEvaluator,
   hoverEvaluator,
@@ -252,6 +254,8 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
     hints: ['先把油門當作上升與下降速度的微調，接近目標時提早減少上升速度。門檻為模擬器原型訓練設定。'],
     evaluator: takeoffEvaluator,
   }),
+  LANDING_LESSON,
+  STRAIGHT_LINE_LESSON,
 ]
 
 export const TRAINING_LESSONS = DEFAULT_LESSONS

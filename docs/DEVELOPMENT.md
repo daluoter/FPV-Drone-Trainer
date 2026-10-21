@@ -31,8 +31,10 @@ It installs the locked npm dependencies, runs unit/integration tests and lint,
 then builds with strict TypeScript checks for the GitHub Pages project path.
 A Python Playwright smoke check opens that production build in Chromium and
 checks project-path assets, an initialized WebGL2 canvas, explicit keyboard
-arm/disarm, L01 countdown and waiting for explicit arm, training stop, synchronized
-demo controls/sticks without progress writes, the three camera controls, and logo navigation. This workflow does
+arm/disarm, countdown and waiting for explicit arm, keyboard reset, training stop,
+practice/challenge progress isolation, L00 knowledge completion and reload,
+synchronized L01/L03/L04 demo controls without progress writes, airborne waiting
+positions, fullscreen recovery, camera controls, and logo navigation. This workflow does
 not deploy the site; production publishing remains a separate manual workflow.
 
 To reproduce the browser check after the required npm gates:

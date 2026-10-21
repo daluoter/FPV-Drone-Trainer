@@ -1,4 +1,5 @@
 import { rotateVectorByQuaternion } from '../math/quaternion'
+import { isFiniteDroneState } from '../drone'
 import type { Vector3 } from '../math/vector'
 import type {
   LessonEvaluatorContract,
@@ -103,7 +104,7 @@ function reference(context: TrainingEvaluationContext, id: string) {
 function safeEvaluation(
   status: TrainingEvaluation['status'],
   metrics: Readonly<Record<string, number>>,
-  options: Pick<TrainingEvaluation, 'checkpointIds' | 'score' | 'message' | 'hint'> = {},
+  options: Pick<TrainingEvaluation, 'checkpointIds' | 'score' | 'message' | 'hint' | 'recovery'> = {},
 ): TrainingEvaluation {
   return {
     status,
@@ -114,7 +115,20 @@ function safeEvaluation(
   }
 }
 
+function recoverableEvaluation(
+  context: TrainingEvaluationContext,
+  metrics: Readonly<Record<string, number>>,
+  options: Pick<TrainingEvaluation, 'checkpointIds' | 'score' | 'message' | 'hint'>,
+): TrainingEvaluation {
+  return context.mode === 'practice'
+    ? safeEvaluation('continue', metrics, { ...options, checkpointIds: [], recovery: 'restart' })
+    : safeEvaluation('failure', metrics, options)
+}
+
 function guardSample(sample: TrainingSample, context: TrainingEvaluationContext, referenceId: string): TrainingEvaluation | null {
+  if (!Number.isFinite(sample.timestampSeconds) || sample.timestampSeconds < 0 || !isFiniteDroneState(sample.state)) {
+    return safeEvaluation('failure', {}, { message: 'Training telemetry contains an invalid or non-finite state.' })
+  }
   if (sample.state.crashed) {
     return safeEvaluation('failure', { elapsedSeconds: context.elapsedSeconds }, {
       message: 'Attempt stopped: the drone crashed; reset and retry the lesson.',
@@ -163,7 +177,7 @@ function displacementVelocityConsistency(
   context: TrainingEvaluationContext,
   sample: TrainingSample,
 ): DisplacementVelocityConsistency {
-  const previous = context.previousSample
+  const previous = context.previousFlightSample ?? context.previousSample
   if (!previous) {
     return {
       displacementSpeedMps: 0,
@@ -216,11 +230,14 @@ function pathGap(
   maximumSpeedMps = 45,
   checkVelocityConsistency = false,
 ): boolean {
-  const previous = context.previousSample
+  const previous = context.previousFlightSample ?? context.previousSample
   if (!previous) return false
   const delta = sample.timestampSeconds - previous.timestampSeconds
+  const physicsDelta = sample.state.timeSeconds - previous.state.timeSeconds
   const distance = distance3d(sample.state.positionM, previous.state.positionM)
   if (!Number.isFinite(delta) || delta <= 0 || delta > maximumSeconds) return true
+  if (!Number.isFinite(physicsDelta) || physicsDelta <= 0 || Math.abs(physicsDelta - delta) > 1e-6
+    || sample.state.stepIndex <= previous.state.stepIndex) return true
   if (!Number.isFinite(distance) || distance > maximumDistanceM) return true
   if (distance / delta > maximumSpeedMps) return true
   return checkVelocityConsistency && !displacementVelocityConsistency(context, sample).consistent
@@ -268,13 +285,13 @@ function evaluateHover(sample: TrainingSample, context: TrainingEvaluationContex
   const verticalVelocity = Math.abs(sample.state.velocityMps.y)
   const tilt = bodyTiltDegrees(sample)
   const inZone = horizontalError <= zoneRadius && altitudeError <= altitudeTolerance
-  const previousInZone = metric(context, 'inZone', 0) > 0.5
-  const dwell = inZone && previousInZone && deltaSeconds(context, sample) <= 0.3
-    ? metric(context, 'contiguousDwellSeconds', 0) + deltaSeconds(context, sample)
-    : 0
   const stick = stickDiagnostics(context, sample)
   const stable = inZone && horizontalVelocity <= 1.6 && verticalVelocity <= 1.2 && tilt <= 18
   const settled = stable && horizontalVelocity <= 0.8 && verticalVelocity <= 0.8 && tilt <= 10
+  const previousSettled = metric(context, 'hoverSettled', 0) > 0.5
+  const dwell = settled && previousSettled && deltaSeconds(context, sample) <= 0.3
+    ? metric(context, 'contiguousDwellSeconds', 0) + deltaSeconds(context, sample)
+    : 0
   const checkpointIds = [
     ...(inZone ? ['enter-hover-zone'] : []),
     ...(stable && dwell >= 2.5 ? ['hold-hover'] : []),
@@ -288,11 +305,18 @@ function evaluateHover(sample: TrainingSample, context: TrainingEvaluationContex
     maxTiltDegrees: tilt,
     contiguousDwellSeconds: dwell,
     inZone: inZone ? 1 : 0,
+    hoverSettled: settled ? 1 : 0,
     stickDelta: stick.stickDelta,
     stickVariation: stick.stickVariation,
     stickSmoothness: stick.stickSmoothness,
   }
-  if (context.elapsedSeconds > 30) {
+  if (pathGap(context, sample)) {
+    return safeEvaluation('failure', metrics, {
+      message: 'Hover telemetry contained a path gap or an impossible position jump.',
+      hint: 'Keep fixed-step telemetry connected and fly the gates in order.',
+    })
+  }
+  if (context.mode !== 'practice' && context.elapsedSeconds > 30) {
     return safeEvaluation('failure', metrics, {
       checkpointIds,
       score: scoreFromErrors([horizontalError * 8, altitudeError * 15, horizontalVelocity * 3, tilt]),
@@ -301,11 +325,11 @@ function evaluateHover(sample: TrainingSample, context: TrainingEvaluationContex
     })
   }
   if (horizontalError > 12 || altitudeError > 12 || speed(sample) > 45 || tilt > 165) {
-    return safeEvaluation('failure', metrics, {
+    return recoverableEvaluation(context, metrics, {
       checkpointIds,
       score: scoreFromErrors([horizontalError * 4, altitudeError * 6, speed(sample)]),
       message: 'The hover left the recoverable flight envelope.',
-      hint: 'Retry and reduce horizontal drift before correcting altitude.',
+      hint: context.mode === 'practice' ? '先減少水平移動，回到目標區；本次局部目標已清空，可繼續練習。' : 'Retry and reduce horizontal drift before correcting altitude.',
     })
   }
   if (settled && dwell >= 3.2 && context.elapsedSeconds >= 3.2) {
@@ -417,7 +441,7 @@ function evaluateCoordinatedTurn(sample: TrainingSample, context: TrainingEvalua
       hint: 'Keep fixed-step telemetry connected and fly the gates in order.',
     })
   }
-  if (context.elapsedSeconds > 35) {
+  if (context.mode !== 'practice' && context.elapsedSeconds > 35) {
     return safeEvaluation('failure', metrics, {
       checkpointIds,
       score: scoreFromErrors([routeError * 8, actualHeadingChange < 55 ? 30 : 0]),
@@ -426,10 +450,10 @@ function evaluateCoordinatedTurn(sample: TrainingSample, context: TrainingEvalua
     })
   }
   if (routeActive && (!routeValid || speed(sample) > 45 || Math.abs(sample.state.velocityMps.y) > 12)) {
-    return safeEvaluation('failure', metrics, {
+    return recoverableEvaluation(context, metrics, {
       checkpointIds,
       message: 'The turn left its corridor or exceeded the route energy envelope.',
-      hint: 'Use a smoother coordinated line and keep altitude near the gate references.',
+      hint: context.mode === 'practice' ? '本段航線已重新開始；先降低速度，再回到入口重新依序練習。' : 'Use a smoother coordinated line and keep altitude near the gate references.',
     })
   }
   const completedExit = checkpointIds.includes('turn-exit') || context.checkpoints['turn-exit']?.completed === true
@@ -460,6 +484,9 @@ function evaluateSplitS(sample: TrainingSample, context: TrainingEvaluationConte
   if (!splitReference) return safeEvaluation('failure', {}, { message: 'The Split-S reference is unavailable.' })
 
   const current = sample.state.positionM
+  const groundHeightM = reference(context, 'landing-surface')?.positionM.y
+    ?? splitReference.positionM.y - (splitReference.sizeM?.y ?? 1.8) * 0.5
+  const altitudeAboveGroundM = current.y - groundHeightM
   const motion = motionDirection(sample)
   const heading = headingRadians(motion)
   const storedEntryHeading = metric(context, 'entryHeadingRad', Number.NaN)
@@ -479,7 +506,7 @@ function evaluateSplitS(sample: TrainingSample, context: TrainingEvaluationConte
   const entryAlignment = entryDirection
     ? motion.x * entryDirection.x + motion.z * entryDirection.z
     : 1
-  const entryCandidate = current.y >= 12
+  const entryCandidate = altitudeAboveGroundM >= 12
     && horizontalFromReference <= 18
     && speed(sample) >= 3
     && entryAlignment >= -0.2
@@ -490,23 +517,23 @@ function evaluateSplitS(sample: TrainingSample, context: TrainingEvaluationConte
     && uprightSeen
     && up <= -0.55
     && (previousUp > -0.25 || metric(context, 'inversionTransition', 0) > 0.5)
-    && current.y >= 8
-  const invertedAltitude = metric(context, 'invertedAltitudeM', current.y)
-  const descentDistance = Math.max(0, invertedAltitude - current.y)
+    && altitudeAboveGroundM >= 8
+  const invertedAltitude = metric(context, 'invertedAltitudeM', altitudeAboveGroundM)
+  const descentDistance = Math.max(0, invertedAltitude - altitudeAboveGroundM)
   const descendingCandidate = hasInverted
     && up <= 0.2
     && sample.state.velocityMps.y <= -1.5
     && descentDistance >= 0.8
-    && current.y >= 3
+    && altitudeAboveGroundM >= 3
   const hasDescent = context.checkpoints.descent?.completed === true
   const reversedCandidate = hasDescent
     && headingChange >= 110
     && horizontalSpeed(sample) >= 2.5
-    && current.y < invertedAltitude - 1
+    && altitudeAboveGroundM < invertedAltitude - 1
   const hasReversed = context.checkpoints.reversed?.completed === true
   const recoveredCandidate = hasReversed
     && up >= 0.72
-    && current.y >= 2
+    && altitudeAboveGroundM >= 2
     && Math.abs(sample.state.velocityMps.y) <= 8
     && horizontalFromReference <= 25
     && headingChange >= 110
@@ -518,7 +545,7 @@ function evaluateSplitS(sample: TrainingSample, context: TrainingEvaluationConte
     ...(recoveredCandidate ? ['recovered'] : []),
   ] as const
   const metrics = {
-    entryAltitudeM: current.y,
+    entryAltitudeM: altitudeAboveGroundM,
     invertedTiltDegrees: bodyTiltDegrees(sample),
     descentRateMps: -sample.state.velocityMps.y,
     headingChangeDegrees: headingChange,
@@ -527,7 +554,7 @@ function evaluateSplitS(sample: TrainingSample, context: TrainingEvaluationConte
     speedMps: speed(sample),
     entryHeadingRad: Number.isFinite(entryHeading) || entryCandidate ? nextEntryHeading : 0,
     entryHeadingReady: Number.isFinite(entryHeading) || entryCandidate ? 1 : 0,
-    invertedAltitudeM: invertedCandidate ? current.y : invertedAltitude,
+    invertedAltitudeM: invertedCandidate ? altitudeAboveGroundM : invertedAltitude,
     uprightSeen: uprightSeen ? 1 : 0,
     inversionTransition: invertedCandidate || metric(context, 'inversionTransition', 0) > 0.5 ? 1 : 0,
   }
@@ -538,7 +565,7 @@ function evaluateSplitS(sample: TrainingSample, context: TrainingEvaluationConte
       hint: 'Keep the fixed-step path continuous through the inversion and recovery.',
     })
   }
-  if (context.elapsedSeconds > 35) {
+  if (context.mode !== 'practice' && context.elapsedSeconds > 35) {
     return safeEvaluation('failure', metrics, {
       checkpointIds,
       score: scoreFromErrors([Math.max(0, 110 - headingChange) * 0.4, horizontalFromReference]),
@@ -546,26 +573,25 @@ function evaluateSplitS(sample: TrainingSample, context: TrainingEvaluationConte
       hint: 'Start high, complete the inverted descending half-loop, then recover level.',
     })
   }
-  if (current.y < 1 && !hasReversed && !recoveredCandidate) {
-    return safeEvaluation('failure', metrics, {
+  if (altitudeAboveGroundM < 1 && !hasReversed && !recoveredCandidate) {
+    return recoverableEvaluation(context, metrics, {
       checkpointIds,
       message: 'The Split-S descended below the recovery safety floor before reversing.',
-      hint: 'Enter with more altitude and delay the recovery until the heading has reversed.',
+      hint: context.mode === 'practice' ? '先恢復水平並爬升到足夠高度，再從進入階段重練；飛行位置不會自動重設。' : 'Enter with more altitude and delay the recovery until the heading has reversed.',
     })
   }
   if (speed(sample) > 50 || Math.abs(sample.state.velocityMps.y) > 35 || horizontalFromReference > 40) {
-    return safeEvaluation('failure', metrics, {
+    return recoverableEvaluation(context, metrics, {
       checkpointIds,
       message: 'The Split-S exceeded the altitude, speed, or position safety envelope.',
-      hint: 'Use the available altitude to manage energy through the half-loop.',
+      hint: context.mode === 'practice' ? '本次動作階段已清空；先減速、回到參考區並取得高度後再開始。' : 'Use the available altitude to manage energy through the half-loop.',
     })
   }
-  const recovered = recoveredCandidate || context.checkpoints.recovered?.completed === true
-  if (recovered && context.elapsedSeconds >= 2) {
+  if (recoveredCandidate && context.elapsedSeconds >= 2) {
     return safeEvaluation('success', metrics, {
       checkpointIds,
       score: scoreFromErrors([
-        Math.max(0, 12 - current.y) * 2,
+        Math.max(0, 12 - altitudeAboveGroundM) * 2,
         Math.max(0, 8 - headingChange) * 2,
         horizontalFromReference * 1.5,
         Math.abs(sample.state.velocityMps.y),
@@ -675,13 +701,6 @@ function evaluateOrbit(sample: TrainingSample, context: TrainingEvaluationContex
     velocityConsistencyErrorM: finite(displacementConsistency.velocityConsistencyErrorM),
     integrationToleranceM: finite(displacementConsistency.integrationToleranceM),
   }
-  if (directionReversals >= 3 || reverseRadians > 0.55) {
-    return safeEvaluation('failure', metrics, {
-      checkpointIds,
-      message: 'The orbit direction oscillated instead of completing one directed geometric lap.',
-      hint: 'Choose one direction around the tower and keep the tangent line smooth.',
-    })
-  }
   if (geometricPathGap || (!reversal && velocityPathGap)) {
     return safeEvaluation('failure', metrics, {
       checkpointIds,
@@ -689,14 +708,21 @@ function evaluateOrbit(sample: TrainingSample, context: TrainingEvaluationContex
       hint: 'Keep fixed-step samples continuous and fly the radius instead of jumping between points.',
     })
   }
-  if (!context.checkpoints['orbit-entry']?.completed && stationarySeconds > 3) {
-    return safeEvaluation('failure', metrics, {
+  if (directionReversals >= 3 || reverseRadians > 0.55) {
+    return recoverableEvaluation(context, metrics, {
       checkpointIds,
-      message: 'The orbit stayed nearly stationary; yaw-in-place cannot establish a geometric lap.',
-      hint: 'Translate around the tower with real lateral speed before turning the camera.',
+      message: 'The orbit direction oscillated instead of completing one directed geometric lap.',
+      hint: context.mode === 'practice' ? '這圈進度已清空；選定同一個繞行方向，重新累積完整一圈。' : 'Choose one direction around the tower and keep the tangent line smooth.',
     })
   }
-  if (context.elapsedSeconds > 45) {
+  if (!context.checkpoints['orbit-entry']?.completed && stationarySeconds > 3) {
+    return recoverableEvaluation(context, metrics, {
+      checkpointIds,
+      message: 'The orbit stayed nearly stationary; yaw-in-place cannot establish a geometric lap.',
+      hint: context.mode === 'practice' ? '先沿塔周圍真正移動，再保持同一繞行方向；可繼續嘗試。' : 'Translate around the tower with real lateral speed before turning the camera.',
+    })
+  }
+  if (context.mode !== 'practice' && context.elapsedSeconds > 45) {
     return safeEvaluation('failure', metrics, {
       checkpointIds,
       score: scoreFromErrors([radiusError * 8, altitudeError * 8, tangentHeadingError * 0.25]),
@@ -705,10 +731,10 @@ function evaluateOrbit(sample: TrainingSample, context: TrainingEvaluationContex
     })
   }
   if (invalidSeconds > 1.2) {
-    return safeEvaluation('failure', metrics, {
+    return recoverableEvaluation(context, metrics, {
       checkpointIds,
       message: 'Orbit radius, altitude, speed, or heading stayed outside the valid envelope too long.',
-      hint: 'Keep the point of interest in a steady camera reference while preserving speed.',
+      hint: context.mode === 'practice' ? '本圈進度已清空；先回到目標半徑與高度，再重新繞行。' : 'Keep the point of interest in a steady camera reference while preserving speed.',
     })
   }
   const lapComplete = context.checkpoints['orbit-lap']?.completed === true

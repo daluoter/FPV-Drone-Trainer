@@ -260,19 +260,19 @@ function emitCoordinatedTurnFailure(runtime: RuntimeHarness): void {
   const input = { roll: 0, pitch: 0, yaw: 0, throttle: 0.4 }
   runtime.emitSample({
     timestampSeconds: 3.1,
-    state: { ...state, stepIndex: 1 },
+    state: { ...state, stepIndex: 1, timeSeconds: 3.1 },
     normalizedInput: input,
     armed: true,
   })
   runtime.emitSample({
     timestampSeconds: 3.2,
-    state: { ...state, stepIndex: 2 },
+    state: { ...state, stepIndex: 2, timeSeconds: 3.2 },
     normalizedInput: input,
     armed: true,
   })
   runtime.emitSample({
     timestampSeconds: 3.3,
-    state: { ...state, stepIndex: 3 },
+    state: { ...state, stepIndex: 3, timeSeconds: 3.3 },
     normalizedInput: input,
     armed: false,
   })
@@ -287,6 +287,7 @@ describe('integrated training/runtime UI boundaries', () => {
   it('clears a pending lesson when keyboard/runtime reset rewinds its clock', () => {
     render(<App />)
     const training = trainingSection()
+    fireEvent.change(screen.getByLabelText('學習方式'), { target: { value: 'challenge' } })
     const runtime = runtimeHarness.instances[0]
     fireEvent.click(within(training).getByRole('button', { name: '開始課程' }))
     act(() => emitCountdown(runtime))
@@ -303,6 +304,7 @@ describe('integrated training/runtime UI boundaries', () => {
     try {
       render(<App />)
       const training = trainingSection()
+      fireEvent.change(screen.getByLabelText('學習方式'), { target: { value: 'challenge' } })
       const runtime = runtimeHarness.instances[0]
       fireEvent.change(within(training).getByLabelText('選擇課程'), { target: { value: 'hover' } })
       fireEvent.click(within(training).getByRole('button', { name: '開始課程' }))
@@ -318,6 +320,7 @@ describe('integrated training/runtime UI boundaries', () => {
   it('keeps result and best-score provenance together after switching settings', () => {
     render(<App />)
     const training = trainingSection()
+    fireEvent.change(screen.getByLabelText('學習方式'), { target: { value: 'challenge' } })
     const runtime = runtimeHarness.instances[0]
     fireEvent.change(within(training).getByLabelText('選擇課程'), { target: { value: 'hover' } })
     fireEvent.click(within(training).getByRole('button', { name: '開始課程' }))
@@ -326,15 +329,52 @@ describe('integrated training/runtime UI boundaries', () => {
     act(() => emitHoverSuccess(runtime))
     fireEvent.click(screen.getByRole('button', { name: /^Disarm$/ }))
     fireEvent.change(screen.getByLabelText('操控設定'), { target: { value: 'standard' } })
-    expect(within(training).getByText(/本次條件：新手設定/)).toBeInTheDocument()
+    expect(within(training).getByText(/本次條件：能力挑戰.*新手設定/)).toBeInTheDocument()
     expect(within(training).getByText(/本次條件已練 1 次/)).toBeInTheDocument()
     fireEvent.click(within(training).getByRole('button', { name: '再練一次' }))
     expect(within(training).getByText(/本次條件已練 0 次/)).toBeInTheDocument()
   })
 
+  it('keeps guided practice completion separate from challenge progress', () => {
+    render(<App />)
+    const training = trainingSection()
+    const runtime = runtimeHarness.instances[0]
+    expect(screen.getByLabelText('學習方式')).toHaveValue('practice')
+    fireEvent.change(within(training).getByLabelText('選擇課程'), { target: { value: 'hover' } })
+    fireEvent.click(within(training).getByRole('button', { name: '開始課程' }))
+    act(() => emitCountdown(runtime))
+    fireEvent.click(screen.getByRole('button', { name: /^Arm$/ }))
+    act(() => emitHoverSuccess(runtime))
+    expect(within(training).getByText('引導目標完成！')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^Disarm$/ }))
+    fireEvent.change(screen.getByLabelText('學習方式'), { target: { value: 'challenge' } })
+    expect(within(training).getByText(/本次條件：引導練習/)).toBeInTheDocument()
+    fireEvent.click(within(training).getByRole('button', { name: '再練一次' }))
+    expect(within(training).getByText(/本次條件已練 0 次/)).toBeInTheDocument()
+  })
+
+  it('recommends the next foundational lesson after success without remounting flight or granting it completion', () => {
+    render(<App />)
+    const training = trainingSection()
+    const canvas = screen.getByLabelText('Free Flight 3D scene')
+    const runtime = runtimeHarness.instances[0]
+    fireEvent.change(within(training).getByLabelText('選擇課程'), { target: { value: 'hover' } })
+    fireEvent.click(within(training).getByRole('button', { name: '開始課程' }))
+    act(() => emitCountdown(runtime))
+    fireEvent.click(screen.getByRole('button', { name: /^Arm$/ }))
+    act(() => emitHoverSuccess(runtime))
+    fireEvent.click(within(training).getByRole('button', { name: '下一課：L03 定點降落' }))
+    expect(within(training).getByLabelText('選擇課程')).toHaveValue('landing')
+    expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
+    expect(screen.getByRole('button', { name: /^Disarm$/ })).toBeDisabled()
+    expect(persistedAttempts('landing')).toBe(0)
+    expect(persistedAttempts('hover')).toBe(1)
+  })
+
   it('keeps result persistence, lesson isolation, retry/reset, replay, and tuning boundaries together', async () => {
     render(<App />)
     const training = trainingSection()
+    fireEvent.change(screen.getByLabelText('學習方式'), { target: { value: 'challenge' } })
     fireEvent.change(within(training).getByLabelText('選擇課程'), { target: { value: 'hover' } })
     fireEvent.click(screen.getByText('進階調參與舊版紀錄'))
     const runtime = runtimeHarness.instances[0]

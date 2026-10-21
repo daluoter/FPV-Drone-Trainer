@@ -62,6 +62,7 @@ export class FlightSimulation {
   private state: DroneState
   private telemetry: FlightTelemetry
   private armed: boolean
+  private trainingPreparationHeld = false
 
   public constructor(config: FlightSimulationConfig = {}) {
     const runtimeConfig = typeof config === 'object' && config !== null ? config : {}
@@ -117,6 +118,7 @@ export class FlightSimulation {
     }
     this.controller.arm()
     this.armed = true
+    this.trainingPreparationHeld = false
     this.telemetry = this.makeTelemetry(this.controller.safeOutput(), this.state, [])
   }
 
@@ -142,6 +144,7 @@ export class FlightSimulation {
   ): DroneState {
     this.controller.reset()
     this.accumulator.reset()
+    this.trainingPreparationHeld = false
     this.state = this.simulation.resetAt(positionM, orientation)
     this.armed = false
     this.telemetry = this.makeTelemetry(
@@ -149,6 +152,19 @@ export class FlightSimulation {
       this.state,
       [reason],
     )
+    return this.state
+  }
+
+  /**
+   * Reset a lesson while disarmed and hold its physical spawn until a
+   * successful explicit arm. Countdown still advances the fixed-step clock.
+   */
+  public resetForTraining(
+    positionM: Vector3 = this.droneConfig.spawnPositionM,
+    orientation: Quaternion = IDENTITY_QUATERNION,
+  ): DroneState {
+    this.resetAt(positionM, orientation, 'Training setup is held while awaiting explicit arm.')
+    this.trainingPreparationHeld = true
     return this.state
   }
 
@@ -249,7 +265,9 @@ export class FlightSimulation {
       }
     }
 
-    const simulationResult = this.simulation.step(output.motorCommands, deltaSeconds)
+    const simulationResult = !this.armed && this.trainingPreparationHeld
+      ? this.simulation.stepHeld(deltaSeconds)
+      : this.simulation.step(output.motorCommands, deltaSeconds)
     this.state = simulationResult.state
     const warnings = [...output.warnings, ...simulationResult.warnings]
     if (this.state.crashed) {

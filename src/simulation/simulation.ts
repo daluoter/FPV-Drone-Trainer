@@ -1,8 +1,8 @@
-import { DEFAULT_DRONE_CONFIG, validateDroneConfig } from '../drone'
+import { DEFAULT_DRONE_CONFIG, isFiniteDroneState, validateDroneConfig } from '../drone'
 import { IDENTITY_QUATERNION, isFiniteQuaternion, quaternionNorm, type Quaternion } from '../math/quaternion'
 import { isFiniteVector3, type Vector3 } from '../math/vector'
 import { createInitialDroneState, type DroneConfig, type DroneState, type DroneStepResult } from '../drone'
-import { createSafeInitialState, stepDroneState } from './dynamics'
+import { createSafeInitialState, MAX_INTEGRATION_DT_SECONDS, stepDroneState } from './dynamics'
 import {
   DEFAULT_FIXED_STEP_SECONDS,
   FixedTimestepAccumulator,
@@ -81,6 +81,25 @@ export class DroneSimulation {
     const result = stepDroneState(this.state, motorCommands, this.config, deltaSeconds)
     this.state = result.state
     return result
+  }
+
+  /**
+   * Explicit lesson preparation clock step. The flight owner may use this
+   * only after resetting a disarmed lesson spawn; normal stepping still
+   * integrates gravity, and an armed flight never uses this path.
+   */
+  public stepHeld(deltaSeconds = DEFAULT_FIXED_STEP_SECONDS): DroneStepResult {
+    if (!Number.isFinite(deltaSeconds) || deltaSeconds <= 0 || deltaSeconds > MAX_INTEGRATION_DT_SECONDS
+      || !isFiniteDroneState(this.state)) {
+      // Reuse the normal defensive reset/invalid-timestep behavior.
+      return this.step([0, 0, 0, 0], deltaSeconds)
+    }
+    this.state = {
+      ...this.state,
+      timeSeconds: this.state.timeSeconds + deltaSeconds,
+      stepIndex: this.state.stepIndex + 1,
+    }
+    return { state: this.state, warnings: [...this.state.warnings], reset: false }
   }
 
   /**

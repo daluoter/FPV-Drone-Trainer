@@ -1,0 +1,146 @@
+.intro-lesson {
+  padding: 14px;
+  border: 1px solid var(--line-strong, #344650);
+  border-radius: 12px;
+  background: var(--surface-raised, #131d27);
+  font-size: 0.8rem;
+}
+
+.intro-lesson-heading,
+.intro-lesson-actions,
+.intro-lesson-demos {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.intro-lesson-heading h3,
+.intro-lesson-heading p,
+.intro-lesson-copy p {
+  margin: 0;
+}
+
+.intro-lesson-heading h3 {
+  margin-top: 3px;
+  font-size: 0.95rem;
+}
+
+.intro-lesson-count {
+  flex-shrink: 0;
+  color: var(--accent, #b8f36b);
+}
+
+.intro-lesson-progress {
+  display: flex;
+  gap: 6px;
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+}
+
+.intro-lesson-progress li {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line-strong, #344650);
+  border-radius: 50%;
+  color: var(--muted, #91a4b0);
+}
+
+.intro-lesson-progress li[aria-current="step"] {
+  border-color: var(--accent, #b8f36b);
+  color: var(--text, #edf3f6);
+}
+
+.intro-lesson-progress li.is-correct {
+  color: var(--accent, #b8f36b);
+  background: var(--accent-dim, #203322);
+}
+
+.intro-lesson-progress-name {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.intro-lesson-copy p {
+  margin-top: 5px;
+  line-height: 1.55;
+  color: var(--muted, #91a4b0);
+}
+
+.intro-lesson-demos {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.intro-lesson-question {
+  margin-top: 12px;
+}
+
+.intro-lesson-question fieldset {
+  padding: 0;
+  border: 0;
+  margin: 0 0 8px;
+}
+
+.intro-lesson-question legend {
+  margin-bottom: 6px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.intro-lesson-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 5px 0;
+  cursor: pointer;
+  line-height: 1.45;
+}
+
+.intro-lesson-choice input {
+  flex-shrink: 0;
+  margin: 3px 0 0;
+  accent-color: var(--accent, #b8f36b);
+}
+
+.intro-lesson-choice input:focus-visible {
+  outline: 2px solid var(--accent, #b8f36b);
+  outline-offset: 3px;
+}
+
+.intro-lesson-feedback,
+.intro-lesson-completed,
+.intro-lesson-note {
+  margin: 10px 0;
+  line-height: 1.5;
+}
+
+.intro-lesson-feedback.is-correct,
+.intro-lesson-completed {
+  color: var(--accent, #b8f36b);
+}
+
+.intro-lesson-feedback.is-retry,
+.intro-lesson-note {
+  color: var(--warning, #ffc978);
+}
+
+.intro-lesson-actions {
+  margin-top: 12px;
+}
+
+@media (min-width: 761px) {
+  .intro-lesson {
+    max-height: max(320px, calc(100vh - 300px));
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+}

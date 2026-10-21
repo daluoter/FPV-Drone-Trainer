@@ -36,6 +36,39 @@ describe('beginner-facing training feedback', () => {
     expect(display[0]).toEqual({ key: 'orbitProgress', label: '繞行進度', value: '50 %' })
   })
 
+  it('shows current descent while airborne and measured contact speed only after landing', () => {
+    const metrics = {
+      landingHeightM: 0.8,
+      landingPositionErrorM: 0.2,
+      verticalSpeedMps: 0.5,
+      touchdownDescentSpeedMps: 0,
+      groundTouching: 0,
+    }
+    expect(formatTrainingMetrics(metrics, 'landing').map((metric) => metric.key))
+      .toEqual(['landingHeightM', 'landingPositionErrorM', 'verticalSpeedMps'])
+    expect(formatTrainingMetrics({ ...metrics, groundTouching: 1, touchdownDescentSpeedMps: 0.6 }, 'landing')[2])
+      .toEqual({ key: 'touchdownDescentSpeedMps', label: '接地下降速度', value: '0.60 m/s' })
+  })
+
+  it('changes straight-line teaching facts from route keeping to braking and settled stop', () => {
+    const metrics = {
+      alongTrackM: 5,
+      crossTrackErrorM: 0.2,
+      altitudeErrorM: 0.1,
+      stopErrorM: 3,
+      forwardSpeedMps: 0.8,
+      horizontalSpeedMps: 0.85,
+      contiguousDwellSeconds: 0,
+      routePhase: 2,
+    }
+    expect(formatTrainingMetrics(metrics, 'straight-line').map((metric) => metric.key))
+      .toEqual(['alongTrackM', 'crossTrackErrorM', 'altitudeErrorM'])
+    expect(formatTrainingMetrics({ ...metrics, routePhase: 3 }, 'straight-line').map((metric) => metric.key))
+      .toEqual(['stopErrorM', 'forwardSpeedMps', 'altitudeErrorM'])
+    expect(formatTrainingMetrics({ ...metrics, routePhase: 4 }, 'straight-line').map((metric) => metric.key))
+      .toEqual(['stopErrorM', 'horizontalSpeedMps', 'contiguousDwellSeconds'])
+  })
+
   it('uses the current evaluator hint rather than replacing it with generic coaching', () => {
     expect(trainingHint('hover', {
       status: 'continue',
