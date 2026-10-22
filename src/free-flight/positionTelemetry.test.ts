@@ -16,11 +16,13 @@ describe('FPV position readout', () => {
     expect(grounded.rightM).toBe(0)
     expect(grounded.forwardM).toBe(0)
     expect(grounded.upM).toBe(0)
+    expect(grounded.zM).toBe(0)
 
     const airborne = makePositionReadout({ positionM: { x: 6, y: 13, z: -12 }, orientation: IDENTITY_QUATERNION }, config)
     expect(airborne.altitudeAboveGroundM).toBe(3)
     expect(airborne.rightM).toBe(2)
     expect(airborne.forwardM).toBe(5)
+    expect(airborne.zM).toBe(-5)
     expect(airborne.upM).toBeCloseTo(13 - launch.y)
   })
 
@@ -33,6 +35,7 @@ describe('FPV position readout', () => {
     const b = makePositionReadout(tilted, config)
     expect(b.rightM).toBe(-2)
     expect(b.forwardM).toBe(-4)
+    expect(b.zM).toBe(4)
     expect(b.upM).toBe(a.upM)
     expect(b.altitudeAboveGroundM).toBe(a.altitudeAboveGroundM)
     expect(b.verticalClearanceM).toBeCloseTo(3 - droneGroundSupport(config, orientation).supportOffsetM - DRONE_GROUND_CLEARANCE_M)
@@ -45,11 +48,11 @@ describe('FPV position readout', () => {
     const origin = { x: 3, y: 2, z: -4 }
     const before = JSON.stringify({ config, state, origin })
     const readout = makePositionReadout(state, config, origin)
-    expect(readout).toMatchObject({ altitudeAboveGroundM: 6, rightM: 5, forwardM: 5, upM: 4 })
+    expect(readout).toMatchObject({ altitudeAboveGroundM: 6, rightM: 5, forwardM: 5, upM: 4, zM: -5 })
     expect(JSON.stringify({ config, state, origin })).toBe(before)
     expect(Object.isFrozen(readout)).toBe(true)
     const otherPose = { ...state, positionM: { x: 3, y: 2, z: -4 } }
-    expect(makePositionReadout(otherPose, config, origin)).toMatchObject({ rightM: 0, forwardM: 0, upM: 0 })
+    expect(makePositionReadout(otherPose, config, origin)).toMatchObject({ rightM: 0, forwardM: 0, upM: 0, zM: 0 })
     expect(readout.rightM).toBe(5)
   })
 

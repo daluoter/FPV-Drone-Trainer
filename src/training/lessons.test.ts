@@ -23,7 +23,7 @@ describe('lesson catalog', () => {
       'Orbit / 刷鍋',
       '穩定起飛',
       '起飛、前往降落區與降落',
-      'Straight Line and Stop',
+      'Straight Line Through Rings',
     ])
     expect(DEFAULT_LESSONS.every((lesson) => lesson.available && lesson.availability === 'available' && lesson.evaluator)).toBe(true)
     expect(DEFAULT_LESSONS.map((lesson) => lesson.setup.sceneReferenceIds)).toEqual([

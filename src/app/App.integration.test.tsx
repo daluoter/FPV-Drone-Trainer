@@ -35,7 +35,7 @@ vi.mock('../rendering', () => {
     { id: 'split-s-reference', kind: 'gate', positionM: { x: 0, y: 0.9, z: -5 }, sizeM: { x: 5.12, y: 1.8, z: 0.12 } },
     { id: 'orbit-poi', kind: 'poi', positionM: { x: 4, y: 2.5, z: 4 }, sizeM: { x: 0.36, y: 4, z: 0.36 } },
     { id: 'training-launch', kind: 'pad', positionM: { x: 0, y: 0.046, z: 0 } },
-    { id: 'landing-surface', kind: 'zone', positionM: { x: 0, y: 0, z: -8 }, sizeM: { x: 1.7, y: 0, z: 1.7 } },
+    { id: 'landing-surface', kind: 'zone', positionM: { x: 0, y: 0, z: -8 }, sizeM: { x: 3, y: 0, z: 3 } },
   ]
 
   class MockFlightRenderer {
@@ -365,7 +365,7 @@ describe('integrated training/runtime UI boundaries', () => {
     act(() => emitCountdown(runtime))
     fireEvent.click(screen.getByRole('button', { name: /^Arm$/ }))
     act(() => emitHoverSuccess(runtime))
-    fireEvent.click(within(training).getByRole('button', { name: '下一課：L03 起飛、直線與減速停點' }))
+    fireEvent.click(within(training).getByRole('button', { name: /^下一課：L03/ }))
     expect(within(training).getByLabelText('選擇課程')).toHaveValue('straight-line')
     expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
     expect(screen.getByRole('button', { name: /^Disarm$/ })).toBeDisabled()

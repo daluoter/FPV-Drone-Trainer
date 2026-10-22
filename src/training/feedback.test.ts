@@ -36,77 +36,65 @@ describe('beginner-facing training feedback', () => {
     expect(display[0]).toEqual({ key: 'orbitProgress', label: '繞行進度', value: '50 %' })
   })
 
-  it('shows current descent while airborne and measured contact speed only after landing', () => {
-    const metrics = {
-      landingHeightM: 0.8,
-      landingPositionErrorM: 0.2,
-      verticalSpeedMps: 0.5,
-      touchdownDescentSpeedMps: 0,
-      groundTouching: 0,
-    }
-    expect(formatTrainingMetrics(metrics, 'landing').map((metric) => metric.key))
-      .toEqual(['landingHeightM', 'landingPositionErrorM', 'verticalSpeedMps'])
-    expect(formatTrainingMetrics({ ...metrics, landingPhase: 4, groundTouching: 1, touchdownDescentSpeedMps: 0.6, contiguousDwellSeconds: 0.3 }, 'landing')[1])
-      .toEqual({ key: 'touchdownDescentSpeedMps', label: '接地下降速度', value: '0.60 m/s' })
+  it('shows target distance, physical height and readable ground contact for landing', () => {
+    const metrics = { landingPhase: 3, landingHeightM: 0.8, landingPositionErrorM: 0.2,
+      verticalSpeedMps: 1.2, touchdownDescentSpeedMps: 0, groundTouching: 0 }
+    expect(formatTrainingMetrics(metrics, 'landing')).toEqual([
+      { key: 'landingPositionErrorM', label: '距降落區中心', value: '0.20 m' },
+      { key: 'landingHeightM', label: '離地間隙', value: '0.80 m' },
+      { key: 'groundTouching', label: '地面接觸', value: '尚未接地' },
+    ])
+    expect(formatTrainingMetrics({ ...metrics, landingPhase: 4, groundTouching: 1 }, 'landing')[2]?.value)
+      .toBe('已接地')
   })
 
-  it('changes straight-line teaching facts from route keeping to braking and settled stop', () => {
-    const metrics = {
-      alongTrackM: 5,
-      crossTrackErrorM: 0.2,
-      altitudeErrorM: 0.1,
-      stopErrorM: 3,
-      forwardSpeedMps: 0.8,
-      horizontalSpeedMps: 0.85,
-      contiguousDwellSeconds: 0,
-      routePhase: 2,
-    }
-    expect(formatTrainingMetrics(metrics, 'straight-line').map((metric) => metric.key))
-      .toEqual(['forwardSpeedMps', 'stopErrorM', 'altitudeErrorM'])
-    expect(formatTrainingMetrics({ ...metrics, routePhase: 3 }, 'straight-line').map((metric) => metric.key))
-      .toEqual(['stopErrorM', 'forwardSpeedMps', 'altitudeErrorM'])
-    expect(formatTrainingMetrics({ ...metrics, routePhase: 4 }, 'straight-line').map((metric) => metric.key))
-      .toEqual(['stopErrorM', 'horizontalSpeedMps', 'contiguousDwellSeconds'])
+  it('prioritizes gate progress and the next gate instead of removed stopping requirements', () => {
+    const metrics = { gatesPassed: 1, nextGateDistanceM: 1.2, nextGateErrorM: 0.4,
+      routePhase: 2, alongTrackM: 3.8, contiguousDwellSeconds: 0, horizontalSpeedMps: 3 }
+    expect(formatTrainingMetrics(metrics, 'straight-line')).toEqual([
+      { key: 'gatesPassed', label: '已通過圓環', value: '1 / 3' },
+      { key: 'nextGateDistanceM', label: '距下一個圓環', value: '1.20 m' },
+      { key: 'nextGateErrorM', label: '對準圓環偏差', value: '0.40 m' },
+    ])
   })
 
-  it('shows takeoff facts before a ground-start course instead of final stopping or touchdown metrics', () => {
-    expect(formatTrainingMetrics({ routePhase: 0, launchHeightM: 0.1, altitudeErrorM: 2.8,
-      verticalSpeedMps: 0.4, stopErrorM: 8, contiguousDwellSeconds: 0 }, 'straight-line').map((metric) => metric.key))
-      .toEqual(['launchHeightM', 'altitudeErrorM', 'verticalSpeedMps'])
+  it('shows current takeoff facts before ground-start courses', () => {
+    expect(formatTrainingMetrics({ routePhase: 0, launchHeightM: 0.1, altitudeM: 0.15,
+      gatesPassed: 0, stopErrorM: 8, contiguousDwellSeconds: 0 }, 'straight-line').map((metric) => metric.key))
+      .toEqual(['launchHeightM', 'altitudeM', 'gatesPassed'])
     expect(formatTrainingMetrics({ landingPhase: 1, landingHeightM: 0.1, launchDistanceM: 0,
-      verticalSpeedMps: 0.4, touchdownDescentSpeedMps: 0, groundTouching: 1 }, 'landing').map((metric) => metric.key))
-      .toEqual(['landingHeightM', 'launchDistanceM', 'verticalSpeedMps'])
+      verticalSpeedMps: 0.4, groundTouching: 1 }, 'landing').map((metric) => metric.key))
+      .toEqual(['landingHeightM', 'launchDistanceM', 'groundTouching'])
   })
 
-  it('explains each straight-line stage and explicitly distinguishes crossing gold from completion', () => {
-    expect(trainingRouteGuide('straight-line')).toMatch(/地面起飛.*藍色 3 m.*金色 5 m.*綠色 8 m.*1.2 秒/)
-    expect(trainingRouteGuide('straight-line')).toContain('穿圈不等於完成')
-    expect(trainingObjective('straight-line', { metrics: { routePhase: 0, altitudeErrorM: 2 } })?.detail)
-      .toContain('距目標高度 2.0 m')
-    expect(trainingObjective('straight-line', { metrics: { routePhase: 1, alongTrackM: 1 } })?.detail)
-      .toContain('距中途目標 2.0 m')
-    const gold = trainingObjective('straight-line', { metrics: { routePhase: 2, alongTrackM: 5.2, forwardSpeedMps: 1.2 } })
-    expect(gold?.detail).toContain('穿過金色環還未完成')
-    expect(gold?.detail).toContain('1.2 m/s')
-    expect(trainingObjective('straight-line', { metrics: { routePhase: 2, alongTrackM: 5.2, brakeEntrySpeedMps: 0 } })?.detail)
-      .toContain('至少 0.2 m/s')
-    expect(trainingObjective('straight-line', { metrics: { routePhase: 3, stopErrorM: 1.4, horizontalSpeedMps: 0.5 } })?.detail)
-      .toContain('距停點 1.4 m')
-    expect(trainingObjective('straight-line', { metrics: { routePhase: 4, contiguousDwellSeconds: 0.7 } })?.detail)
-      .toContain('再穩住 0.5 s')
-    expect(trainingHint('straight-line', { status: 'continue', metrics: { routePhase: 2, alongTrackM: 5.2, forwardSpeedMps: 1.2 } }))
-      .toContain('金色減速區')
+  it('explains ordered ring passage and retains passed gates when a ring is missed', () => {
+    expect(trainingRouteGuide('straight-line')).toMatch(/地面起飛.*藍色 3 m.*金色 5 m.*綠色 8 m/)
+    expect(trainingRouteGuide('straight-line')).toContain('依序從圈內穿過三圈即可完成')
+    expect(trainingRouteGuide('straight-line')).toContain('不要求減速比例或終點停留')
+    expect(trainingObjective('straight-line', { metrics: { routePhase: 0 } })?.title).toContain('地面自行起飛')
+    expect(trainingObjective('straight-line', { metrics: { routePhase: 1, nextGateDistanceM: 2 } })?.detail)
+      .toContain('距下一圈平面 2.0 m')
+    const gold = trainingObjective('straight-line', { metrics: { routePhase: 2, nextGateDistanceM: -0.2 } })
+    expect(gold?.title).toContain('第 2 個金色圓環')
+    expect(gold?.detail).toContain('退回這一圈前再穿一次')
+    expect(gold?.detail).toContain('已完成的圈會保留')
+    expect(gold?.detail).not.toContain('接地')
+    const green = trainingObjective('straight-line', { metrics: { routePhase: 3, nextGateDistanceM: 1 } })
+    expect(green?.detail).toContain('穿過這一圈即可完成，不需停穩')
+    expect(trainingHint('straight-line', { status: 'continue', metrics: { routePhase: 2, nextGateDistanceM: 1 } }))
+      .toContain('金色圓環')
   })
 
-  it('directs landing learners from the launch pad to the separate marked target', () => {
+  it('directs landing learners to the separate enlarged target without a dwell requirement', () => {
     expect(trainingRouteGuide('landing')).toContain('降落目標與起飛墊分開')
-    expect(trainingObjective('landing', { metrics: { landingPhase: 1 } })?.detail).toContain('先離地至少 0.8 m')
-    expect(trainingObjective('landing', { metrics: { landingPhase: 2, landingPositionErrorM: 6.4 } })?.detail)
-      .toContain('距降落區 6.4 m')
+    expect(trainingRouteGuide('landing')).toContain('半徑 1.5 m 內接地且沒有墜毀即可完成')
+    expect(trainingObjective('landing', { metrics: { landingPhase: 1 } })?.detail).toContain('先離地至少 0.15 m')
+    const transit = trainingObjective('landing', { metrics: { landingPhase: 2, landingPositionErrorM: 6.4 } })
+    expect(transit?.detail).toContain('距區域中心 6.4 m')
+    expect(transit?.detail).toContain('可直接再起飛重試')
     expect(trainingObjective('landing', { metrics: { landingPhase: 3, landingPositionErrorM: 0.3, landingHeightM: 0.4 } })?.detail)
       .toContain('離地間隙 0.4 m')
-    expect(trainingObjective('landing', { metrics: { landingPhase: 4, contiguousDwellSeconds: 0.4 } })?.detail)
-      .toContain('再穩住 0.6 s')
+    expect(trainingObjective('landing', { metrics: { landingPhase: 4 } })?.detail).toContain('不必再等待穩定計時')
   })
 
   it('uses the current evaluator hint rather than replacing it with generic coaching', () => {

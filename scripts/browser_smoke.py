@@ -104,6 +104,8 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if response is None or response.status != 200:
                 raise AssertionError("The production entry page did not return HTTP 200.")
             expect(page).to_have_title("FPV Drone Trainer")
+            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.22.1")
+            report["release"] = page.get_by_test_id("app-release").inner_text()
 
             asset_urls = page.locator("script[src], link[rel='stylesheet'][href]").evaluate_all(
                 "elements => elements.map(element => element.src || element.href)"
@@ -139,10 +141,12 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             altitude = flight.get_by_test_id("flight-altitude")
             expect(position_hud).to_be_visible()
             expect(altitude).to_have_text(re.compile(r"^-?\d+\.\d m$"))
-            for coordinate in ("right", "forward", "up"):
+            for coordinate in ("right", "up", "z"):
                 expect(flight.get_by_test_id(f"flight-position-{coordinate}")).to_have_text(re.compile(r"^[+-]?\d+\.\d m$"))
             expect(position_hud).to_contain_text("相對起飛點")
-            checks.append("always-visible altitude and launch-relative position without developer HUD")
+            for axis in ("X", "Y", "Z"):
+                expect(position_hud).to_contain_text(axis)
+            checks.append("release identifier and always-visible altitude with explicit X/Y/Z without developer HUD")
             for control in (flight.locator('.flight-controls'), page.locator('#training').get_by_role('button', name='開始課程', exact=True)):
                 bounds = control.bounding_box()
                 if not bounds or bounds['y'] < 0 or bounds['y'] + bounds['height'] > 720:
@@ -374,8 +378,8 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             checks.append("L00 wrong-answer gating, full knowledge completion and reload persistence")
 
             for demo_name, first_cue, final_cue in (
-                ("L04 降落示範", "從地面起飛區開始", "平穩接地後"),
-                ("L03 直線示範", "從地面起飛區開始", "在終點附近連續穩住"),
+                ("L04 降落示範", "從地面起飛區開始", "沒有墜毀就完成"),
+                ("L03 直線示範", "從地面起飛區開始", "依序穿過藍、金、綠三圈就完成"),
             ):
                 before_demo = training_progress(page)
                 flight.get_by_role("button", name=demo_name, exact=True).click()
@@ -457,6 +461,29 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 camera.click()
                 expect(camera).to_have_attribute("aria-pressed", "true")
             checks.append("FPV, Chase and Free camera controls")
+
+            # Reproduce the reported crashed-screen case using ordinary input
+            # and real physics, with no pose injection or developer HUD.
+            page.get_by_role("button", name="自由飛行", exact=True).click()
+            source.select_option("keyboard")
+            progress_before_crash = training_progress(page)
+            arm.click()
+            page.keyboard.down("r")
+            try:
+                page.wait_for_function("parseFloat(document.querySelector('[data-testid=flight-altitude]')?.textContent || '0') >= 4")
+            finally:
+                page.keyboard.up("r")
+            expect(flight.locator(".flight-state-badge")).to_contain_text("CRASHED", timeout=15_000)
+            expect(flight.get_by_role("checkbox", name="Developer HUD", exact=True)).not_to_be_checked()
+            expect(position_hud).to_be_visible()
+            for coordinate in ("right", "up", "z"):
+                expect(flight.get_by_test_id(f"flight-position-{coordinate}")).to_have_text(re.compile(r"^[+-]?\d+\.\d m$"))
+            expect(arm).to_be_disabled()
+            if training_progress(page) != progress_before_crash:
+                raise AssertionError("Free-flight crash wrote a lesson result.")
+            if screenshot:
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "crashed-with-xyz.png"))
+            checks.append("real keyboard climb and ground-impact crash retains altitude and explicit XYZ")
 
             logo = page.get_by_role("link", name="FPV Drone Trainer home", exact=True)
             expect(logo).to_have_attribute("href", BASE_PATH)

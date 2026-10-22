@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { summarizeTrainingResult } from './resultFeedback'
 import type { TrainingResult } from './types'
+import type { TrainingAttemptContext } from './attempt'
 
 const result: TrainingResult = {
   lessonId: 'hover', sessionId: 'feedback', outcome: 'FAILED', score: 0,
   elapsedSeconds: 4, sampleCount: 960, completedCheckpoints: 1, totalCheckpoints: 3,
   startedAtSeconds: 0, completedAtSeconds: 4, metrics: {}, message: 'Stopped', hint: null,
+}
+
+const currentContext: TrainingAttemptContext = {
+  rulesVersion: 4, physicsVersion: 1, presetId: 'beginner', settingsFingerprint: 'settings.v1:{}',
+  inputSource: 'keyboard', mode: 'practice', assistance: 'none',
 }
 
 describe('observed result coaching', () => {
@@ -26,11 +32,13 @@ describe('observed result coaching', () => {
     expect(missing.observedGap).toContain('3 個步驟未完成')
   })
 
-  it('does not treat the initial zero touchdown speed as a completed landing observation', () => {
+  it('does not treat the initial zero touchdown speed as an actual landing', () => {
     const feedback = summarizeTrainingResult({ ...result, lessonId: 'landing', completedCheckpoints: 0,
+      attemptContext: currentContext,
       metrics: { touchdownDescentSpeedMps: 0, groundTouching: 0, contiguousDwellSeconds: 0 } })
     expect(feedback.observedStrength).toBeNull()
-    expect(feedback.observedGap).toContain('接地後連續穩定時間')
+    expect(feedback.observedGap).toContain('尚未完成從起飛墊實際離地')
+    expect(feedback.nextPractice).toContain('起飛')
   })
 
   it('keeps completion and mastery distinct even with all checkpoints completed', () => {
@@ -52,12 +60,61 @@ describe('observed result coaching', () => {
     }
   })
 
-  it('names the actual uncompleted route stage instead of blaming a distant final target during transit', () => {
-    const gold = summarizeTrainingResult({ ...result, lessonId: 'straight-line', metrics: { routePhase: 2, stopErrorM: 2 } })
-    expect(gold.observedGap).toContain('穿過圓環不等於完成')
-    expect(gold.nextPractice).toContain('觀察前進速度確實降低')
-    const transit = summarizeTrainingResult({ ...result, lessonId: 'landing', metrics: { landingPhase: 2, landingPositionErrorM: 5 } })
-    expect(transit.observedGap).toContain('尚未完成從空中')
-    expect(transit.nextPractice).toContain('先保持高度')
+  it('names the next missed ring instead of requiring braking or a stop', () => {
+    const gold = summarizeTrainingResult({ ...result, lessonId: 'straight-line', attemptContext: currentContext,
+      metrics: { routePhase: 2, gatesPassed: 1, stopErrorM: 2, horizontalSpeedMps: 4 } })
+    expect(gold.observedStrength).toContain('1 / 3 個圓環')
+    expect(gold.observedGap).toContain('第 2 個金色圓環')
+    expect(gold.nextPractice).toContain('已完成的圈會保留')
+    expect(gold.nextPractice).not.toMatch(/減速區|降低.*速度|停穩/)
+  })
+
+  it('does not apply old precision thresholds after a successful noncrash landing or ring flight', () => {
+    const landing = summarizeTrainingResult({ ...result, lessonId: 'landing', attemptContext: currentContext,
+      outcome: 'SUCCESS', completedCheckpoints: 5, totalCheckpoints: 5,
+      metrics: { landingPhase: 4, landingPositionErrorM: 1.2, touchdownDescentSpeedMps: 1.2,
+        horizontalSpeedMps: 0.8, maxTiltDegrees: 20, contiguousDwellSeconds: 0, groundTouching: 1 } })
+    expect(landing.observedStrength).toContain('接地且沒有墜毀')
+    expect(landing.observedGap).toBeNull()
+    expect(landing.nextPractice).not.toMatch(/0.80|連續.*秒|穩定時間/)
+    const straight = summarizeTrainingResult({ ...result, lessonId: 'straight-line', attemptContext: currentContext,
+      outcome: 'SUCCESS', completedCheckpoints: 5, totalCheckpoints: 5,
+      metrics: { routePhase: 4, gatesPassed: 3, horizontalSpeedMps: 7, altitudeErrorM: 1.3, contiguousDwellSeconds: 0 } })
+    expect(straight.observedStrength).toContain('三個圓環')
+    expect(straight.observedGap).toBeNull()
+    expect(straight.nextPractice).not.toMatch(/0.35|連續.*秒|停點/)
+  })
+
+  it('distinguishes a wrong-zone landing from a physical crash and keeps the retry local', () => {
+    const wrongZone = summarizeTrainingResult({ ...result, lessonId: 'landing', attemptContext: currentContext,
+      metrics: { landingPhase: 2, landingPositionErrorM: 2, groundTouching: 1 } })
+    expect(wrongZone.observedGap).toContain('2.00 m')
+    expect(wrongZone.observedGap).toContain('半徑 1.50 m')
+    expect(wrongZone.nextPractice).toContain('可直接再起飛重試')
+    const crashed = summarizeTrainingResult({ ...result, lessonId: 'landing', attemptContext: currentContext,
+      message: '降落停止：墜毀不能當作成功接地。',
+      metrics: { landingPhase: 3, landingPositionErrorM: 0.1, groundTouching: 1 } })
+    expect(crashed.observedGap).toContain('發生墜毀')
+  })
+
+  it.each(['straight-line', 'landing'])('preserves the explicit %s crash cause when runtime metrics are unavailable', (lessonId) => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId, attemptContext: currentContext,
+      message: 'Ground impact latched a crash; reset required.', metrics: {} })
+    expect(feedback.observedGap).toContain('發生墜毀')
+    expect(feedback.observedGap).not.toContain('尚未完成從地面')
+    expect(feedback.nextPractice).toContain('Reset')
+  })
+
+  it('keeps historical rule-3 results on their original criteria', () => {
+    const historical = summarizeTrainingResult({ ...result, lessonId: 'straight-line',
+      attemptContext: { ...currentContext, rulesVersion: 3 }, metrics: { routePhase: 2, stopErrorM: 2 } })
+    expect(historical.observedGap).toContain('尚未在金色減速區完成實際降速')
+    expect(historical.nextPractice).toContain('觀察前進速度確實降低')
+    expect(historical.scopeNote).toContain('舊規則 3')
+    const historicalLanding = summarizeTrainingResult({ ...result, lessonId: 'landing',
+      attemptContext: { ...currentContext, rulesVersion: 3 }, metrics: { landingPhase: 4,
+        landingPositionErrorM: 0.3, groundTouching: 1, touchdownDescentSpeedMps: 1.2, contiguousDwellSeconds: 1 } })
+    expect(historicalLanding.observedGap).toContain('接地前下降速度')
+    expect(historicalLanding.observedGap).toContain('0.80 m/s')
   })
 })

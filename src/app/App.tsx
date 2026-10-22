@@ -26,6 +26,7 @@ import type { TeachingDemonstrationKind } from '../training/demonstrations'
 import { loadLearningPreferences, saveLearningPreferences, type LearningPreferences } from '../training/learningPreferences'
 import { CURRENT_TRAINING_RULES_VERSION, fingerprintTrainingSettings, type TrainingAttemptContext } from '../training/attempt'
 import { prepareTrainingSetup } from '../training/setup'
+import { APP_RELEASE } from './release'
 
 function resultStateForUi(session: TrainingSession, state: TrainingMachineState): TrainingMachineState {
   return state.result && (state.phase === 'SUCCESS' || state.phase === 'FAILED')
@@ -248,7 +249,7 @@ export default function App() {
       </header>
       <main>
         <section className="school-introduction">
-          <div><p className="eyebrow">從第一次起飛開始</p><h1>小幅操作，一步步學會飛。</h1></div>
+          <div><p className="eyebrow">從第一次起飛開始 · <span data-testid="app-release">版本 {APP_RELEASE}</span></p><h1>小幅操作，一步步學會飛。</h1></div>
           <p>先看示範，理解四軸，再練習起飛。Acro 模式搖桿回中會停止旋轉，機體不會自動回平或煞停。</p>
         </section>
         <div className="school-toolbar">

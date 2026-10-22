@@ -161,6 +161,7 @@ describe('training progress persistence', () => {
     for (const variant of [
       context({ rulesVersion: 2 }),
       context({ rulesVersion: 3 }),
+      context({ rulesVersion: 4 }),
       context({ mode: 'practice' }),
       context({ presetId: 'standard' }),
       context({ settingsFingerprint: fingerprintTrainingSettings({ rates: 500, camera: 20 }) }),
@@ -195,7 +196,7 @@ describe('training progress persistence', () => {
     storage.setItem(key, JSON.stringify({ schemaVersion: 1, context: context({ inputSource: 'keyboard' }), progress: createDefaultTrainingProgress() }))
     expect(store.load(source).loaded).toBe(false)
     expect(store.load(source).errors.join(' ')).toMatch(/context.*incompatible/i)
-    const invalid = { ...source, rulesVersion: 4 } as unknown as TrainingAttemptContext
+    const invalid = { ...source, rulesVersion: 5 } as unknown as TrainingAttemptContext
     expect(store.recordResult(result({ attemptContext: invalid })).saved).toBe(false)
     expect(storage.getItem(TRAINING_PROGRESS_STORAGE_KEY)).toBeNull()
   })

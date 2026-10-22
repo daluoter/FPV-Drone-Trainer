@@ -512,11 +512,11 @@ export default function FreeFlight({
             <div className="flight-position-hud" role="group" aria-label="飛行位置">
               <div className="flight-altitude"><span>{telemetry?.replay.active ? '回放高度' : '高度'} <small>地面上方</small></span><strong data-testid="flight-altitude">{positionValue(position.altitudeAboveGroundM)}</strong></div>
               <div className="flight-position-coordinates">
-                <span>X 右 <b data-testid="flight-position-right">{positionValue(position.rightM, true)}</b></span>
-                <span>前（−Z） <b data-testid="flight-position-forward">{positionValue(position.forwardM, true)}</b></span>
-                <span>Y 上 <b data-testid="flight-position-up">{positionValue(position.upM, true)}</b></span>
+                <span data-testid="flight-position-x">X 左右 <b data-testid="flight-position-right">{positionValue(position.rightM, true)}</b></span>
+                <span data-testid="flight-position-y">Y 上下 <b data-testid="flight-position-up">{positionValue(position.upM, true)}</b></span>
+                <span>Z 前後 <b data-testid="flight-position-z">{positionValue(position.zM, true)}</b></span>
               </div>
-              <small>相對起飛點 · 固定場地方向 · 單位 m</small>
+              <small>相對起飛點 · −Z 為前方 · 單位 m</small>
             </div>
             {renderingState !== 'ready' && (
               <div className="flight-rendering-error" role="alert" data-testid="flight-rendering-error">

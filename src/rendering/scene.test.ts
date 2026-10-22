@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type * as THREE from 'three'
 
 import { createDefaultDroneConfig, createInitialDroneState } from '../drone'
 
@@ -111,7 +112,18 @@ describe('flight scene reference contract', () => {
       expect(straight?.visible).toBe(true)
       expect(straight?.children).toHaveLength(4)
       expect(scene.getReference('straight-stop')?.positionM).toEqual({ x: 0, y: 3, z: -8 })
-      expect(scene.getReference('straight-stop')?.sizeM).toEqual({ x: 1.3, y: 0.9, z: 1.3 })
+      expect(scene.getReference('straight-stop')?.sizeM).toEqual({ x: 3, y: 3, z: 0.08 })
+      // The displayed opening must match the passage evaluator, including a
+      // vertical green finish ring instead of the former horizontal stop disk.
+      for (const id of ['straight-transit', 'straight-brake', 'straight-stop']) {
+        const ring = scene.scene.getObjectByName(`${id}-ring`) as THREE.Mesh<THREE.RingGeometry>
+        expect(ring.geometry.parameters.innerRadius).toBe(1.5)
+        expect(ring.rotation.x).toBe(0)
+        expect(ring.scale.toArray()).toEqual([1, 1, 1])
+      }
+      const landingPaint = landing?.getObjectByName('landing-zone-paint') as THREE.Mesh<THREE.RingGeometry>
+      expect(landingPaint.geometry.parameters.outerRadius).toBe(1.5)
+      expect(scene.getReference('landing-surface')?.sizeM).toEqual({ x: 3, y: 0, z: 3 })
       expect(landing?.visible).toBe(false)
       expect(takeoff?.visible).toBe(false)
       expect(scene.getReference('turn-entry')?.object.visible).toBe(false)

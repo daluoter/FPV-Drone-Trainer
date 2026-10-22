@@ -95,7 +95,10 @@ function demonstrationInput(
   if (kind === 'straight-line' || kind === 'landing') {
     const state = simulation.getState()
     const up = rotateVectorByQuaternion(state.orientation, { x: 0, y: 1, z: 0 })
-    const targetZ = settings.drone.spawnPositionM.z - (timeSeconds < ROUTE_FORWARD_START_SECONDS ? 0 : LANDING_TARGET_DISTANCE_M)
+    // Continue beyond the last vertical ring so the example actually crosses
+    // its plane, rather than approaching the old stop point asymptotically.
+    const routeDistance = LANDING_TARGET_DISTANCE_M + (kind === 'straight-line' ? 1 : 0)
+    const targetZ = settings.drone.spawnPositionM.z - (timeSeconds < ROUTE_FORWARD_START_SECONDS ? 0 : routeDistance)
     const targetVelocityZ = clamp((targetZ - state.positionM.z) * 0.65, -1.3, 1.3)
     const accelerationZ = clamp((targetVelocityZ - state.velocityMps.z) * 2.4, -1.5, 1.5)
     const targetPitch = Math.atan2(accelerationZ, settings.drone.gravityMps2)
@@ -129,15 +132,15 @@ function cuesFor(kind: TeachingDemonstrationKind): readonly TeachingCue[] {
     { timeSeconds: 3, text: '先在起點上方取得高度，穩住後再向前飛，不會從空中突然開始。' },
     { timeSeconds: ROUTE_FORWARD_START_SECONDS, text: '小幅前傾飛向藍色降落區，保持高度，提早降低前進速度。' },
     { timeSeconds: LANDING_DESCENT_START_SECONDS, text: '對準藍色降落區、先減少側移，再緩慢下降；接地前提早減少下降速度。' },
-    { timeSeconds: 29, text: '平穩接地後保持低油門與水平，連續穩住，再解除解鎖。' },
+    { timeSeconds: 29, text: '在藍色區內接地、沒有墜毀就完成；看到完成結果後，再解除解鎖。' },
   ])
   if (kind === 'straight-line') return freeze([
     { timeSeconds: 0, text: '從地面起飛區開始，先自己建立推力，逐步爬升到起點目標高度。' },
-    { timeSeconds: 5, text: '先在起點穩住高度，確認前方路線與停點，再開始前進。' },
+    { timeSeconds: 5, text: '升到起點高度附近，確認前方藍、金、綠三個圈，再開始前進。' },
     { timeSeconds: ROUTE_FORWARD_START_SECONDS, text: '小幅前傾開始前進，同時用油門維持高度；通過中途圈只是其中一步。' },
-    { timeSeconds: 13.5, text: '進入減速區後反向小幅修正，觀察實際速度下降，避免衝過停點。' },
-    { timeSeconds: 18, text: '回復水平並不會立即煞停；持續觀察速度與位置。' },
-    { timeSeconds: 22, text: '在終點附近連續穩住，完成前進、減速與停點練習；穿過金色圈不等於已完成整課。' },
+    { timeSeconds: 13.5, text: '依序從藍色、金色圈內飛過；這一版先練穿圈，不要求減速比例。' },
+    { timeSeconds: 18, text: '繼續對準綠色終點圈，從圈內飛過；沒有停穩也能完成。' },
+    { timeSeconds: 22, text: '依序穿過藍、金、綠三圈就完成；漏圈可以回到該圈前方重新穿過。' },
   ])
   const axisName = kind === 'roll' ? '橫滾 Roll' : kind === 'pitch' ? '俯仰 Pitch' : '偏航 Yaw'
   return freeze([
@@ -203,7 +206,7 @@ export function createTeachingDemonstration(
   const recording = recorder.endFlight()
   const title = kind === 'takeoff' ? '油門與起飛示範'
     : kind === 'landing' ? '起飛到降落：前往藍色降落區、減速與平穩接地'
-      : kind === 'straight-line' ? '直線與減速停點：前進、煞停與穩住'
+    : kind === 'straight-line' ? '直線穿圈：依序飛過藍、金、綠三圈'
         : kind === 'roll' ? '橫滾 Roll：推桿、回中與反向修正'
       : kind === 'pitch' ? '俯仰 Pitch：推桿、回中與反向修正'
         : '偏航 Yaw：推桿、回中與反向修正'

@@ -42,6 +42,7 @@ describe('training attempt provenance', () => {
       context({ mode: 'practice' }),
       context({ rulesVersion: 2 }),
       context({ rulesVersion: 3 }),
+      context({ rulesVersion: 4 }),
       context({ settingsFingerprint: fingerprintTrainingSettings({ rates: 900 }) }),
     ].map(trainingAttemptContextKey)
     expect(new Set(keys).size).toBe(keys.length)
@@ -52,7 +53,8 @@ describe('training attempt provenance', () => {
     expect(isTrainingAttemptContext(context())).toBe(true)
     expect(isTrainingAttemptContext({ ...context(), rulesVersion: 2 })).toBe(true)
     expect(isTrainingAttemptContext({ ...context(), rulesVersion: 3 })).toBe(true)
-    expect(isTrainingAttemptContext({ ...context(), rulesVersion: 4 })).toBe(false)
+    expect(isTrainingAttemptContext({ ...context(), rulesVersion: 4 })).toBe(true)
+    expect(isTrainingAttemptContext({ ...context(), rulesVersion: 5 })).toBe(false)
     expect(isTrainingAttemptContext({ ...context(), settingsFingerprint: '' })).toBe(false)
     expect(() => trainingAttemptContextKey({ ...context(), inputSource: 'unknown' } as unknown as TrainingAttemptContext)).toThrow()
   })

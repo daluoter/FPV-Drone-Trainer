@@ -14,11 +14,13 @@ export interface PositionReadout {
   readonly forwardM: number | null
   /** Signed world +Y from the supported launch centre of mass. */
   readonly upM: number | null
+  /** Signed world +Z from launch; negative is forward, positive is backward. */
+  readonly zM: number | null
 }
 
 const UNAVAILABLE: PositionReadout = Object.freeze({
   altitudeAboveGroundM: null, verticalClearanceM: null,
-  rightM: null, forwardM: null, upM: null,
+  rightM: null, forwardM: null, upM: null, zM: null,
 })
 
 /**
@@ -47,6 +49,7 @@ export function makePositionReadout(
     rightM: state.positionM.x - launch.x,
     forwardM: launch.z - state.positionM.z,
     upM: state.positionM.y - launch.y,
+    zM: state.positionM.z - launch.z,
   }
   return Object.values(readout).every(Number.isFinite) ? Object.freeze(readout) : UNAVAILABLE
 }

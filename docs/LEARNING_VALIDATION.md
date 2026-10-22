@@ -134,3 +134,26 @@
 瀏覽器產物：`/tmp/fpv-browser-smoke/run-necfarwk/`，含 `report.json`、`console.json`、preview log、`replay-position-hud.png`、`position-hud-375.png` 及既有逐流程截圖。新的錯誤呈現由純 evaluator、machine 與 React 整合測試驗證；未以 UI fixture 宣稱真人已飛完課程。初次嚴格建置抓到測試 fixture 的 TypeScript 推導問題，補上明確回傳型別後建置通過。
 
 本輪程式與文件推送至 `feat/beginner-flight-school`；GitHub Pages 正式站、遠端 CI／UAT 與使用者再次試飛尚未驗證。本紀錄不取代後續集中真人複驗。
+
+## 第三輪回饋：放寬目標與明確 XYZ（2026-10-22）
+
+基準：`4f649f4`；顯示版本 `2026.10.22.1`，新成績規則版本 4。使用者要求暫以能穿圈及降落後未墜毀為主，並確認缺少 HUD 的截圖來自本機開發／預覽。詳見 [本輪回饋](USER_FEEDBACK_2026-10-22.md)。
+
+- L03 依序真實穿過藍／金／綠圈即完成，取消減速、速度／傾角精度及停點時間。自行起飛即可進入路線，斜向起飛不會被隱藏的起點懸停門檻卡住。穿越以線段／平面交點判定，支援快速跨圈、漏圈補飛及保留已過圈進度。
+- L04 指定區半徑改為 1.5 m，實際起飛後在區內由空中接地且未墜毀即完成；取消額外進場、速度、傾角及停留條件。物理撞擊／翻覆墜毀規則不變，區外落地可再起飛。真實求解器測試包含 1.2 m/s 非墜毀接地成功、5 m/s 撞擊墜毀失敗。
+- 圈圈與落點外觀採同一組門檻，綠色終點改為垂直圈。同步示範真的飛過最後圈平面，不只是漸近舊停點；提示及結果建議皆使用新版目標。舊規則 1–3 的紀錄及結果說明保留，不和新版最佳混合。
+- 公開 HUD 明確顯示 X／Y／Z，負 Z 為前；修正字體、圖層及手機 FPS 排版。真實 runtime 測試透過普通 UI Arm 後從 8 m 零油門落下觸發墜毀，驗證 Developer HUD 關閉仍顯示座標；未注入成功或墜毀旗標。
+- 頁面標示版本，提供 [更新／重新建置步驟](DEVELOPMENT.md#confirm-the-updated-local-screen)。尚未取得使用者本機 commit／啟動指令，不能將缺少舊 HUD 唯一歸因於快取、舊分支或 preview；新的版本標記讓此事可核對。
+
+| 最終檢查 | 結果 |
+| --- | --- |
+| `npm test -- --maxWorkers=2` | PASS：48 檔、302 項，26.68 秒。舊的嚴格條件測試改為新版穿圈／非墜毀降落正反例，其他課程與完整回歸持續通過。 |
+| `npm run lint` | PASS，零警告規則。 |
+| `npm run build -- --base=/FPV-Drone-Trainer/` | PASS，含嚴格 TypeScript；entry 1,004.72 kB／gzip 282.91 kB，既知 >500 kB 建議仍存在。 |
+| 正式產物 Chromium smoke | PASS：19 項，Chromium 154.0.8037.57；頁面版本 2026.10.22.1，無 page／console error／資源錯誤。 |
+
+完整回歸先抓到舊課名及「版本 4 尚不支援」的過時斷言；更新為新課名及拒絕未知版本 5，保留規則 1–4 的讀取／隔離測試後通過。另補上無 phase metrics 時仍優先說明明確墜毀原因的正反例，避免把 runtime 提早停止誤解為尚未起飛。
+
+瀏覽器產物：`/tmp/fpv-browser-smoke/run-lvu3e6qp/`。新增真實 UI 選擇自由飛行、Arm、按 R 爬升至 4 m 以上，再放開油門等待物理解算墜毀；`crashed-with-xyz.png` 顯示 CRASHED 與公開高度／X／Y／Z 同時存在，Developer HUD 未開啟，課程進度未新增。另有 `position-hud-375.png`、`replay-position-hud.png`、版本及三種視窗布局的 report、既有流程截圖與 console／preview log。已人工檢視新的墜毀與手機寬度截圖；此為軟體畫面核對，不是新手實際操控驗收。
+
+本輪不包含正式 Pages 發布、遠端 CI 或真人通關認證。使用者可在本機更新至本版本集中複驗；L00 已驗證的知識標記及 L01／L02 行為保留。

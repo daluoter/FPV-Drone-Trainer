@@ -11,6 +11,21 @@ npm run dev
 
 Open the Vite URL shown in the terminal. Phase 8 exposes the Controller Lab handoff, Free Flight screen, four geometric lesson evaluators, fixed-step observer seam, live checkpoints/metrics, field references/path, Mode 2 overlays, and bounded replay. Phase 9 adds terminal-result navigation and an integrated mocked-runtime UI regression. Use Developer keyboard fallback explicitly for a no-hardware smoke check; a calibrated physical controller remains required for RC evidence. The manual owner sequence is tracked in [`VALIDATION.md`](VALIDATION.md).
 
+### Confirm the updated local screen
+
+The current classroom shows **版本 2026.10.22.1** near the page heading. The simulation always shows altitude plus **X 左右／Y 上下／Z 前後**, including after a crash. Negative Z means forward from the supported launch origin. Developer HUD is optional.
+
+If these are absent, stop the old terminal process with Ctrl+C, enter the intended repository, then update the feature branch and start the source server:
+
+```bash
+git fetch origin
+git switch feat/beginner-flight-school
+git pull --ff-only origin feat/beginner-flight-school
+npm run dev
+```
+
+Open the exact URL printed by this new process and reload the page. Vite can choose another port when an older process already occupies its default port. For a production preview, run `npm run build` before `npm run preview`; preview serves the existing `dist` files and does not rebuild them when Git source changes. Keep the repository's chosen base path when testing a Pages build. No local storage clear is required, and the app does not register a service worker.
+
 ## Required checks
 
 Run these before committing a phase:

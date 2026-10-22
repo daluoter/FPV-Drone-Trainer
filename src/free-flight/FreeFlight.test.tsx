@@ -10,21 +10,21 @@ import type { FlightRuntime, FlightRuntimeOptions } from '../runtime'
 import { createTrainingMachineState } from '../training/machine'
 import type { TrainingMachineState, TrainingResult } from '../training/types'
 
-const frames = vi.hoisted(() => ({ next: null as ((time: number) => void) | null, runtime: null as FlightRuntime | null }))
+const frames = vi.hoisted(() => ({ now: 0, next: null as ((time: number) => void) | null, runtime: null as FlightRuntime | null }))
 vi.mock('../runtime', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../runtime')>()
   return { ...actual, FlightRuntime: class extends actual.FlightRuntime {
     constructor(options: FlightRuntimeOptions) {
-      super({ ...options, scheduleFrame: (callback) => { frames.next = callback; return 1 }, cancelFrame: () => { frames.next = null } })
+      super({ ...options, now: () => frames.now, scheduleFrame: (callback) => { frames.next = callback; return 1 }, cancelFrame: () => { frames.next = null } })
       frames.runtime = this
     }
   } }
 })
 
-beforeEach(() => { frames.next = null; frames.runtime = null })
+beforeEach(() => { frames.now = 0; frames.next = null; frames.runtime = null })
 
 function frame(time: number): void {
-  act(() => { const callback = frames.next; frames.next = null; callback?.(time) })
+  act(() => { frames.now = time; const callback = frames.next; frames.next = null; callback?.(time) })
 }
 
 // Keep the real runtime, scene and arm gates; only replace the unavailable GPU.
@@ -175,13 +175,18 @@ describe('Free Flight native navigation confirmation', () => {
     const hud = screen.getByRole('group', { name: '飛行位置' })
     expect(within(hud).getByTestId('flight-altitude')).toHaveTextContent('0.0 m')
     expect(within(hud).getByTestId('flight-position-right')).toHaveTextContent('0.0 m')
-    expect(within(hud).getByTestId('flight-position-forward')).toHaveTextContent('0.0 m')
+    expect(within(hud).getByTestId('flight-position-z')).toHaveTextContent('0.0 m')
+    expect(within(hud).getByTestId('flight-position-x')).toHaveTextContent('X 左右')
+    expect(within(hud).getByTestId('flight-position-y')).toHaveTextContent('Y 上下')
+    expect(hud).toHaveTextContent('Z 前後')
     fireEvent.click(screen.getByRole('button', { name: 'L03 直線示範' }))
     fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
     fireEvent.change(screen.getByRole('slider'), { target: { value: frames.runtime!.getReplayPlayback()!.getState().durationSeconds } })
     expect(within(hud).getByText('回放高度')).toBeInTheDocument()
     expect(within(hud).getByTestId('flight-altitude')).toHaveTextContent('3.0 m')
-    expect(within(hud).getByTestId('flight-position-forward')).toHaveTextContent('+8.0 m')
+    const finalZ = Number.parseFloat(within(hud).getByTestId('flight-position-z').textContent!)
+    expect(finalZ).toBeLessThanOrEqual(-8)
+    expect(finalZ).toBeGreaterThan(-10)
     expect(within(hud).getByTestId('flight-position-up')).toHaveTextContent('+3.0 m')
     const paused = hud.textContent
     frame(200)
@@ -189,7 +194,28 @@ describe('Free Flight native navigation confirmation', () => {
     expect(hud.textContent).toBe(paused)
     fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
     expect(within(hud).getByTestId('flight-altitude')).toHaveTextContent('0.0 m')
-    expect(within(hud).getByTestId('flight-position-forward')).toHaveTextContent('0.0 m')
+    expect(within(hud).getByTestId('flight-position-z')).toHaveTextContent('0.0 m')
+  })
+
+  it('keeps altitude and explicit XYZ values visible after an actual ground-impact crash', () => {
+    const defaults = createDefaultTuningSettings()
+    const settings = { ...defaults, drone: { ...defaults.drone,
+      ground: { ...defaults.drone.ground, heightM: 10 }, spawnPositionM: { x: 2, y: 18, z: -3 } } }
+    render(<FreeFlight poller={createBrowserGamepadPoller()} profile={null} settings={settings} />)
+    expect(screen.getByRole('checkbox', { name: 'Developer HUD' })).not.toBeChecked()
+    fireEvent.change(screen.getByLabelText('控制方式'), { target: { value: 'keyboard' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Arm$/ }))
+    // No throttle: the real fixed-step simulation falls from 8 m and latches a crash.
+    for (let index = 0; index <= 120; index++) frame(index * 1_000 / 60)
+    expect(frames.runtime!.getTelemetry().state.crashed).toBe(true)
+    expect(screen.getByText('CRASHED / reset required before re-arming')).toBeInTheDocument()
+    const hud = screen.getByRole('group', { name: '飛行位置' })
+    expect(hud).toBeVisible()
+    expect(within(hud).getByTestId('flight-altitude')).toHaveTextContent('0.0 m')
+    expect(within(hud).getByTestId('flight-position-x')).toHaveTextContent('X 左右 0.0 m')
+    expect(within(hud).getByTestId('flight-position-y')).toHaveTextContent('Y 上下 0.0 m')
+    expect(hud).toHaveTextContent('Z 前後 0.0 m')
+    expect(within(hud).getByTestId('flight-position-z')).toHaveTextContent('0.0 m')
   })
 
   it('keeps the original recovery cause on the viewport until a valid lesson checkpoint resumes', () => {
