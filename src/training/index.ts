@@ -14,3 +14,4 @@ export * from './takeoff'
 
 export * from './landing'
 export * from './straightLine'
+export * from './directionControl'

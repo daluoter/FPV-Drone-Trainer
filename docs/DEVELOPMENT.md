@@ -13,7 +13,7 @@ Open the Vite URL shown in the terminal. Phase 8 exposes the Controller Lab hand
 
 ### Confirm the updated local screen
 
-The current classroom shows **版本 2026.10.22.1** near the page heading. The simulation always shows altitude plus **X 左右／Y 上下／Z 前後**, including after a crash. Negative Z means forward from the supported launch origin. Developer HUD is optional.
+The current classroom shows **版本 2026.10.22.2** near the page heading and offers **L05 側移與方向感** after landing. The simulation always shows altitude plus **X 左右／Y 上下／Z 前後**, including after a crash. Negative Z means forward from the supported launch origin. L05's target-direction guidance instead follows the current drone heading. Developer HUD is optional.
 
 If these are absent, stop the old terminal process with Ctrl+C, enter the intended repository, then update the feature branch and start the source server:
 
@@ -48,8 +48,10 @@ A Python Playwright smoke check opens that production build in Chromium and
 checks project-path assets, an initialized WebGL2 canvas, explicit keyboard
 arm/disarm, countdown and waiting for explicit arm, keyboard reset, training stop,
 practice/challenge progress isolation, L00 knowledge completion and reload,
-synchronized L01/L03/L04 demo controls without progress writes, airborne waiting
-positions, an inline L00 playback exit, session-bound result marker seek with progress isolation, fullscreen recovery, camera controls, and logo navigation. This workflow does
+synchronized L01/L03/L04/L05 demo controls without progress writes, L05 seek/pause
+and lesson reload, L03/L04/L05 ground starts, an inline L00 playback exit,
+session-bound result marker seek with progress isolation, fullscreen recovery,
+camera controls, and logo navigation. This workflow does
 not deploy the site; production publishing remains a separate manual workflow.
 
 To reproduce the browser check after the required npm gates:

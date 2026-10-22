@@ -95,4 +95,29 @@ describe('FlightRenderer lifecycle and failure contract', () => {
     expect(rendererStub.render).toHaveBeenCalledOnce()
     renderer.dispose()
   })
+
+  it('retains the active L05 step across a disarmed scene reconfiguration', () => {
+    const rendererStub = createRendererStub()
+    const renderer = new FlightRenderer(document.createElement('canvas'), { rendererFactory: () => rendererStub })
+    try {
+      renderer.setLessonTarget('direction-control')
+      renderer.setDirectionTarget('direction-yaw')
+      const previous = renderer.flightScene
+      const disposePrevious = vi.spyOn(previous, 'dispose')
+      renderer.reconfigureScene({ ...DEFAULT_DRONE_CONFIG,
+        ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 20, z: -3 } })
+      const group = renderer.scene.getObjectByName('direction-control-targets')!
+      expect(group.visible).toBe(true)
+      expect(group.children.filter((marker) => marker.visible).map((marker) => marker.name)).toEqual(['direction-yaw-zone'])
+      expect(renderer.flightScene.getReference('direction-yaw')?.positionM).toEqual({ x: 2, y: 8, z: -3 })
+      expect(renderer.renderer).toBe(rendererStub)
+      expect(disposePrevious).toHaveBeenCalledOnce()
+      renderer.setDirectionTarget('direction-turned-right')
+      expect(group.children.filter((marker) => marker.visible).map((marker) => marker.name)).toEqual(['direction-turned-right-zone'])
+      renderer.setDirectionTarget(null)
+      expect(group.children.every((marker) => !marker.visible)).toBe(true)
+    } finally {
+      renderer.dispose()
+    }
+  })
 })

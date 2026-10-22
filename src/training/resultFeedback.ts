@@ -1,4 +1,4 @@
-import { trainingHint } from './feedback'
+import { directionControlTargetLabel, trainingHint } from './feedback'
 import { LANDING_LIFTOFF_HEIGHT_M, LANDING_ZONE_RADIUS_M } from './landing'
 import { TAKEOFF_SETTLED_DWELL_SECONDS } from './takeoff'
 import type { TrainingResult } from './types'
@@ -65,6 +65,67 @@ function scopeNote(result: TrainingResult): string {
   return isLegacyRouteResult(result)
     ? `本次為舊規則 ${result.attemptContext.rulesVersion} 的紀錄，保留當時條件說明。${mode}`
     : mode
+}
+
+function directionControlResultFeedback(result: TrainingResult, scope: string): TrainingResultFeedback | null {
+  if (result.lessonId !== 'direction-control') return null
+  if (result.outcome !== 'SUCCESS' && /墜毀|撞擊|crash|impact/iu.test(result.message ?? '')) return {
+    observedStrength: null,
+    observedGap: '本次發生墜毀，方向練習尚未完成。',
+    nextPractice: '先按 Reset 重設，再自行起飛；用小量操作前往目前亮起的目標，接近地面時提早控制下降。',
+    scopeNote: scope,
+  }
+  if (!Number.isFinite(result.sampleCount) || result.sampleCount <= 0) return null
+  if (result.outcome === 'SUCCESS') return {
+    observedStrength: '本次已完成左右、前後移動、實際偏航換向，以及新朝向下的移動目標。',
+    observedGap: null,
+    nextPractice: '以相同條件再練一次，先辨認目標位於目前機頭的哪一側，再小量操作移動。',
+    scopeNote: scope,
+  }
+
+  const metrics = result.metrics
+  const phase = Number.isInteger(metrics.directionPhase) && metrics.directionPhase >= 0 && metrics.directionPhase <= 9
+    ? metrics.directionPhase : null
+  const passed = Number.isInteger(metrics.directionTargetsCompleted) && metrics.directionTargetsCompleted >= 0 && metrics.directionTargetsCompleted <= 7
+    ? metrics.directionTargetsCompleted : null
+  const index = Number.isInteger(metrics.directionTargetIndex) && metrics.directionTargetIndex >= 0 && metrics.directionTargetIndex < 7
+    ? metrics.directionTargetIndex : phase !== null && phase >= 2 && phase <= 8 ? phase - 2 : null
+  const strength = passed !== null && passed > 0
+    ? `本次已依序完成 ${passed} / 7 個方向目標。`
+    : phase !== null && phase >= 2 ? '本次已觀察到從地面自行起飛。'
+      : null
+  if (phase !== null && phase <= 1) return {
+    observedStrength: strength,
+    observedGap: '本次尚未完成從地面自行起飛。',
+    nextPractice: '從起飛區自行加油門離地，再前往右側亮起的目標；不需要先懸停。',
+    scopeNote: scope,
+  }
+  if (index === 4) {
+    const change = metrics.headingChangeDegrees
+    const error = metrics.headingErrorDegrees
+    const observed = [
+      Number.isFinite(change) ? `已轉 ${change.toFixed(0)}°` : null,
+      Number.isFinite(error) ? `距新朝向 ${error.toFixed(0)}°` : null,
+    ].filter(Boolean).join('、')
+    return {
+      observedStrength: strength,
+      observedGap: `本次尚未完成實際偏航換向${observed ? `；結束時${observed}` : ''}。`,
+      nextPractice: '靠近換向目標區，用 Yaw 向右轉動機頭約 90°，看到下一目標亮起後，再依新機頭方向移動；單純側移不能代替換向。',
+      scopeNote: scope,
+    }
+  }
+  if (index !== null) return {
+    observedStrength: strength,
+    observedGap: `本次尚未完成「${directionControlTargetLabel(index)}」目標。${Number.isFinite(metrics.targetDistanceM) ? `結束時距該目標 ${metrics.targetDistanceM.toFixed(1)} m。` : ''}`,
+    nextPractice: `${index >= 5 ? '以換向後的新機頭方向為準' : '機頭大致保持原朝向'}，小量操作進入目前亮起的目標區；偏離時可繼續補飛，不需重做已完成的目標。`,
+    scopeNote: scope,
+  }
+  return {
+    observedStrength: null,
+    observedGap: '本次方向練習尚未完成；分段資料不足，無法判定卡在哪個目標。',
+    nextPractice: '重試課程，確認目前亮起的目標與機頭方向，再依序完成移動及換向。',
+    scopeNote: scope,
+  }
 }
 
 function relaxedRouteFeedback(result: TrainingResult, scope: string): TrainingResultFeedback | null {
@@ -156,6 +217,8 @@ function phaseProgress(result: TrainingResult): { observedGap: string; nextPract
 /** Final-sample observations and checkpoint facts, never inferred causes or a claim about the whole flight. */
 export function summarizeTrainingResult(result: TrainingResult): TrainingResultFeedback {
   const scope = scopeNote(result)
+  const direction = directionControlResultFeedback(result, scope)
+  if (direction) return direction
   if (!Number.isFinite(result.sampleCount) || result.sampleCount <= 0) {
     return {
       observedStrength: null,

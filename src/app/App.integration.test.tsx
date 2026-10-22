@@ -1,9 +1,12 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { createInitialDroneState, DEFAULT_DRONE_CONFIG } from '../drone'
+import { createInitialDroneState, DEFAULT_DRONE_CONFIG, droneGroundSupport } from '../drone'
 import type { FlightRuntimeFixedStepSample, FlightRuntimeTelemetry } from '../runtime'
 import { createHoverSuccessFixture } from '../training'
+import { createTeachingDemonstration } from '../training/demonstrations'
+import { createTuningPreset } from '../tuning'
+import { GROUND_CONTACT_SLOP_M } from '../simulation/dynamics'
 
 import type { TrainingSample } from '../training/types'
 import App from './App'
@@ -284,6 +287,49 @@ describe('integrated training/runtime UI boundaries', () => {
   beforeEach(() => {
     window.localStorage.clear()
     runtimeHarness.instances.length = 0
+  })
+
+  it('records an ordered L05 result once, offers L06 and restores its saved progress after reload', () => {
+    const { unmount } = render(<App />)
+    const training = trainingSection()
+    const canvas = screen.getByLabelText('Free Flight 3D scene')
+    fireEvent.change(within(training).getByLabelText('選擇課程'), { target: { value: 'direction-control' } })
+    fireEvent.change(screen.getByLabelText('控制方式'), { target: { value: 'keyboard' } })
+    fireEvent.click(within(training).getByRole('button', { name: '開始課程' }))
+    const runtime = runtimeHarness.instances[0]!
+    act(() => emitCountdown(runtime))
+    fireEvent.click(screen.getByRole('button', { name: /^Arm$/ }))
+    // Feed a physics-generated recording through the real App/session/store
+    // boundary. The runtime/renderer are mocked here; this is UI evidence.
+    const settings = createTuningPreset('beginner')
+    const demo = createTeachingDemonstration(settings, 'direction-control')
+    const initial = createInitialDroneState(settings.drone)
+    act(() => {
+      for (const pose of demo.recording.samples) {
+        const timestampSeconds = pose.timestampSeconds + 3
+        const supportOffsetM = droneGroundSupport(settings.drone, pose.orientation).supportOffsetM
+        runtime.emitSample({
+          timestampSeconds, armed: true, normalizedInput: pose.normalizedInput,
+          state: { ...initial, positionM: pose.positionM, velocityMps: pose.velocityMps,
+            orientation: pose.orientation, angularVelocityBodyRadPerSec: pose.angularVelocityBodyRadPerSec,
+            timeSeconds: timestampSeconds, stepIndex: Math.round(pose.timestampSeconds * 240) },
+          groundContact: { heightM: settings.drone.ground.heightM, supportOffsetM,
+            touching: pose.positionM.y - supportOffsetM <= settings.drone.ground.heightM + GROUND_CONTACT_SLOP_M + 1e-5 },
+        })
+      }
+    })
+    expect(within(training).getByText('引導目標完成！')).toBeInTheDocument()
+    expect(within(training).getByText(/9 \/ 9 個步驟完成/)).toBeInTheDocument()
+    expect(persistedAttempts('direction-control')).toBe(1)
+    expect(persistedAttempts('landing')).toBe(0)
+    expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
+    expect(within(training).getByRole('button', { name: /^下一課：L06/ })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: /^Disarm$/ }))
+    unmount()
+    render(<App />)
+    expect(within(trainingSection()).getByLabelText('選擇課程')).toHaveValue('direction-control')
+    expect(within(trainingSection()).getByText(/本次條件已練 1 次/)).toBeInTheDocument()
+    expect(persistedAttempts('direction-control')).toBe(1)
   })
 
   it('clears a pending lesson when keyboard/runtime reset rewinds its clock', () => {

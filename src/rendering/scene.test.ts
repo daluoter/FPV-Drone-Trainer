@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type * as THREE from 'three'
 
 import { createDefaultDroneConfig, createInitialDroneState } from '../drone'
+import { rotateVectorByQuaternion } from '../math/quaternion'
 
 import { createFlightScene } from './scene'
 
@@ -165,6 +166,13 @@ describe('flight scene reference contract', () => {
         'straight-transit',
         'straight-brake',
         'straight-stop',
+        'direction-right',
+        'direction-left',
+        'direction-forward',
+        'direction-back',
+        'direction-yaw',
+        'direction-turned-forward',
+        'direction-turned-right',
       ])
       expect(scene.getReference('hover-zone')?.kind).toBe('zone')
       expect(scene.getReference('hover-zone')?.positionM).toEqual({ x: 0, y: 3, z: 0 })
@@ -195,6 +203,69 @@ describe('flight scene reference contract', () => {
       scene.setReplayVisible(false)
       expect(scene.ghost.visible).toBe(false)
       expect(scene.scene.getObjectByName('replay-path')?.visible).toBe(false)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('selects one L05 goal at a time and keeps colocated movement and yaw steps distinct', () => {
+    const scene = createFlightScene()
+    const direction = scene.scene.getObjectByName('direction-control-targets')!
+    const before = scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM: { ...positionM }, sizeM }))
+    const droneBefore = scene.drone.position.toArray()
+    const visibleGoals = () => direction.children.filter((marker) => marker.visible).map((marker) => marker.name)
+    try {
+      expect(direction.visible).toBe(false)
+      scene.setLessonTarget('direction-control')
+      expect(direction.visible).toBe(true)
+      expect(scene.getReference('hover-zone')?.object.visible).toBe(false)
+      expect(scene.scene.getObjectByName('landing-target')?.visible).toBe(false)
+      expect(scene.scene.getObjectByName('straight-line-targets')?.visible).toBe(false)
+      scene.setDirectionTarget('direction-left')
+      expect(visibleGoals()).toEqual(['direction-left-zone'])
+      scene.setDirectionTarget('direction-yaw')
+      expect(visibleGoals()).toEqual(['direction-yaw-zone'])
+      expect(scene.getReference('direction-left')?.positionM).toEqual(scene.getReference('direction-yaw')?.positionM)
+      expect(scene.scene.getObjectByName('direction-yaw-turn-arc')).toBeDefined()
+      const heading = scene.scene.getObjectByName('direction-yaw-heading')!
+      // ArrowHelper's local +Y axis is the instructional heading direction.
+      const headingDirection = rotateVectorByQuaternion(heading.quaternion, { x: 0, y: 1, z: 0 })
+      expect(headingDirection.x).toBeCloseTo(1)
+      expect(headingDirection.y).toBeCloseTo(0)
+      expect(headingDirection.z).toBeCloseTo(0)
+      scene.setDirectionTarget(null)
+      expect(visibleGoals()).toEqual([])
+      scene.setDirectionTarget('unknown')
+      expect(visibleGoals()).toEqual([])
+      scene.setDirectionTarget('direction-right')
+      scene.setLessonTarget('hover')
+      expect(direction.visible).toBe(false)
+      expect(scene.getReference('hover-zone')?.object.visible).toBe(true)
+      expect(scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM, sizeM }))).toEqual(before)
+      expect(scene.drone.position.toArray()).toEqual(droneBefore)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('uses ground-relative L05 spherical guides and a supported launch origin for elevated custom spawns', () => {
+    const defaults = createDefaultDroneConfig()
+    const config = { ...defaults, ground: { ...defaults.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 20, z: -3 } }
+    const before = JSON.stringify(config)
+    const scene = createFlightScene(config)
+    try {
+      expect(scene.getReference('direction-right')?.positionM).toEqual({ x: 10, y: 8, z: -3 })
+      expect(scene.getReference('direction-forward')?.positionM).toEqual({ x: 2, y: 8, z: -7 })
+      expect(scene.getReference('direction-turned-right')?.positionM).toEqual({ x: 6, y: 8, z: 1 })
+      for (const reference of scene.sceneReferences.filter((candidate) => candidate.id.startsWith('direction-'))) {
+        expect(reference.sizeM).toEqual({ x: 3, y: 3, z: 3 })
+        expect(reference.object.position.toArray()).toEqual([reference.positionM.x, reference.positionM.y, reference.positionM.z])
+        const ring = scene.scene.getObjectByName(`${reference.id}-outline-0`) as THREE.Mesh<THREE.RingGeometry>
+        expect(ring.geometry.parameters.innerRadius).toBe(1.5)
+        const paint = scene.scene.getObjectByName(`${reference.id}-ground-paint`)!
+        expect(reference.object.position.y + paint.position.y).toBeCloseTo(5.018)
+      }
+      expect(JSON.stringify(config)).toBe(before)
     } finally {
       scene.dispose()
     }

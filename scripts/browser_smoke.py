@@ -104,7 +104,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if response is None or response.status != 200:
                 raise AssertionError("The production entry page did not return HTTP 200.")
             expect(page).to_have_title("FPV Drone Trainer")
-            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.22.1")
+            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.22.2")
             report["release"] = page.get_by_test_id("app-release").inner_text()
 
             asset_urls = page.locator("script[src], link[rel='stylesheet'][href]").evaluate_all(
@@ -175,9 +175,10 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(mode).to_have_value("practice")
             expect(lesson).to_have_value("takeoff")
             expect(lesson.locator("option:checked")).to_contain_text("L01")
-            expect(lesson.locator("option")).to_have_count(7)
+            expect(lesson.locator("option")).to_have_count(8)
             expect(lesson.locator("option[value='landing']")).to_contain_text("L04")
             expect(lesson.locator("option[value='straight-line']")).to_contain_text("L03")
+            expect(lesson.locator("option[value='direction-control']")).to_contain_text("L05")
             progress_before_waiting = training_progress(page)
             training.get_by_role("button", name="開始課程", exact=True).click()
             expect(phase).to_have_text("倒數準備")
@@ -325,7 +326,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
             if training_progress(page) != stored_attempts:
                 raise AssertionError("Changing learning mode modified stored flight results.")
-            checks.append("default practice mode, seven lessons and persisted practice/challenge isolation")
+            checks.append("default practice mode, eight lessons and persisted practice/challenge isolation")
 
             # Answer the actual radios/form. Wrong answers must not unlock the
             # next step; knowledge completion is separate from flight progress.
@@ -401,7 +402,44 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                     raise AssertionError(f"{demo_name} modified flight progress.")
             checks.append("L03/L04 demonstration cue synchronization and progress isolation")
 
-            # Both revised lessons wait on actual supported ground and remain
+            lesson.select_option("direction-control")
+            expect(training.locator(".school-route-guide")).to_contain_text("左右")
+            before_direction_demo = training_progress(page)
+            flight.get_by_role("button", name="L05 方向示範", exact=True).click()
+            expect(arm).to_be_disabled()
+            expect(lesson).to_be_disabled()
+            flight.get_by_role("button", name="Pause", exact=True).click()
+            timeline.press("Home")
+            expect(cue).to_contain_text("從地面自行起飛")
+            expect(altitude).to_have_text("0.0 m")
+            timeline.press("End")
+            expect(cue).to_contain_text("已完成側移、前後移動與換向後方向感")
+            expect(altitude).to_have_text("3.0 m")
+            if float(flight.get_by_test_id("flight-position-z").inner_text().split()[0]) < 3:
+                raise AssertionError("L05 ghost did not complete the body-right move after its heading change.")
+            paused_direction_position = position_hud.inner_text()
+            page.wait_for_timeout(200)
+            if position_hud.inner_text() != paused_direction_position:
+                raise AssertionError("L05 paused position kept advancing.")
+            if screenshot:
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l05-demonstration-fpv.png"))
+                flight.get_by_role("button", name="Chase", exact=True).click()
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l05-demonstration-chase.png"))
+                flight.get_by_role("button", name="FPV", exact=True).click()
+            timeline.press("Home")
+            expect(altitude).to_have_text("0.0 m")
+            flight.get_by_role("button", name="結束示範", exact=True).click()
+            expect(disarm).to_be_disabled()
+            expect(arm).to_be_enabled()
+            if training_progress(page) != before_direction_demo:
+                raise AssertionError("L05 demonstration wrote a flight result.")
+            page.reload(wait_until="networkidle")
+            expect(lesson).to_have_value("direction-control")
+            expect(page.locator("#school-open-intro")).to_have_text("L00 觀念複習 ✓")
+            source.select_option("keyboard")
+            checks.append("L05 recorded direction demo, ghost seek and pause, progress isolation and lesson reload")
+
+            # Ground-based lessons wait on actual supported ground and remain
             # safe after arm at zero throttle while the learner prepares to lift off.
             hud = flight.get_by_role("checkbox", name="Developer HUD", exact=True)
             hud.check()
@@ -409,7 +447,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 has=page.get_by_text("Position m", exact=True)
             ).locator("code")
             report["ground_start_positions"] = {}
-            for lesson_id in ("landing", "straight-line"):
+            for lesson_id in ("landing", "straight-line", "direction-control"):
                 lesson.select_option(lesson_id)
                 training.get_by_role("button", name="開始課程", exact=True).click()
                 coords = [float(value.strip()) for value in position.inner_text().split(",")]
@@ -436,7 +474,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 expect(phase).to_have_text("準備選課")
                 expect(source).to_be_enabled()
             hud.uncheck()
-            checks.append("L03/L04 actual ground start, safe low-throttle arm and visible stage guidance")
+            checks.append("L03/L04/L05 actual ground start, safe low-throttle arm and visible stage guidance")
 
             fullscreen = flight.locator(".school-fullscreen")
             fullscreen.click()

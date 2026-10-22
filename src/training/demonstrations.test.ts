@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import { createInitialDroneState, droneGroundSupport } from '../drone'
-import { quaternionNorm } from '../math/quaternion'
+import { quaternionNorm, rotateVectorByQuaternion } from '../math/quaternion'
 import { ReplayPlayback, type ReplaySample } from '../replay'
 import { createDefaultTuningSettings, type TuningSettings } from '../tuning/config'
 import { createTuningPreset } from '../tuning/presets'
-import { createTeachingDemonstration, teachingCueAt } from './demonstrations'
+import { createTeachingDemonstration, teachingCueAt, teachingTargetAt } from './demonstrations'
 import { DEFAULT_LESSONS } from './lessons'
 import { LANDING_LESSON, landingEvaluator } from './landing'
 import { STRAIGHT_LINE_LESSON, straightLineEvaluator } from './straightLine'
@@ -14,6 +14,7 @@ import { TrainingSession } from './machine'
 import { CURRENT_TRAINING_RULES_VERSION } from './attempt'
 import { createTrainingFieldAnchors } from './field'
 import { GROUND_CONTACT_SLOP_M } from '../simulation/dynamics'
+import { DIRECTION_CONTROL_LESSON } from './directionControl'
 import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample, TrainingSceneReference } from './types'
 
 function at(samples: readonly ReplaySample[], timeSeconds: number): ReplaySample {
@@ -58,6 +59,75 @@ function referencesFor(settings: TuningSettings): readonly TrainingSceneReferenc
 }
 
 describe('bounded simulation teaching recordings', () => {
+  it.each(['beginner', 'standard', 'raised-field'] as const)('flies the complete L05 physical example with %s settings', (preset) => {
+    const defaults = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
+    const settings = preset === 'raised-field' ? {
+      ...defaults, drone: { ...defaults.drone, ground: { ...defaults.drone.ground, heightM: 10 }, spawnPositionM: { x: 6, y: 25, z: -3 } },
+    } : defaults
+    const before = JSON.stringify(settings)
+    const demo = createTeachingDemonstration(settings, 'direction-control')
+    expect(demo.lessonId).toBe('direction-control')
+    expect(demo.recording.samples[0]!.positionM).toEqual(createTrainingFieldAnchors(settings.drone).launch)
+    expect(demo.recording.durationSeconds).toBeGreaterThan(30)
+    expect(demo.recording.durationSeconds).toBeLessThanOrEqual(95)
+    expect(demo.recording.samples.length).toBeLessThanOrEqual(6_000)
+    expect(demo.recording.droppedSamples).toBe(0)
+    expect(Object.isFrozen(demo.cues)).toBe(true)
+    expect(teachingCueAt(demo, demo.recording.durationSeconds)).toContain('已完成側移、前後移動與換向後方向感')
+    expect(demo.cues.at(-1)!.timeSeconds).toBeCloseTo(demo.recording.durationSeconds, 10)
+    expect(demo.cues.every((cue) => cue.timeSeconds <= demo.recording.durationSeconds)).toBe(true)
+    const session = new TrainingSession({
+      lessons: [DIRECTION_CONTROL_LESSON], initialLessonId: 'direction-control', countdownDurationSeconds: 0,
+      sceneReferences: referencesFor(settings),
+    })
+    session.start(0)
+    session.tick(0)
+    for (const pose of demo.recording.samples) {
+      expect(Object.values(pose.normalizedInput!).every(Number.isFinite)).toBe(true)
+      const state = session.consumeSample(geometricSample(settings, pose))
+      expect(state.phase, JSON.stringify({ time: pose.timestampSeconds, result: state.result, evaluation: state.lastEvaluation })).not.toBe('FAILED')
+      if (state.phase === 'SUCCESS') break
+    }
+    expect(session.getState().phase, JSON.stringify(session.getState().lastEvaluation)).toBe('SUCCESS')
+    expect(session.getState().result?.completedCheckpoints).toBe(9)
+    expect(Object.values(session.getState().checkpoints).every((checkpoint) => checkpoint.completed)).toBe(true)
+    const yawCue = demo.cues.find((cue) => cue.targetReferenceId === 'direction-yaw')!
+    const turnedCue = demo.cues.find((cue) => cue.targetReferenceId === 'direction-turned-forward')!
+    const beforeTurn = rotateVectorByQuaternion(at(demo.recording.samples, yawCue.timeSeconds).orientation, { x: 0, y: 0, z: -1 })
+    const afterTurn = rotateVectorByQuaternion(at(demo.recording.samples, turnedCue.timeSeconds).orientation, { x: 0, y: 0, z: -1 })
+    expect(beforeTurn.z).toBeLessThan(-0.95)
+    expect(afterTurn.x).toBeGreaterThan(0.95)
+    expect(JSON.stringify(settings)).toBe(before)
+  })
+
+  it('keeps L05 active targets synchronized with captions, ghost seek, and paused clocks', () => {
+    const demo = createTeachingDemonstration(createTuningPreset('beginner'), 'direction-control')
+    const player = new ReplayPlayback(demo.recording)
+    const yawCue = demo.cues.find((cue) => cue.targetReferenceId === 'direction-yaw')!
+    const finalCue = demo.cues.find((cue) => cue.targetReferenceId === 'direction-turned-right')!
+    expect(teachingTargetAt(demo, 0)).toBe('direction-right')
+    // Chromium serializes a step="any" range's maximum with slightly less precision.
+    expect(teachingCueAt(demo, demo.recording.durationSeconds - 5e-10)).toContain('已完成側移、前後移動與換向後方向感')
+    expect(teachingCueAt(demo, demo.recording.durationSeconds - 0.001)).not.toContain('已完成側移、前後移動與換向後方向感')
+    expect(teachingTargetAt(demo, yawCue.timeSeconds - 5e-10)).toBe('direction-yaw')
+    expect(teachingTargetAt(demo, yawCue.timeSeconds - 0.001)).toBe('direction-back')
+    player.seek(yawCue.timeSeconds + 0.1)
+    expect(teachingTargetAt(demo, player.currentTime)).toBe('direction-yaw')
+    expect(teachingCueAt(demo, player.currentTime)).toContain('偏航')
+    const before = player.getGhostState()
+    player.pause()
+    player.advance(10)
+    expect(player.getGhostState()).toEqual(before)
+    expect(teachingTargetAt(demo, player.currentTime)).toBe('direction-yaw')
+    player.seek(finalCue.timeSeconds + 0.1)
+    expect(teachingTargetAt(demo, player.currentTime)).toBe('direction-turned-right')
+    expect(teachingCueAt(demo, player.currentTime)).toContain('右邊側移')
+    player.setSpeed(0.5)
+    player.play()
+    player.advance(0.4)
+    expect(teachingTargetAt(demo, player.currentTime)).toBe('direction-turned-right')
+  })
+
   it('records finite synchronized poses and normalized input without mutating tuning', () => {
     const settings = createTuningPreset('beginner')
     const before = JSON.stringify(settings)

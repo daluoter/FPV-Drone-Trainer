@@ -8,12 +8,12 @@ function requestFor(lessonId: string): TrainingSetupRequest {
 }
 
 describe('reference-relative training setup', () => {
-  it('starts landing and straight-line on the actual supported ground, independently of the elevated teaching pad', () => {
+  it('starts ground-based lessons on supported ground independently of the elevated teaching pad', () => {
     const references = [
       { id: 'takeoff-pad', kind: 'pad', positionM: { x: 6, y: 5.5, z: -3 } },
       { id: 'training-launch', kind: 'pad', positionM: { x: 6, y: 5.05, z: -3 } },
     ]
-    for (const lessonId of ['landing', 'straight-line']) {
+    for (const lessonId of ['landing', 'straight-line', 'direction-control']) {
       const original = requestFor(lessonId)
       const before = JSON.stringify(original)
       expect(prepareTrainingSetup(original, references)?.setup.spawnPositionM).toEqual({ x: 6, y: 5.05, z: -3 })

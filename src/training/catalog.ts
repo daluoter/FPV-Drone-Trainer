@@ -1,5 +1,6 @@
 import { LANDING_LEARNING_CONTENT } from './landing'
 import { STRAIGHT_LINE_LEARNING_CONTENT } from './straightLine'
+import { DIRECTION_CONTROL_LEARNING_CONTENT } from './directionControl'
 
 export interface LessonLearningContent {
   readonly code: string
@@ -14,6 +15,7 @@ export interface LessonLearningContent {
 const LEARNING_CONTENT: Readonly<Record<string, LessonLearningContent>> = {
   landing: LANDING_LEARNING_CONTENT,
   'straight-line': STRAIGHT_LINE_LEARNING_CONTENT,
+  'direction-control': DIRECTION_CONTROL_LEARNING_CONTENT,
   takeoff: {
     code: 'L01',
     title: '穩定起飛',
@@ -55,7 +57,7 @@ const LEARNING_CONTENT: Readonly<Record<string, LessonLearningContent>> = {
     code: 'L06',
     title: '協調轉彎',
     level: '進階',
-    prerequisiteIds: ['hover'],
+    prerequisiteIds: ['direction-control'],
     objectives: ['依序通過進入、頂點與出口參考。', '讓實際飛行軌跡轉向並維持高度。'],
     steps: [
       '先熟悉路線與出口位置，緩慢接近進入標記。',

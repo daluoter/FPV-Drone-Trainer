@@ -1,5 +1,6 @@
 import { LANDING_LESSON } from './landing'
 import { STRAIGHT_LINE_LESSON } from './straightLine'
+import { DIRECTION_CONTROL_LESSON } from './directionControl'
 import {
   coordinatedTurnEvaluator,
   hoverEvaluator,
@@ -256,6 +257,7 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
   }),
   LANDING_LESSON,
   STRAIGHT_LINE_LESSON,
+  DIRECTION_CONTROL_LESSON,
 ]
 
 export const TRAINING_LESSONS = DEFAULT_LESSONS

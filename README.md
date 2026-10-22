@@ -2,10 +2,11 @@
 
 A browser-based FPV flight school and freestyle trick trainer focused on trustworthy transmitter input, believable Acro / Rate flight, and measurable feedback.
 
-> **Status: beginner-school release 2026.10.22.1.** The Traditional Chinese classroom includes L00 knowledge checks, L01 takeoff, L02 hover, L03 ordered ring passage and L04 takeoff/travel/landing, alongside advanced lessons. Following learner feedback, L03 completes after the blue/gold/green rings; L04 completes on actual non-crashed contact in the enlarged destination. Braking percentages and precision dwell are deferred. Unlimited practice and timed challenges keep separate progress under rules version 4, preserving earlier results. Altitude and explicit X/Y/Z remain visible even after a crash. See [local version/update instructions](docs/DEVELOPMENT.md#confirm-the-updated-local-screen), [learning contracts](docs/LEARNING_CONTRACT.md), and [validation records](docs/LEARNING_VALIDATION.md). Physical-controller and pilot calibration remain separate validation items.
+> **Status: beginner-school release 2026.10.22.2.** The Traditional Chinese classroom adds **L05 lateral movement and orientation** after the user-approved L03 ring passage and L04 landing. L05 starts on actual ground, teaches right/left and forward/back movement, then measured heading change and movement relative to the new heading. Active targets, body-relative direction hints, a physics-generated synchronized demo, results and reloadable progress are included. Unlimited practice and timed challenges keep separate progress under rules version 4, preserving earlier results. Altitude and explicit X/Y/Z remain visible even after a crash. See [local version/update instructions](docs/DEVELOPMENT.md#confirm-the-updated-local-screen), [learning contracts](docs/LEARNING_CONTRACT.md), and [validation records](docs/LEARNING_VALIDATION.md). L05 awaits learner review; physical-controller and pilot calibration remain separate validation items.
 
 ## Implemented
 
+- L05 ground-start lateral movement and orientation lesson, active target zones, heading-relative hints and a synchronized real-physics teaching recording; see [the L05 tryout guide](docs/L05_DIRECTION_CONTROL.md).
 - Always-visible altitude and explicit launch-relative X/Y/Z, using the recorded ghost and original field settings during replay; negative Z means forward. XYZ stays visible after a crash with Developer HUD off.
 - Vite + React + strict TypeScript application scaffold
 - Direct Three.js dependency reserved for the renderer boundary

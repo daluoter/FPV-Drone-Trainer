@@ -131,4 +131,71 @@ describe('beginner-facing training feedback', () => {
     })
     expect(hint).toMatch(/先重試.*倒數結束後再明確解鎖/)
   })
+
+  it('gives body-relative offscreen target directions without interpreting them as fixed XYZ', () => {
+    const goal = trainingObjective('direction-control', { metrics: {
+      directionPhase: 2, directionTargetIndex: 0, targetRightM: 3.2, targetForwardM: -1.1,
+      targetUpM: 0.1, targetDistanceM: 3.4, headingErrorDegrees: 5,
+    } })
+    expect(goal?.title).toContain('向右側移')
+    expect(goal?.detail).toContain('以目前機頭為準')
+    expect(goal?.detail).toContain('右方 3.2 m、後方 1.1 m')
+    expect(goal?.detail).not.toContain('上方')
+    expect(goal?.detail).toContain('不要求停穩')
+    const turned = trainingObjective('direction-control', { metrics: {
+      directionPhase: 8, directionTargetIndex: 6, targetRightM: 2, targetForwardM: -0.8,
+      targetUpM: 0, headingErrorDegrees: 0,
+    } })
+    expect(turned?.title).toContain('換向後向右側移')
+    expect(turned?.detail).toContain('右方 2.0 m、後方 0.8 m')
+    expect(turned?.detail).toContain('XYZ 不會跟著機頭旋轉')
+  })
+
+  it('explains yaw progress separately from sideways movement and retains authoritative blockers', () => {
+    const metrics = { directionPhase: 6, directionTargetIndex: 4, headingChangeDegrees: 20,
+      headingErrorDegrees: 70, targetDistanceM: 0.3 }
+    const goal = trainingObjective('direction-control', { metrics })
+    expect(goal?.title).toContain('向右偏航換向')
+    expect(goal?.detail).toContain('Yaw 改變朝向，Roll 才是側移')
+    expect(goal?.detail).toContain('目前已轉 20 °')
+    expect(goal?.detail).toContain('距新朝向還差約 70 °')
+    const blocker = '缺少換向起始朝向資料，請重試課程。'
+    expect(trainingHint('direction-control', { status: 'continue', metrics, hint: blocker })).toBe(blocker)
+    expect(formatTrainingMetrics(metrics, 'direction-control').map(({ key }) => key))
+      .toEqual(['headingChangeDegrees', 'headingErrorDegrees', 'targetDistanceM'])
+  })
+
+  it('shows actual airborne and yaw-reference blockers before further movement instructions', () => {
+    const grounded = trainingObjective('direction-control', { metrics: {
+      directionPhase: 4, directionTargetIndex: 2, groundTouching: 1, groundClearanceM: 0,
+      targetRightM: 3, targetForwardM: 2, targetUpM: 3,
+    } })
+    expect(grounded?.detail).toContain('目前尚未在空中')
+    expect(grounded?.detail).toContain('目前位置自行加油門起飛')
+    expect(grounded?.detail).toContain('已完成的目標會保留')
+    expect(grounded?.detail).not.toMatch(/Roll|Pitch/)
+    const missingAnchor = trainingObjective('direction-control', { metrics: {
+      directionPhase: 6, directionTargetIndex: 4, groundTouching: 0, groundClearanceM: 3,
+      yawEntryRecorded: 0, targetDistanceM: 0.2, headingChangeDegrees: 0, headingErrorDegrees: 0,
+    } })
+    expect(missingAnchor?.detail).toContain('尚缺換向前的朝向紀錄')
+    expect(missingAnchor?.detail).toContain('請重設課程')
+  })
+
+  it('keeps direction practice goals simple while showing only finite progress and location facts', () => {
+    expect(trainingRouteGuide('direction-control')).toMatch(/地面起飛.*左右側移.*前後移動.*偏航換向.*新朝向/)
+    expect(trainingRouteGuide('direction-control')).toContain('無須停穩')
+    expect(formatTrainingMetrics({ directionPhase: 4, directionTargetsCompleted: 2, targetDistanceM: 3.4,
+      headingErrorDegrees: 8, targetUpM: Number.NaN, contiguousDwellSeconds: 0 }, 'direction-control'))
+      .toEqual([
+        { key: 'directionTargetsCompleted', label: '已完成方向目標', value: '2 / 7' },
+        { key: 'targetDistanceM', label: '距目前目標', value: '3.40 m' },
+        { key: 'headingErrorDegrees', label: '航向偏差', value: '8.0 °' },
+      ])
+    const unknown = trainingObjective('direction-control', { metrics: {
+      directionPhase: 3, targetRightM: Number.NaN, targetForwardM: Infinity, targetUpM: Number.NaN,
+    } })
+    expect(unknown?.detail).not.toMatch(/NaN|Infinity/)
+    expect(unknown?.detail).toContain('方向以目前機頭為準')
+  })
 })

@@ -7,18 +7,20 @@ import { flightSimulationConfigFromTuning, validateTuningSettings, type TuningSe
 import { identifyTuningPreset, type TuningPresetSelection } from '../tuning/presets'
 import { CURRENT_TRAINING_RULES_VERSION, fingerprintTrainingSettings } from './attempt'
 import { createTrainingFieldAnchors, LANDING_TARGET_DISTANCE_M } from './field'
+import { recordDirectionDemonstration } from './directionDemonstration'
 
-export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'roll' | 'pitch' | 'yaw'
+export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'roll' | 'pitch' | 'yaw'
 
 export interface TeachingCue {
   readonly timeSeconds: number
   readonly text: string
+  readonly targetReferenceId?: string
 }
 
 export interface TeachingDemonstration {
   readonly schemaVersion: 1
   readonly kind: TeachingDemonstrationKind
-  readonly lessonId: 'intro' | 'takeoff' | 'landing' | 'straight-line'
+  readonly lessonId: 'intro' | 'takeoff' | 'landing' | 'straight-line' | 'direction-control'
   readonly rulesVersion: typeof CURRENT_TRAINING_RULES_VERSION
   readonly physicsVersion: 1
   readonly presetId: TuningPresetSelection
@@ -162,13 +164,24 @@ export function createTeachingDemonstration(
   kind: TeachingDemonstrationKind,
 ): TeachingDemonstration {
   if (!validateTuningSettings(settings).valid) throw new RangeError('示範設定未通過驗證，請先還原有效設定。')
-  if (!['takeoff', 'landing', 'straight-line', 'roll', 'pitch', 'yaw'].includes(kind)) {
+  if (!['takeoff', 'landing', 'straight-line', 'direction-control', 'roll', 'pitch', 'yaw'].includes(kind)) {
     throw new RangeError('不支援此示範種類。')
   }
   const simulation = new FlightSimulation(flightSimulationConfigFromTuning(settings))
   const maximumThrust = settings.drone.motors.reduce((sum, motor) => sum + motor.maxThrustN, 0)
   if (settings.drone.massKg * settings.drone.gravityMps2 / maximumThrust >= 0.8) {
     throw new RangeError('目前推力不足以完成穩定示範，請檢查機體設定。')
+  }
+  if (kind === 'direction-control') {
+    const { recording, cues } = recordDirectionDemonstration(simulation, settings, stickForRate, collectiveThrottle)
+    return Object.freeze({
+      schemaVersion: 1, kind, lessonId: 'direction-control',
+      rulesVersion: CURRENT_TRAINING_RULES_VERSION, physicsVersion: 1,
+      presetId: identifyTuningPreset(settings), settingsFingerprint: fingerprintTrainingSettings(settings),
+      title: 'L05 側移與方向感：左右、前後、換向後再移動',
+      description: '模擬示範，尚待真人飛手驗證。畫面、搖桿、字幕與目標共用同一時間軸；示範不會計入通關。',
+      source: 'simulated', recording, cues,
+    })
   }
   // The renderer's takeoff-pad anchor is the geometry-clamped initial COM,
   // including nonzero ground or a configured spawn below the support surface.
@@ -226,13 +239,27 @@ export function createTeachingDemonstration(
   })
 }
 
+// Native range values can round a retained frame's timestamp by a few ULPs.
+const TEACHING_CLOCK_TOLERANCE_SECONDS = 1e-9
+
 /** The UI passes the playback clock's relative position, including seek/slow motion. */
 export function teachingCueAt(demonstration: TeachingDemonstration, timeSeconds: number): string {
   const time = Number.isFinite(timeSeconds) ? Math.max(0, timeSeconds) : 0
   let cue = demonstration.cues[0]?.text ?? demonstration.description
   for (const candidate of demonstration.cues) {
-    if (candidate.timeSeconds > time) break
+    if (candidate.timeSeconds > time + TEACHING_CLOCK_TOLERANCE_SECONDS) break
     cue = candidate.text
   }
   return cue
+}
+
+/** Scene target reads the same playback time as captions, including paused seek. */
+export function teachingTargetAt(demonstration: TeachingDemonstration, timeSeconds: number): string | null {
+  const time = Number.isFinite(timeSeconds) ? Math.max(0, timeSeconds) : 0
+  let target: string | null = null
+  for (const cue of demonstration.cues) {
+    if (cue.timeSeconds > time + TEACHING_CLOCK_TOLERANCE_SECONDS) break
+    if (cue.targetReferenceId !== undefined) target = cue.targetReferenceId
+  }
+  return target
 }

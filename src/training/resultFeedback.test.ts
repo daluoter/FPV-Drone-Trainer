@@ -117,4 +117,48 @@ describe('observed result coaching', () => {
     expect(historicalLanding.observedGap).toContain('接地前下降速度')
     expect(historicalLanding.observedGap).toContain('0.80 m/s')
   })
+
+  it('uses observed L05 progress to name the next unfinished direction goal', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'direction-control', attemptContext: currentContext,
+      completedCheckpoints: 4, totalCheckpoints: 9,
+      metrics: { directionPhase: 4, directionTargetIndex: 2, directionTargetsCompleted: 2,
+        targetDistanceM: 3.2, horizontalSpeedMps: 5, contiguousDwellSeconds: 0 } })
+    expect(feedback.observedStrength).toContain('2 / 7 個方向目標')
+    expect(feedback.observedGap).toContain('「向前移動」')
+    expect(feedback.observedGap).toContain('3.2 m')
+    expect(feedback.nextPractice).toContain('不需重做已完成的目標')
+    expect(feedback.nextPractice).not.toMatch(/0.35|速度過快|連續.*秒/)
+  })
+
+  it('distinguishes missing L05 yaw from moving without claiming completion from input', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'direction-control', attemptContext: currentContext,
+      metrics: { directionPhase: 6, directionTargetIndex: 4, directionTargetsCompleted: 4,
+        headingChangeDegrees: 10, headingErrorDegrees: 80 } })
+    expect(feedback.observedGap).toContain('尚未完成實際偏航換向')
+    expect(feedback.observedGap).toContain('已轉 10°')
+    expect(feedback.observedGap).toContain('距新朝向 80°')
+    expect(feedback.nextPractice).toContain('單純側移不能代替換向')
+  })
+
+  it('does not misclassify an explicit L05 crash or missing progress as failure to take off', () => {
+    const crashed = summarizeTrainingResult({ ...result, lessonId: 'direction-control', attemptContext: currentContext,
+      sampleCount: 0, message: 'Ground impact latched a crash; reset required.', metrics: {} })
+    expect(crashed.observedGap).toContain('發生墜毀')
+    expect(crashed.nextPractice).toContain('Reset')
+    expect(crashed.observedGap).not.toContain('尚未完成從地面')
+    const missing = summarizeTrainingResult({ ...result, lessonId: 'direction-control', metrics: {} })
+    expect(missing.observedGap).toContain('分段資料不足')
+    expect(missing.observedStrength).toBeNull()
+    expect(missing.observedGap).not.toContain('尚未完成從地面')
+  })
+
+  it('reports L05 completion without adding speed or dwell requirements or mastery', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'direction-control', attemptContext: currentContext,
+      outcome: 'SUCCESS', completedCheckpoints: 9, totalCheckpoints: 9,
+      metrics: { directionPhase: 9, directionTargetsCompleted: 7, horizontalSpeedMps: 6, contiguousDwellSeconds: 0 } })
+    expect(feedback.observedStrength).toContain('實際偏航換向')
+    expect(feedback.observedGap).toBeNull()
+    expect(feedback.nextPractice).toContain('目前機頭的哪一側')
+    expect(feedback.scopeNote).toContain('不代表已熟練')
+  })
 })

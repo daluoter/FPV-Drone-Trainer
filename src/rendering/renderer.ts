@@ -58,6 +58,7 @@ export class FlightRenderer {
   public readonly canvas: HTMLCanvasElement
   private currentFlightScene: FlightScene
   private lessonTarget: string | null = null
+  private directionTarget: string | null = null
   public get flightScene(): FlightScene { return this.currentFlightScene }
   public readonly cameraRig: FlightCameraRig
   public readonly renderer: THREE.WebGLRenderer
@@ -121,12 +122,20 @@ export class FlightRenderer {
     this.flightScene.setLessonTarget(lessonId)
   }
 
+  /** Advance a presentation-only L05 guide without altering live flight. */
+  public setDirectionTarget(targetId: string | null): void {
+    if (this.disposed) return
+    this.directionTarget = targetId
+    this.flightScene.setDirectionTarget(targetId)
+  }
+
   /** Rebuild anchors only after the owner has explicitly reset and disarmed. */
   public reconfigureScene(config: DroneConfig): void {
     if (this.disposed) return
     const previous = this.currentFlightScene
     this.currentFlightScene = createFlightScene(config)
     this.currentFlightScene.setLessonTarget(this.lessonTarget)
+    this.currentFlightScene.setDirectionTarget(this.directionTarget)
     previous.dispose()
   }
 

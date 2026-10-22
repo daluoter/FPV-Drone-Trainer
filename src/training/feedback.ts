@@ -28,6 +28,9 @@ const METRICS: Readonly<Record<string, MetricDefinition>> = {
   landingPositionErrorM: { label: '距降落區中心', unit: 'm', digits: 2 },
   landingRouteErrorM: { label: '偏離前往路線', unit: 'm', digits: 2 },
   groundTouching: { label: '地面接觸', unit: '', digits: 0 },
+  groundClearanceM: { label: '支撐點離地', unit: 'm', digits: 2 },
+  directionTargetsCompleted: { label: '已完成方向目標', unit: '/ 7', digits: 0 },
+  targetDistanceM: { label: '距目前目標', unit: 'm', digits: 2 },
   gatesPassed: { label: '已通過圓環', unit: '/ 3', digits: 0 },
   nextGateDistanceM: { label: '距下一個圓環', unit: 'm', digits: 2 },
   nextGateErrorM: { label: '對準圓環偏差', unit: 'm', digits: 2 },
@@ -81,6 +84,11 @@ const LESSON_METRICS: Readonly<Record<string, readonly string[]>> = {
 }
 
 function metricPriorities(metrics: Readonly<Record<string, number>>, lessonId: string | null): readonly string[] {
+  if (lessonId === 'direction-control') {
+    if (metrics.directionPhase <= 1) return ['groundClearanceM', 'altitudeM', 'directionTargetsCompleted']
+    if (metrics.directionPhase === 6) return ['headingChangeDegrees', 'headingErrorDegrees', 'targetDistanceM']
+    return ['directionTargetsCompleted', 'targetDistanceM', 'headingErrorDegrees']
+  }
   if (lessonId === 'landing') {
     return metrics.landingPhase <= 1
       ? ['landingHeightM', 'launchDistanceM', 'groundTouching']
@@ -154,6 +162,7 @@ const LESSON_HINTS: Readonly<Record<string, string>> = {
   takeoff: '緩推油門，留在起飛區上方；接近目標高度時改用小量修正。',
   landing: `先從地面起飛，再前往正前方 ${LANDING_ZONE_DISTANCE_M} m 的藍色降落區；在區內接地且沒有墜毀即可完成。`,
   'straight-line': '先自行起飛，再依序穿過藍色、金色與綠色三個圓環；穿過綠色終點環即可完成。',
+  'direction-control': '從地面自行起飛，依亮起目標練左右、前後移動，再向右偏航換向；方向提示以目前機頭為準。',
   hover: '先減少水平移動，再用小量油門修正高度，避免連續大幅補桿。',
   'coordinated-turn': '先對準入口，再沿標示航線轉彎，同時留意高度。',
   'split-s': '先確認進入高度，再依序完成倒置、下降半圈與恢復正向。',
@@ -170,12 +179,80 @@ function fact(metrics: Readonly<Record<string, number>>, key: string, unit: stri
   return Number.isFinite(value) ? `${value.toFixed(digits)} ${unit}` : null
 }
 
+const DIRECTION_TARGET_LABELS = ['向右側移', '向左側移', '向前移動', '向後移動', '向右偏航換向', '換向後向前移動', '換向後向右側移'] as const
+
+/** Shared teaching names; the evaluator remains authoritative about progress. */
+export function directionControlTargetLabel(index: number): string {
+  return Number.isInteger(index) && index >= 0 && index < DIRECTION_TARGET_LABELS.length
+    ? DIRECTION_TARGET_LABELS[index] : '目前方向目標'
+}
+
+/** At most two useful body-relative directions, never inferred from fixed XYZ. */
+function directionTargetLocation(metrics: Readonly<Record<string, number>>): string {
+  const offsets = [
+    { key: 'targetRightM', positive: '右方', negative: '左方' },
+    { key: 'targetForwardM', positive: '前方', negative: '後方' },
+    { key: 'targetUpM', positive: '上方', negative: '下方' },
+  ].flatMap(({ key, positive, negative }) => {
+    const value = metrics[key]
+    return Number.isFinite(value) && Math.abs(value) >= 0.2
+      ? [{ distance: Math.abs(value), text: `${value > 0 ? positive : negative} ${Math.abs(value).toFixed(1)} m` }] : []
+  }).sort((left, right) => right.distance - left.distance).slice(0, 2)
+  if (offsets.length) return `以目前機頭為準：目標在${offsets.map(({ text }) => text).join('、')}。`
+  const distance = fact(metrics, 'targetDistanceM', 'm')
+  return distance ? `距目前亮起的目標 ${distance}。` : '留意目前亮起的目標；方向以目前機頭為準。'
+}
+
+function directionObjective(metrics: Readonly<Record<string, number>>): TrainingObjective {
+  const phase = Number.isInteger(metrics.directionPhase) ? metrics.directionPhase : 0
+  if (phase <= 1) return {
+    title: phase === 0 ? '1／9 起飛區地面準備' : '2／9 自行起飛',
+    detail: '從起飛區自行加油門離地，再飛往亮起的目標區；建議高度約 3 m，不需要先懸停。',
+  }
+  if (phase >= 9) return {
+    title: '9／9 側移與方向感目標已完成',
+    detail: '已完成左右、前後移動、偏航換向與新朝向下的移動；現在可以 Disarm。',
+  }
+  const index = Number.isInteger(metrics.directionTargetIndex) && metrics.directionTargetIndex >= 0 && metrics.directionTargetIndex < 7
+    ? metrics.directionTargetIndex : phase - 2
+  const location = directionTargetLocation(metrics)
+  if (metrics.groundTouching > 0.5 || (Number.isFinite(metrics.groundClearanceM) && metrics.groundClearanceM < 0.15)) return {
+    title: `${phase + 1}／9 ${directionControlTargetLabel(index)}`,
+    detail: '目前尚未在空中；先在目前位置自行加油門起飛，再前往目標。已完成的目標會保留，不需要回原起飛點。',
+  }
+  if (phase === 6) {
+    const change = fact(metrics, 'headingChangeDegrees', '°', 0)
+    const error = fact(metrics, 'headingErrorDegrees', '°', 0)
+    const action = metrics.yawEntryRecorded === 0
+      ? '尚缺換向前的朝向紀錄；請重設課程，依序完成前後移動後再換向。'
+      : Number.isFinite(metrics.targetDistanceM) && metrics.targetDistanceM > 1.6
+      ? `先回到換向目標區附近。${location}`
+      : '在換向區附近用 Yaw 向右轉頭約 90°；Yaw 改變朝向，Roll 才是側移。'
+    return {
+      title: '7／9 向右偏航換向',
+      detail: `${action}${change ? `目前已轉 ${change}，本步需實際轉向至少 45°；` : ''}${error ? `距新朝向還差約 ${error}，需在 45° 內。` : ''}看到下一個目標亮起後，再按新機頭方向移動。`,
+    }
+  }
+  const heading = metrics.headingErrorDegrees
+  const orientation = phase >= 7 ? '換向後的新前方' : '起飛時的前方'
+  const action = Number.isFinite(heading) && heading > 60
+    ? `機頭偏離本步方向 ${heading.toFixed(0)}°；先轉回大致朝向${orientation}，再靠近目標。`
+    : phase === 2 || phase === 3 ? '機頭大致保持原朝向，用小量 Roll 側移。'
+      : phase === 4 || phase === 5 ? '機頭大致保持原朝向，用小量 Pitch 前後移動。'
+        : '以換向後的新機頭方向移動；固定場地的 XYZ 不會跟著機頭旋轉。'
+  return {
+    title: `${phase + 1}／9 ${directionControlTargetLabel(index)}`,
+    detail: `${location}${action}飛入目標區即可，不要求停穩；已完成的目標會保留。`,
+  }
+}
+
 /** A visible current objective from authoritative stage facts, separate from success. */
 export function trainingObjective(
   lessonId: string | null,
   evaluation: Pick<TrainingEvaluation, 'metrics'> | null | undefined,
 ): TrainingObjective | null {
   const metrics = evaluation?.metrics ?? {}
+  if (lessonId === 'direction-control') return directionObjective(metrics)
   if (lessonId === 'straight-line') {
     const phase = metrics.routePhase ?? 0
     if (phase === 0) return {
@@ -216,6 +293,7 @@ export function trainingObjective(
 
 /** Short route instructions remain visible before a lesson starts. */
 export function trainingRouteGuide(lessonId: string | null): string | null {
+  if (lessonId === 'direction-control') return '地面起飛 → 左右側移 → 前後移動 → 向右偏航換向 → 以新朝向前進及右移。依序飛入目前亮起的目標區即可，無須停穩；方位提示以目前機頭為準，XYZ 則是固定場地座標。'
   if (lessonId === 'straight-line') {
     return `地面起飛 → 藍色 ${STRAIGHT_LINE_TRANSIT_DISTANCE_M} m → 金色 ${STRAIGHT_LINE_BRAKE_ZONE_START_M} m → 綠色 ${STRAIGHT_LINE_ROUTE_LENGTH_M} m。圓環半徑 ${STRAIGHT_LINE_GATE_RADIUS_M} m；依序從圈內穿過三圈即可完成，不要求減速比例或終點停留。漏圈可退回該圈前重新穿過，已通過的圈保留。`
   }
