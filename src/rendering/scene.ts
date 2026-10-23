@@ -760,7 +760,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   const recoveryReference: FlightSceneReference = {
     id: 'recovery-zone', kind: 'zone', object: recoveryField,
     positionM: { x: field.launch.x, y: config.ground.heightM + BASIC_RECOVERY_TARGET_HEIGHT_M, z: field.launch.z },
-    sizeM: { x: BASIC_RECOVERY_AREA_RADIUS_M * 2, y: 3, z: BASIC_RECOVERY_AREA_RADIUS_M * 2 },
+    sizeM: { x: BASIC_RECOVERY_AREA_RADIUS_M * 2, y: 8 - BASIC_RECOVERY_MIN_PREPARATION_HEIGHT_M, z: BASIC_RECOVERY_AREA_RADIUS_M * 2 },
   }
 
   const landingSurface: FlightSceneReference = { id: 'landing-surface', kind: 'zone', object: landingTarget, positionM: { ...field.landing }, sizeM: { x: LANDING_ZONE_RADIUS_M * 2, y: 0, z: LANDING_ZONE_RADIUS_M * 2 } }

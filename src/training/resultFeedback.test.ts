@@ -591,7 +591,7 @@ describe('observed result coaching', () => {
 
 describe('L10 observed recovery results', () => {
   const recoveryResult: TrainingResult = { ...result, lessonId: 'basic-recovery', totalCheckpoints: 8,
-    attemptContext: { ...currentContext, rulesVersion: 5 }, message: 'Stopped',
+    attemptContext: { ...currentContext, rulesVersion: 6 }, message: 'Stopped',
     metrics: { recoveryPhase: 2, exercisesCompleted: 0, exerciseReady: 0, currentEpisodeValid: 0,
       episodeInterrupted: 0, altitudeM: 6, groundTouching: 0, insideRecoveryArea: 1 } }
 
@@ -649,22 +649,22 @@ describe('L10 observed recovery results', () => {
 
   it('names the incomplete recovery and final measured tilt and rate without guessing its cause', () => {
     const feedback = summarizeTrainingResult({ ...recoveryResult, metrics: { ...recoveryResult.metrics,
-      recoveryPhase: 3, currentEpisodeValid: 1, tiltDegrees: 17, bodyRateDegreesPerSecond: 55,
+      recoveryPhase: 3, currentEpisodeValid: 1, tiltDegrees: 17, bodyRateDegreesPerSecond: 100,
       recoveryDwellSeconds: 0 } })
     expect(feedback.observedGap).toContain('尚未完成「主動修回水平」')
     expect(feedback.observedGap).toContain('結束時傾角 17.0°')
-    expect(feedback.observedGap).toContain('55.0°/s 旋轉')
+    expect(feedback.observedGap).toContain('100.0°/s 旋轉')
     expect(feedback.observedGap).not.toContain('因為')
     expect(feedback.nextPractice).toContain('回中會停止旋轉，回到水平需要主動修正')
   })
 
   it('distinguishes excessive upward velocity from recovered sinking and reports the final signed speed', () => {
     const feedback = summarizeTrainingResult({ ...recoveryResult, metrics: { ...recoveryResult.metrics,
-      recoveryPhase: 5, exercisesCompleted: 1, currentEpisodeValid: 1, verticalSpeedMps: 2,
+      recoveryPhase: 5, exercisesCompleted: 1, currentEpisodeValid: 1, verticalSpeedMps: 2.1,
       tiltDegrees: 0, bodyRateDegreesPerSecond: 0, recoveryDwellSeconds: 0 } })
     expect(feedback.observedStrength).toContain('1 / 3 項恢復練習')
-    expect(feedback.observedGap).toContain('升降速度 2.0 m/s（上＋／下−）')
-    expect(feedback.observedGap).toContain('±0.6 m/s 內')
+    expect(feedback.observedGap).toContain('升降速度 2.1 m/s（上＋／下−）')
+    expect(feedback.observedGap).toContain('−0.2～+2 m/s 內')
     expect(feedback.observedGap).not.toContain('仍在下沉')
   })
 
@@ -675,14 +675,39 @@ describe('L10 observed recovery results', () => {
       bodyRateDegreesPerSecond: 0, recoveryDwellSeconds: 0.1 } })
     expect(feedback.observedStrength).toContain('2 / 3 項恢復練習')
     expect(feedback.observedGap).toContain('機身仍傾斜 22.0°')
-    expect(feedback.observedGap).toContain('恢復確認 0.10／0.50 s')
+    expect(feedback.observedGap).toContain('恢復確認 0.10／0.25 s')
     expect(feedback.nextPractice).toContain('反方向適度傾斜減速')
     expect(feedback.nextPractice).toContain('回中不會自動煞停')
   })
 
+  it('allows modest climb in sink results and applies each exercise tilt limit', () => {
+    const sink = summarizeTrainingResult({ ...recoveryResult, metrics: { ...recoveryResult.metrics,
+      recoveryPhase: 5, currentEpisodeValid: 1, verticalSpeedMps: 1.5, tiltDegrees: 20,
+      bodyRateDegreesPerSecond: 60, recoveryDwellSeconds: 0.1 } })
+    expect(sink.observedGap).toContain('恢復確認 0.10／0.25 s')
+    expect(sink.observedGap).not.toMatch(/升降速度|機身仍傾斜|仍以/)
+    expect(sink.nextPractice).toContain('容許適度爬升')
+  })
+
+  it.each([5, undefined] as const)('keeps historical/unknown-rule results separate from eased comparisons: %s', (version) => {
+    const historical = { ...recoveryResult, attemptContext: version === undefined ? undefined
+      : { ...currentContext, rulesVersion: version }, metrics: { recoveryPhase: 5, currentEpisodeValid: 1,
+        exercisesCompleted: 1, verticalSpeedMps: -0.4, tiltDegrees: 20, recoveryDwellSeconds: 0.3 } }
+    const before = JSON.stringify(historical)
+    const feedback = summarizeTrainingResult(historical)
+    expect(feedback.observedGap).toContain('保留當時結果')
+    expect(feedback.observedGap).not.toMatch(/−0.2|25°|0.25/)
+    expect(feedback.scopeNote).toContain('沒有以新版門檻重新評分')
+    expect(feedback.nextPractice).toContain('分開保存')
+    expect(JSON.stringify(historical)).toBe(before)
+    const success = summarizeTrainingResult({ ...historical, outcome: 'SUCCESS', completedCheckpoints: 8 })
+    expect(success.observedStrength).toContain('原始完成結果保留')
+    expect(success.observedGap).toBeNull()
+  })
+
   it.each([
     [{ groundTouching: 1, altitudeM: 0.06 }, '碰地停住不能算空中恢復'],
-    [{ altitudeM: 2.1 }, '未保留恢復需要的 2.5 m 高度餘裕'],
+    [{ altitudeM: 0.8 }, '未保留恢復需要的 1 m 高度餘裕'],
     [{ currentEpisodeValid: 0, episodeInterrupted: 1 }, '先前的偏差已中斷'],
     [{ insideRecoveryArea: 0 }, '恢復確認已暫停'],
   ] as const)('reports episode interruption or pause without promising retained progress after terminal retry: %j', (changes, cause) => {

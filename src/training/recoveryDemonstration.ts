@@ -6,7 +6,14 @@ import type { RateAxis } from '../rates'
 import { FlightReplayRecorder, type ReplayRecording } from '../replay'
 import type { TuningSettings } from '../tuning/config'
 import { GROUND_CONTACT_SLOP_M } from '../simulation/dynamics'
-import { BASIC_RECOVERY_LESSON, BASIC_RECOVERY_TARGET_HEIGHT_M, basicRecoveryEvaluator } from './basicRecovery'
+import {
+  BASIC_RECOVERY_DRIFT_ONSET_MPS,
+  BASIC_RECOVERY_LESSON,
+  BASIC_RECOVERY_SINK_ONSET_MPS,
+  BASIC_RECOVERY_TARGET_HEIGHT_M,
+  BASIC_RECOVERY_TILT_ONSET_DEGREES,
+  basicRecoveryEvaluator,
+} from './basicRecovery'
 import type { TeachingCue } from './demonstrations'
 import { createTrainingFieldAnchors } from './field'
 import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample } from './types'
@@ -14,6 +21,8 @@ import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample } from
 const STEP_SECONDS = 1 / 240
 const MAXIMUM_DURATION_SECONDS = 120
 const CAPACITY = 7_500
+const PREPARATION_READING_SECONDS = 2
+const ONSET_OBSERVATION_SECONDS = 0.75
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value))
@@ -26,13 +35,13 @@ function normalized(value: Vector3): Vector3 {
 
 const PHASE_CAPTIONS = [
   '從地面自行起飛，依提示製造小偏差，再主動修正；示範不計入真人成績。',
-  '從地面自行起飛至約 6 m，先留出恢復高度；真人操控沒有自動定高。',
-  '先讓姿態與速度平順，再小量右傾，觀察實際傾角超過 15°。',
-  '已偵測傾斜；向反方向小量修正，主動把機身帶回接近水平，回中只會停止旋轉。',
-  '傾斜恢復完成；回到約 6 m 並降低漂移，準備稍收油門製造下沉。',
-  '已偵測下沉；適量補油止住下降，保持離地餘裕，接地停止不算空中恢復。',
-  '下沉恢復完成；先讓姿態與速度平順，再小量前傾建立前進漂移。',
-  '已偵測漂移；朝移動反方向短暫傾斜減速，再主動帶回近水平，不要求回原位置。',
+  `從地面自行起飛至約 ${BASIC_RECOVERY_TARGET_HEIGHT_M} m，先留出恢復高度；真人操控沒有自動定高。`,
+  `第 3 步：先準備，再小量右傾，觀察實際傾角達 ${BASIC_RECOVERY_TILT_ONSET_DEGREES}°。`,
+  '已偵測傾斜；第 4 步先看機身傾斜，接著向反方向修正。Acro 回中只會停止旋轉。',
+  `第 5 步：傾斜恢復完成，回到約 ${BASIC_RECOVERY_TARGET_HEIGHT_M} m；準備稍收油門，讓升降速度變成負值。`,
+  '已偵測下沉；第 6 步先看負的升降速度，接著適量補油止住下降。接地停止不算空中恢復。',
+  '第 7 步：下沉恢復完成，先稍微減少漂移，再小量前傾建立實際前進速度。',
+  '已偵測漂移；第 8 步先看水平速度，接著朝移動反方向傾斜減速，再主動回平。',
   '已完成傾斜、下沉與漂移恢復；三段都先觀察到真實偏差，再完成空中修正。',
 ] as const
 
@@ -65,6 +74,10 @@ export function recordRecoveryDemonstration(
   let phase = 0
   let finished = false
   let previousReady = false
+  let phaseEnteredAt = 0
+  let preparedAt: number | null = null
+  let actionCueKey = ''
+  let lastAction: { phase: number; kind: 'prepare' | 'induce' | 'observe' | 'correct' } = { phase: 0, kind: 'prepare' }
 
   const observe = (sample: TrainingSample): void => {
     const next = basicRecoveryEvaluator.evaluate(sample, {
@@ -83,12 +96,28 @@ export function recordRecoveryDemonstration(
     const ready = next.metrics?.exerciseReady === 1
     if (nextPhase !== phase) {
       phase = nextPhase
+      phaseEnteredAt = sample.timestampSeconds
+      preparedAt = null
+      actionCueKey = ''
       cues.push({ timeSeconds: sample.timestampSeconds, text: PHASE_CAPTIONS[phase], targetReferenceId: 'recovery-zone', recoveryPhase: phase })
     } else if (ready && !previousReady && [2, 4, 6].includes(phase)) {
-      const instruction = phase === 2 ? '準備完成：現在小量右傾，建立約 15° 的傾斜。'
-        : phase === 4 ? '準備完成：現在稍收油門，觀察下降速度達到約 0.8 m/s。'
-          : '準備完成：現在小量前傾，觀察水平速度達到約 1.5 m/s。'
-      cues.push({ timeSeconds: sample.timestampSeconds, text: instruction, targetReferenceId: 'recovery-zone', recoveryPhase: phase })
+      preparedAt = sample.timestampSeconds
+      cues.push({ timeSeconds: sample.timestampSeconds,
+        text: '準備完成；先看目前步驟與數值，示範接著會製造小偏差。可點選示範步驟重看，觀看不會增加真人進度。',
+        targetReferenceId: 'recovery-zone', recoveryPhase: phase })
+    }
+    if (lastAction.phase === phase && (lastAction.kind === 'induce' || lastAction.kind === 'correct')) {
+      const key = `${phase}:${lastAction.kind}`
+      if (key !== actionCueKey) {
+        actionCueKey = key
+        const instruction = phase === 2 ? `第 3 步現在開始：小量右傾，讓實際傾角達 ${BASIC_RECOVERY_TILT_ONSET_DEGREES}°。`
+          : phase === 3 ? '第 4 步現在修正：向傾斜反方向小量操作，主動帶回接近水平，再回中減緩旋轉。'
+            : phase === 4 ? `第 5 步現在開始：稍收油門，觀察升降速度下降至 −${BASIC_RECOVERY_SINK_ONSET_MPS.toFixed(1)} m/s。`
+              : phase === 5 ? '第 6 步現在修正：適量補油，讓負的升降速度回升、止住下降；小幅向上也可以。'
+                : phase === 6 ? `第 7 步現在開始：小量前傾，讓實際水平速度達 ${BASIC_RECOVERY_DRIFT_ONSET_MPS.toFixed(1)} m/s。`
+                  : '第 8 步現在修正：向移動反方向傾斜減速，再主動回平，觀察水平速度降低。'
+        cues.push({ timeSeconds: sample.timestampSeconds, text: instruction, targetReferenceId: 'recovery-zone', recoveryPhase: phase })
+      }
     }
     previousReady = ready
     finished = next.status === 'success'
@@ -98,17 +127,20 @@ export function recordRecoveryDemonstration(
     const state = simulation.getState()
     const velocity = state.velocityMps
     const ready = evaluation?.metrics?.exerciseReady === 1
-    const inducingTilt = phase === 2 && ready
-    const inducingSink = phase === 4 && ready
-    const inducingDrift = phase === 6 && ready
+    const readingFinished = ready && preparedAt !== null && time - preparedAt >= PREPARATION_READING_SECONDS
+    const observingOnset = [3, 5, 7].includes(phase) && time - phaseEnteredAt < ONSET_OBSERVATION_SECONDS
+    const inducingTilt = phase === 2 && readingFinished || phase === 3 && observingOnset
+    const inducingSink = phase === 4 && readingFinished || phase === 5 && observingOnset
+    const inducingDrift = phase === 6 && readingFinished || phase === 7 && observingOnset
+    lastAction = { phase, kind: phase % 2 === 0 ? readingFinished ? 'induce' : 'prepare' : observingOnset ? 'observe' : 'correct' }
     const desiredVelocityX = clamp((launch.x - state.positionM.x) * 0.65, -1, 1)
-    const desiredVelocityZ = inducingDrift ? -2.2 : clamp((launch.z - state.positionM.z) * 0.65, -1, 1)
+    const desiredVelocityZ = inducingDrift ? -1.8 : clamp((launch.z - state.positionM.z) * 0.65, -1, 1)
     const accelerationX = clamp((desiredVelocityX - velocity.x) * 2.4
       + settings.drone.linearDragCoefficientNPerMps.x * velocity.x / settings.drone.massKg, -1.5, 1.5)
     const accelerationZ = clamp((desiredVelocityZ - velocity.z) * 2.4
       + settings.drone.linearDragCoefficientNPerMps.z * velocity.z / settings.drone.massKg, -1.5, 1.5)
     const up = rotateVectorByQuaternion(state.orientation, { x: 0, y: 1, z: 0 })
-    const tilt = 20 * Math.PI / 180
+    const tilt = 18 * Math.PI / 180
     const targetUp = inducingTilt ? { x: Math.sin(tilt), y: Math.cos(tilt), z: 0 }
       : normalized({ x: accelerationX, y: settings.drone.gravityMps2, z: accelerationZ })
     const correction = crossVector3(up, targetUp)
@@ -120,7 +152,7 @@ export function recordRecoveryDemonstration(
       roll: stickForRate(settings, 'roll', pilotRates.roll * 180 / Math.PI),
       pitch: stickForRate(settings, 'pitch', pilotRates.pitch * 180 / Math.PI),
       yaw: stickForRate(settings, 'yaw', pilotRates.yaw * 180 / Math.PI),
-      throttle: collectiveThrottle(simulation, time < 0.5 ? launch.y : inducingSink ? altitude - 2.5 : altitude, inducingSink ? 1.2 : 0.65),
+      throttle: collectiveThrottle(simulation, time < 0.5 ? launch.y : inducingSink ? state.positionM.y - 0.8 : altitude, inducingSink ? 0.7 : 0.65),
     }
   }
   const sampleFor = (input: NormalizedRcInput): TrainingSample => {

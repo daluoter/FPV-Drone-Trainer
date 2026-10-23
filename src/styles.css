@@ -2809,6 +2809,19 @@ h1 em {
 .school-phase { display: inline-block; font-size: 11px; color: #a4db89; margin-top: 14px; }
 .school-checkpoints { list-style: none; padding: 0; font-size: 12px; line-height: 1.9; }
 .school-checkpoints .is-complete { color: var(--accent); }
+.school-demonstration-progress { margin: 10px 0; padding: 12px; border: 1px solid #78b7d1; border-radius: 8px; background: #12232d; font-size: 12px; }
+.school-demonstration-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px; color: #a9dcf4; }
+.school-demonstration-heading > span { font-variant-numeric: tabular-nums; }
+.school-demonstration-title { margin: 8px 0 4px; font-weight: 600; }
+.school-demonstration-current { margin: 8px 0; padding: 8px; border-radius: 5px; background: #214351; color: #e6f7ff; line-height: 1.6; }
+.school-demo-checkpoints { position: relative; max-height: 210px; overflow-y: auto; margin: 10px 0; scrollbar-width: thin; }
+.school-demo-checkpoints > li { margin: 5px 0; }
+.school-demo-checkpoints .is-current { color: #ffe3a6; }
+.school-demo-step { display: flex; align-items: baseline; gap: 7px; width: 100%; padding: 8px; text-align: left; white-space: normal; line-height: 1.5; }
+.school-demo-step > span:nth-child(2) { flex: 1; }
+.school-demo-step > small { flex-shrink: 0; color: inherit; font-size: 10px; }
+.school-demo-checkpoints .is-current .school-demo-step { border-color: #eac36d; background: #3b331f; color: #ffe3a6; }
+.school-demo-checkpoints .is-complete .school-demo-step { color: var(--accent); }
 .school-course-actions { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0; }
 .school-course-actions .lab-button { font-size: 12px; padding: 10px 12px; }
 .school-metrics { display: grid; gap: 6px; margin: 10px 0; font-size: 12px; }

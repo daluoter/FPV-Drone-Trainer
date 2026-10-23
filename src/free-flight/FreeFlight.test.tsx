@@ -6,6 +6,7 @@ import { createBrowserGamepadPoller } from '../controller'
 import type { FlightRenderer, FlightRendererOptions } from '../rendering'
 import { createDefaultTuningSettings } from '../tuning'
 import FreeFlight from './FreeFlight'
+import App from '../app/App'
 import type { FlightRuntime, FlightRuntimeOptions } from '../runtime'
 import { createTrainingMachineState } from '../training/machine'
 import { measureBasicRecoveryMotion } from '../training/basicRecovery'
@@ -58,6 +59,95 @@ function attemptUnload(): Event {
 }
 
 describe('Free Flight native navigation confirmation', () => {
+  it('clears failed replacement metadata before opening an ordinary live-flight replay', () => {
+    const settings = createDefaultTuningSettings()
+    const props = { poller: createBrowserGamepadPoller(), profile: null }
+    const { rerender } = render(<FreeFlight {...props} settings={settings} />)
+    fireEvent.click(screen.getByRole('button', { name: 'L01 起飛示範' }))
+    expect(screen.getByRole('region', { name: '示範進度' })).toBeInTheDocument()
+    const unsupported = { ...settings, controller: { ...settings.controller,
+      rateLimitsDegPerSec: { ...settings.controller.rateLimitsDegPerSec, roll: 1 } } }
+    rerender(<FreeFlight {...props} settings={unsupported} />)
+    fireEvent.click(screen.getByRole('button', { name: '橫滾 Roll' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('目前設定無法建立示範')
+    expect(screen.queryByRole('region', { name: '示範進度' })).not.toBeInTheDocument()
+    expect(frames.runtime!.getTelemetry().replay.active).toBe(false)
+    rerender(<FreeFlight {...props} settings={settings} />)
+    fireEvent.change(screen.getByLabelText('控制方式'), { target: { value: 'keyboard' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Arm$/ }))
+    for (let index = 0; index <= 8; index += 1) frame(index * 1_000 / 60)
+    fireEvent.click(screen.getByRole('button', { name: /^Disarm$/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Enter replay' }))
+    expect(frames.runtime!.getTelemetry().replay.active).toBe(true)
+    expect(screen.getByRole('heading', { name: '飛行回放' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '示範進度' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('目前示範步驟')).not.toBeInTheDocument()
+  })
+
+  it('advances independent teaching progress during ordinary playback and freezes it at Pause', () => {
+    const onFixedStep = vi.fn()
+    render(<FreeFlight poller={createBrowserGamepadPoller()} profile={null} settings={createDefaultTuningSettings()} onFixedStep={onFixedStep} />)
+    fireEvent.click(screen.getByRole('button', { name: '橫滾 Roll' }))
+    const progress = screen.getByRole('region', { name: '示範進度' })
+    expect(progress).toHaveTextContent('0 / 5 個示範步驟完成')
+    frame(0)
+    frame(1200)
+    expect(progress).toHaveTextContent('1 / 5 個示範步驟完成')
+    frame(2200)
+    expect(progress).toHaveTextContent('2 / 5 個示範步驟完成')
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    const paused = progress.textContent
+    frame(3200)
+    expect(progress.textContent).toBe(paused)
+    expect(onFixedStep).not.toHaveBeenCalled()
+    fireEvent.click(within(progress).getByRole('button', { name: '觀看示範步驟：觀察起始姿態' }))
+    expect(progress).toHaveTextContent('0 / 5 個示範步驟完成')
+  })
+
+  it('shows independent demonstration chapters through the real App sidebar and restores live progress after exit', () => {
+    window.localStorage.clear()
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('選擇課程'), { target: { value: 'basic-recovery' } })
+    const liveSteps = screen.getByRole('list', { name: '本課步驟' })
+    expect(within(liveSteps).getAllByRole('listitem').every((item) => !item.classList.contains('is-complete'))).toBe(true)
+    const stored = () => Object.fromEntries(Object.entries(window.localStorage).filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.')))
+    const before = stored()
+    fireEvent.click(screen.getByRole('button', { name: 'L10 恢復示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    const progress = screen.getByRole('region', { name: '示範進度' })
+    expect(progress).toHaveTextContent('L10 基礎失誤恢復')
+    expect(screen.queryByRole('list', { name: '本課步驟' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '0.5×' })).toHaveAttribute('aria-pressed', 'true')
+    for (const [title, current] of [['產生小幅下沉', '5 / 8'], ['建立前進或側移', '7 / 8']] as const) {
+      fireEvent.click(within(progress).getByRole('button', { name: `觀看示範步驟：${title}` }))
+      expect(frames.runtime!.getReplayPlayback()!.isPlaying()).toBe(false)
+      expect(progress).toHaveTextContent(`正在示範第 ${current} 步：${title}`)
+      expect(within(progress).getByRole('list', { name: '示範步驟' }).querySelector('[aria-current="step"]')).toHaveTextContent(title)
+    }
+    const duration = frames.runtime!.getReplayPlayback()!.durationSeconds
+    fireEvent.change(screen.getByRole('slider'), { target: { value: duration } })
+    expect(progress).toHaveTextContent('8 / 8 個示範步驟完成')
+    expect(progress).toHaveTextContent('示範步驟已全部演示')
+    fireEvent.change(screen.getByRole('slider'), { target: { value: 0 } })
+    expect(progress).not.toHaveTextContent('8 / 8 個示範步驟完成')
+    expect(stored()).toEqual(before)
+    fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
+    expect(screen.queryByRole('region', { name: '示範進度' })).not.toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: '本課步驟' })).getAllByRole('listitem').every((item) => !item.classList.contains('is-complete'))).toBe(true)
+    expect(stored()).toEqual(before)
+    // A different movie still owns its own steps while L10 remains selected.
+    fireEvent.click(screen.getByRole('button', { name: 'L03 直線示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    expect(screen.getByRole('region', { name: '示範進度' })).toHaveTextContent('L03')
+    expect(screen.getByLabelText('選擇課程')).toHaveValue('basic-recovery')
+    fireEvent.change(screen.getByRole('slider'), { target: { value: frames.runtime!.getReplayPlayback()!.durationSeconds } })
+    expect(screen.getByRole('region', { name: '示範進度' })).toHaveTextContent('5 / 5 個示範步驟完成')
+    fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
+    expect(screen.getByLabelText('選擇課程')).toHaveValue('basic-recovery')
+    expect(stored()).toEqual(before)
+    window.localStorage.clear()
+  })
+
   const routeLessons = [
     { lessonId: 'direction-control', code: 'L05', prefix: 'direction', total: 9,
       targets: ['direction-right', 'direction-left', 'direction-forward', 'direction-back', 'direction-yaw', 'direction-turned-forward', 'direction-turned-right'],
@@ -252,7 +342,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(screen.getByTestId('recovery-vertical-speed')).toHaveTextContent(`${motion.verticalSpeedMps.toFixed(1)} m/s`)
     expect(screen.getByTestId('recovery-horizontal-speed')).toHaveTextContent(`${motion.horizontalSpeedMps.toFixed(1)} m/s`)
     expect(screen.getByLabelText('恢復練習數值')).toHaveTextContent('回放')
-    expect(screen.getByText(/已偵測傾斜；向反方向/)).toBeInTheDocument()
+    expect(screen.getByLabelText('目前示範步驟')).toHaveTextContent('主動修回水平')
     const level = frames.renderer!.flightScene.scene.getObjectByName('recovery-level-reference') as THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>
     expect(level.material.color.getHex()).toBe(0xffc978)
     const paused = screen.getByLabelText('恢復練習數值').textContent

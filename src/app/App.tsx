@@ -23,6 +23,8 @@ import {
 import type { FlightRuntimeFixedStepSample, FlightRuntimeTelemetry } from '../runtime'
 import IntroLesson from '../training/IntroLesson'
 import type { TeachingDemonstrationKind } from '../training/demonstrations'
+import type { TeachingDemonstrationProgressSnapshot } from '../training/demonstrationProgress'
+import DemonstrationProgress from '../training/TeachingDemonstrationProgress'
 import { loadLearningPreferences, saveLearningPreferences, type LearningPreferences } from '../training/learningPreferences'
 import { fingerprintTrainingSettings, trainingRulesVersionForLesson, type TrainingAttemptContext } from '../training/attempt'
 import { prepareTrainingSetup } from '../training/setup'
@@ -64,6 +66,11 @@ export default function App() {
   const [inputSource, setInputSource] = useState<'controller' | 'keyboard'>('controller')
   const [flightBusy, setFlightBusy] = useState(false)
   const [playbackActive, setPlaybackActive] = useState(false)
+  const [demonstrationProgress, setDemonstrationProgress] = useState<TeachingDemonstrationProgressSnapshot | null>(null)
+  const [demonstrationSeekRequest, setDemonstrationSeekRequest] = useState<{ sequence: number; timeSeconds: number } | null>(null)
+  const seekDemonstrationStep = useCallback((timeSeconds: number) => {
+    setDemonstrationSeekRequest((previous) => ({ sequence: (previous?.sequence ?? 0) + 1, timeSeconds }))
+  }, [])
   const [workspace, setWorkspace] = useState<'learning' | 'free'>('learning')
   const [showSetup, setShowSetup] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -270,6 +277,8 @@ export default function App() {
           profile={flightProfile}
           settings={tuningSettings}
           demonstrationRequest={demonstrationRequest}
+          demonstrationSeekRequest={demonstrationSeekRequest}
+          onDemonstrationProgress={setDemonstrationProgress}
           exitPlaybackRequest={exitPlaybackRequest}
           trainingResetKey={trainingResetKey}
           trainingDisarmKey={trainingDisarmKey}
@@ -279,7 +288,7 @@ export default function App() {
           trainingPath={trainingState.trajectory}
           onTrainingReset={resetTraining}
           trainingState={workspace === 'learning' && !showIntro ? trainingState : null}
-          lessonPanel={workspace === 'learning' ? <div className="school-learning-sidebar"><div hidden={!showIntro}><IntroLesson playbackActive={playbackActive} onExitPlayback={() => setExitPlaybackRequest((value) => value + 1)} disabled={busy} completed={learningPreferences.introCompleted} onDemonstrate={(kind) => setDemonstrationRequest((previous) => ({ sequence: (previous?.sequence ?? 0) + 1, kind }))} onComplete={() => { persistLearning({ ...learningPreferences, introCompleted: true }); setShowIntro(false) }} /></div><div hidden={showIntro}><TrainingPanel
+          lessonPanel={workspace === 'learning' ? <div className="school-learning-sidebar"><div hidden={!showIntro}>{playbackActive && demonstrationProgress && <DemonstrationProgress progress={demonstrationProgress} onSeekStep={seekDemonstrationStep} />}<IntroLesson playbackActive={playbackActive} onExitPlayback={() => setExitPlaybackRequest((value) => value + 1)} disabled={busy} completed={learningPreferences.introCompleted} onDemonstrate={(kind) => setDemonstrationRequest((previous) => ({ sequence: (previous?.sequence ?? 0) + 1, kind }))} onComplete={() => { persistLearning({ ...learningPreferences, introCompleted: true }); setShowIntro(false) }} /></div><div hidden={showIntro}><TrainingPanel
             mode={learningPreferences.mode}
             state={trainingState}
             progress={trainingProgress}
@@ -289,6 +298,8 @@ export default function App() {
             onRetry={retryTraining}
             onReset={resetTraining}
             playbackActive={playbackActive}
+            demonstrationProgress={demonstrationProgress}
+            onSeekDemonstrationStep={seekDemonstrationStep}
           /></div></div> : null}
           onSceneReferences={onTrainingSceneReferences}
           onFixedStep={onTrainingFixedStep}

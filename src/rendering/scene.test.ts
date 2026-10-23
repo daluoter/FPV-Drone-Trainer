@@ -770,24 +770,24 @@ describe('flight scene reference contract', () => {
     try {
       const reference = scene.getReference('recovery-zone')!
       expect(reference.kind).toBe('zone')
-      expect(reference.positionM).toEqual({ x: 6, y: 11, z: -3 })
-      expect(reference.object.position.toArray()).toEqual([6, 11, -3])
-      expect(reference.sizeM).toEqual({ x: 50, y: 3, z: 50 })
+      expect(reference.positionM).toEqual({ x: 6, y: 9, z: -3 })
+      expect(reference.object.position.toArray()).toEqual([6, 9, -3])
+      expect(reference.sizeM).toEqual({ x: 80, y: 5, z: 80 })
       const floor = scene.scene.getObjectByName('recovery-area-boundary') as THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>
-      expect(floor.geometry.parameters.innerRadius).toBeCloseTo(24.93)
-      expect(floor.geometry.parameters.outerRadius).toBe(25)
+      expect(floor.geometry.parameters.innerRadius).toBeCloseTo(39.93)
+      expect(floor.geometry.parameters.outerRadius).toBe(40)
       expect(floor.rotation.x).toBe(-Math.PI / 2)
       expect(floor.getWorldPosition(floor.position.clone()).y).toBeCloseTo(5.025)
       expect(floor.material.transparent).toBe(true)
       const band = scene.scene.getObjectByName('recovery-height-band') as THREE.LineLoop<THREE.BufferGeometry, THREE.LineBasicMaterial>
       const points = band.geometry.getAttribute('position')
-      expect(Array.from({ length: points.count }, (_, index) => points.getY(index) + reference.positionM.y)).toEqual([10, 10, 13, 13])
+      expect(Array.from({ length: points.count }, (_, index) => points.getY(index) + reference.positionM.y)).toEqual([8, 8, 13, 13])
       expect(band.material.opacity).toBeLessThan(0.5)
       const level = scene.scene.getObjectByName('recovery-level-reference') as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
       const levelPoints = level.geometry.getAttribute('position')
-      // The long reference is truly horizontal in world space, centered at 6 m AGL.
-      expect(levelPoints.getY(0) + reference.positionM.y).toBe(11)
-      expect(levelPoints.getY(1) + reference.positionM.y).toBe(11)
+      // The long reference is truly horizontal in world space, centered at 4 m AGL.
+      expect(levelPoints.getY(0) + reference.positionM.y).toBe(9)
+      expect(levelPoints.getY(1) + reference.positionM.y).toBe(9)
       expect(levelPoints.getX(0) + reference.positionM.x).toBe(1)
       expect(levelPoints.getX(1) + reference.positionM.x).toBe(11)
       expect(levelPoints.getZ(0) + reference.positionM.z).toBe(-15)

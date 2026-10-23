@@ -25,6 +25,8 @@ import { FIGURE_EIGHT_TARGET_IDS } from '../training/figureEight'
 import { createTrainingFieldAnchors } from '../training/field'
 import { createWideGates, WIDE_GATE_IDS } from '../world/wideGates'
 import { measureBasicRecoveryMotion } from '../training/basicRecovery'
+import DemonstrationProgress from '../training/TeachingDemonstrationProgress'
+import { createDemonstrationProgress, demonstrationProgressAt, type TeachingDemonstrationProgressSnapshot } from '../training/demonstrationProgress'
 import type { TrainingMachineState, TrainingSample, TrainingSceneReference, TrainingSetupRequest } from '../training/types'
 import { copyTuningSettings, flightSimulationConfigFromTuning, type TuningSettings } from '../tuning'
 import { REPLAY_SPEEDS, type ReplaySpeed } from '../replay'
@@ -40,6 +42,8 @@ export interface FreeFlightProps {
   readonly trainingSetupRequest?: TrainingSetupRequest | null
   readonly trainingPath?: readonly TrainingSample[]
   readonly demonstrationRequest?: { readonly sequence: number; readonly kind: TeachingDemonstrationKind } | null
+  readonly demonstrationSeekRequest?: { readonly sequence: number; readonly timeSeconds: number } | null
+  readonly onDemonstrationProgress?: (progress: TeachingDemonstrationProgressSnapshot | null) => void
   readonly exitPlaybackRequest?: number
   readonly onTrainingReset?: () => void
   readonly trainingArmBlocked?: boolean
@@ -106,6 +110,8 @@ export default function FreeFlight({
   trainingSetupRequest = null,
   trainingPath = [],
   demonstrationRequest = null,
+  demonstrationSeekRequest = null,
+  onDemonstrationProgress,
   exitPlaybackRequest = 0,
   onTrainingReset,
   trainingArmBlocked = false,
@@ -127,6 +133,7 @@ export default function FreeFlight({
   const [renderingError, setRenderingError] = useState<string | null>(null)
   const [rendererRetryKey, setRendererRetryKey] = useState(0)
   const [demonstration, setDemonstration] = useState<TeachingDemonstration | null>(null)
+  const [demonstrationSettings, setDemonstrationSettings] = useState<TuningSettings | null>(null)
   const [demoError, setDemoError] = useState<string | null>(null)
   const [resultReplay, setResultReplay] = useState<ResultReplaySnapshot | null>(null)
   const capturedResultSessionRef = useRef<string | null>(null)
@@ -145,6 +152,15 @@ export default function FreeFlight({
     return createWideGates(launch, settings.drone.ground.heightM).flatMap((gate) => gate.colliders)
   }, [settings.drone])
   const shouldConfirmExit = Boolean(telemetry?.armed || trainingSettingsLocked)
+  const demonstrationTimeline = useMemo(() => demonstration && demonstrationSettings
+    ? createDemonstrationProgress(demonstration, demonstrationSettings) : null, [demonstration, demonstrationSettings])
+  const demonstrationProgress = useMemo(() => telemetry?.replay.active && demonstrationTimeline
+    ? demonstrationProgressAt(demonstrationTimeline, telemetry.replay.currentTimeSeconds) : null,
+  [demonstrationTimeline, telemetry?.replay.active, telemetry?.replay.currentTimeSeconds])
+
+  useEffect(() => {
+    onDemonstrationProgress?.(demonstrationProgress)
+  }, [demonstrationProgress, onDemonstrationProgress])
 
   useEffect(() => {
     if (!shouldConfirmExit) return
@@ -396,14 +412,18 @@ export default function FreeFlight({
   const enterReplay = (): void => {
     const runtime = runtimeRef.current
     if (!runtime) return
+    setDemonstration(null)
+    setDemonstrationSettings(null)
     setPlayingResultSession(null)
     if (!runtime.enterReplay()) return
+    setDemoError(null)
     setReplayCoordinateConfig(lastFlightConfigRef.current)
     setTelemetry(runtime.getTelemetry())
   }
 
   const exitReplay = (): void => {
     setDemonstration(null)
+    setDemonstrationSettings(null)
     setPlayingResultSession(null)
     setReplayCoordinateConfig(null)
     const runtime = runtimeRef.current
@@ -423,6 +443,7 @@ export default function FreeFlight({
     if (!runtime.getTelemetry().replay.active && !runtime.enterReplay(resultReplay.recording)) return
     setReplayCoordinateConfig(capturedResultConfigRef.current)
     setDemonstration(null)
+    setDemonstrationSettings(null)
     runtime.pauseReplay()
     runtime.seekReplay(marker.timeSeconds)
     setPlayingResultSession(resultReplay.sessionId)
@@ -450,6 +471,18 @@ export default function FreeFlight({
     setTelemetry(runtime.getTelemetry())
   }
 
+  const seekDemonstrationStep = (seconds: number): void => {
+    const runtime = runtimeRef.current
+    if (!runtime || !demonstration || !runtime.getTelemetry().replay.active) return
+    runtime.pauseReplay()
+    runtime.seekReplay(seconds)
+    setTelemetry(runtime.getTelemetry())
+  }
+
+  useEffect(() => {
+    if (demonstrationSeekRequest) seekDemonstrationStep(demonstrationSeekRequest.timeSeconds)
+  }, [demonstrationSeekRequest])
+
   const setReplaySpeed = (speed: ReplaySpeed): void => {
     const runtime = runtimeRef.current
     if (!runtime) return
@@ -466,6 +499,7 @@ export default function FreeFlight({
 
   const reset = (): void => {
     setDemonstration(null)
+    setDemonstrationSettings(null)
     setReplayCoordinateConfig(null)
     if (trainingSettingsLocked && onTrainingReset) { onTrainingReset(); return }
     const runtime = runtimeRef.current
@@ -477,16 +511,26 @@ export default function FreeFlight({
   const startDemonstration = (kind: TeachingDemonstrationKind): void => {
     const runtime = runtimeRef.current
     if (!runtime || trainingSettingsLocked || telemetry?.armed) return
+    setDemonstration(null)
+    setDemonstrationSettings(null)
+    setReplayCoordinateConfig(null)
+    setPlayingResultSession(null)
     try {
       if (runtime.isReplayActive?.()) runtime.exitReplay()
-      const demo = createTeachingDemonstration(settings, kind)
-      if (!runtime.enterReplay(demo.recording)) return
-      setReplayCoordinateConfig(copyTuningSettings(settings).drone)
+      const recordedSettings = copyTuningSettings(settings)
+      const demo = createTeachingDemonstration(recordedSettings, kind)
+      if (!runtime.enterReplay(demo.recording)) throw new Error('Teaching playback could not start.')
+      setReplayCoordinateConfig(recordedSettings.drone)
+      setDemonstrationSettings(recordedSettings)
       setDemonstration(demo)
       setDemoError(null)
+      runtime.setReplaySpeed(kind === 'basic-recovery' ? 0.5 : 1)
       runtime.playReplay()
       setTelemetry(runtime.getTelemetry())
-    } catch { setDemoError('目前設定無法建立示範，請選擇新手預設後再試。') }
+    } catch {
+      setTelemetry(runtime.getTelemetry())
+      setDemoError('目前設定無法建立示範，請選擇新手預設後再試。')
+    }
   }
   useEffect(() => {
     if (demonstrationRequest) startDemonstration(demonstrationRequest.kind)
@@ -598,7 +642,10 @@ export default function FreeFlight({
                   : 'CRASHED / reset required before re-arming' : trainingArmBlocked ? '倒數準備中 · 請保持低油門' : trainingState?.phase === 'WAITING_FOR_ARM' ? '準備完成 · 按 Arm 開始，尚未計時' : 'SAFE / explicit arm required'}
               </div>
             )}
-            {renderingState === 'ready' && telemetry?.replay.active && <div className="flight-safe-overlay">{demonstration ? demonstration.title : '飛行回放'} · 真人飛行已停止</div>}
+            {renderingState === 'ready' && telemetry?.replay.active && <div className="flight-safe-overlay" aria-label={demonstrationProgress ? '目前示範步驟' : undefined}>{demonstrationProgress
+              ? demonstrationProgress.complete ? `示範完成 ${demonstrationProgress.completedSteps}／${demonstrationProgress.totalSteps} 步 · 觀看不計成績`
+                : `示範第 ${(demonstrationProgress.currentStepIndex ?? 0) + 1}／${demonstrationProgress.totalSteps} 步：${demonstrationProgress.currentStepTitle}`
+              : demonstration ? demonstration.title : '飛行回放'} · 真人飛行已停止</div>}
             {trainingState?.phase === 'ACTIVE' && <div tabIndex={0} aria-label="目前練習提示" className={`school-viewport-hint${recovery ? ' is-recovering' : ''}`}>{recovery
               ? <><strong>重練原因（當時數值）：{recovery.message}</strong><span>{recovery.hint}</span></>
               : currentObjective && trainingState.lastEvaluation?.recovery !== 'restart' ? <><strong>{currentObjective.title}</strong><span>{trainingState.lessonId === 'direction-control' || trainingState.lessonId === 'coordinated-turn' || trainingState.lessonId === 'square-route' || trainingState.lessonId === 'figure-eight' || trainingState.lessonId === 'wide-gate' || trainingState.lessonId === 'basic-recovery' || !trainingState.lastEvaluation?.hint ? currentObjective.detail : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</span></> : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>}
@@ -711,6 +758,7 @@ export default function FreeFlight({
               </>
             )}
           </section>
+          {demonstrationProgress && !lessonPanel && <DemonstrationProgress progress={demonstrationProgress} onSeekStep={seekDemonstrationStep} />}
           {demonstration && telemetry?.replay.active && <p className="school-demo-cue" aria-live="polite">{teachingCueAt(demonstration, telemetry.replay.currentTimeSeconds)}</p>}
           {source === 'keyboard' && (
             <p className="flight-input-note">

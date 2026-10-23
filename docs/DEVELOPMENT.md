@@ -13,9 +13,11 @@ Open the Vite URL shown in the terminal. Phase 8 exposes the Controller Lab hand
 
 ### Confirm the updated local screen
 
-The current classroom shows **版本 2026.10.23.5** near the page heading and offers **L10 基礎失誤恢復** after L09 寬門穿越. L10 starts on supported ground, then guides the learner to create and recover from tilt, descent and drift. The stage prompt and motion feedback show the observed tilt, vertical speed and horizontal speed. The simulation also keeps altitude plus **X 左右／Y 上下／Z 前後** visible, including after a crash. Negative Z means forward from the supported launch origin. L05–L09 target-direction guidance instead follows the current drone heading. Developer HUD is optional. Follow [the L10 tryout guide](L10_BASIC_RECOVERY.md) for preparation, onset, recovery and interruption checks.
+The current classroom shows **版本 2026.10.23.6** near the page heading. L10 now starts from supported ground and recommends about **4 m**, with exercise-specific preparation and shorter recovery confirmation. The always-visible motion instruments show actual tilt, vertical speed and horizontal speed beside altitude / XYZ. Follow [the L10 tryout guide](L10_BASIC_RECOVERY.md) for the revised thresholds.
 
-The latest user message accepted L09 from the preceding `2026.10.23.4` / `265f818` delivery. Its exact local build, browser and input hardware were not supplied. L10 still needs manual acceptance; do not infer that a passing simulation-generated demo establishes pilot approval or mastery.
+Every existing demonstration has an independent **示範進度** view with its own current step and checkmarks. While a demo is open, this view replaces the learner's live objectives, checkpoints and result view; the learner's session remains unchanged. Clicking a chapter pauses at that step's start; press Play to watch it. For L10, try step 5「產生小幅下沉」and step 7「建立前進或側移」. L10 starts at 0.5×, with time to read the next action and observe the actual deviation before correction.
+
+The latest feedback reported that L10 was too difficult and that the demonstration was understandable only through step 4. It does **not** accept L10. Earlier L03–L09 acceptance stays recorded; revised L10 still needs manual review. No local storage clear is needed: L10 rules-5 results remain historical, while rules 6 provides the new current scope. Other lesson scopes and saved records stay unchanged.
 
 If these are absent, stop the old terminal process with Ctrl+C, enter the intended repository, then update the feature branch and start the source server:
 
@@ -52,6 +54,7 @@ arm/disarm, countdown and waiting for explicit arm, keyboard reset, training sto
 practice/challenge progress isolation, L00 knowledge completion and reload,
 synchronized L01/L03/L04/L05/L06/L07/L08/L09/L10 demo controls without progress writes, L05/L06/L07/L08/L09/L10 seek/pause
 and lesson reload, L03/L04/L05/L06/L07/L08/L09/L10 ground starts, an inline L00 playback exit,
+independent progress and chapter seeking for every existing demo,
 session-bound result marker seek with progress isolation, fullscreen recovery,
 camera controls, and logo navigation. This workflow does
 not deploy the site; production publishing remains a separate manual workflow.

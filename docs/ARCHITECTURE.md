@@ -80,9 +80,25 @@ The renderer appends `wide-gate-1` through `wide-gate-3` references without chan
 
 L10 (`basic-recovery`) starts at the supported ground launch and keeps normal Acro control throughout the live exercise. The learner follows prompts to produce a small tilt, descent or horizontal drift; the evaluator waits for the corresponding actual state before accepting its recovery. No scripted live stick override, disturbance force, direct pose edit, automatic leveling or altitude controller is added.
 
-The pure evaluator computes tilt from the authoritative quaternion, rotation rate from body angular velocity, and vertical / horizontal speeds from world velocity. It keeps bounded incremental preparation, onset-validity and recovery-dwell metrics. Each new exercise first needs a short settled preparation above the ground; a recovery then needs 0.5 seconds of consecutive valid airborne samples. Contact or low height invalidates the current onset and dwell. Earlier completed exercises remain; this exercise must be prepared and induced again. Leaving the broad practice area resets preparation / dwell but retains an already valid onset, so recovery can continue after returning. No fixed XYZ return or heading target is imposed.
+The pure evaluator computes tilt from the authoritative quaternion, rotation rate from body angular velocity, and vertical / horizontal speeds from world velocity. It keeps bounded incremental preparation, onset-validity and recovery-dwell metrics. Each new exercise first needs a short settled preparation above the ground; a recovery then needs 0.25 seconds of consecutive valid airborne samples. Preparation is specific to the next exercise rather than requiring a full all-axis hover. Contact or low height invalidates the current onset and dwell. Earlier completed exercises remain; this exercise must be prepared and induced again. Leaving the broad practice area resets preparation / dwell but retains an already valid onset, so recovery can continue after returning. No fixed XYZ return or heading target is imposed.
 
-The `basic-recovery-field` scene group and appended `recovery-zone` reference are visual guides around the launch, with a recommended 6 m height and a 25 m horizontal radius. They add no static colliders. Stage presentation and the live / replay motion HUD consume snapshots; the existing runtime remains the sole animation-loop and physics owner. A simulated teaching recording uses actual RC inputs through the solver, then plays as an independent ghost without awarding progress. See [the L10 guide](L10_BASIC_RECOVERY.md) and [the training contract](LEARNING_CONTRACT.md).
+The `basic-recovery-field` scene group and appended `recovery-zone` reference are visual guides around the launch, with a recommended 4 m height and a 40 m horizontal radius. They add no static colliders. Stage presentation and the live / replay motion HUD consume snapshots; the existing runtime remains the sole animation-loop and physics owner. A simulated teaching recording uses actual RC inputs through the solver, then plays as an independent ghost without awarding progress. See [the L10 guide](L10_BASIC_RECOVERY.md) and [the training contract](LEARNING_CONTRACT.md).
+
+## Independent demonstration progress
+
+All 12 existing demo kinds have their own bounded presentation timeline. For
+course demos, `demonstrationProgress.ts` projects retained recording measurements
+into a separate evaluator/checkpoint observer once. It never uses or writes the
+live TrainingSession or progress store. L00 axis demos instead use authored
+teaching-action chapters. Playback time selects completed/current/pending steps;
+chapter seek pauses at the recorded start and seeking backward restores earlier
+checkmarks. The React demo view temporarily replaces live objective/checkpoint/
+result presentation; exiting restores the unchanged learner state.
+
+L10's generated recording adds reading and actual-onset observation intervals and
+opens at 0.5×. These are recorded control choices and presentation settings, not
+live flight assistance. Rules 6 isolates eased L10 results from historical rules 5;
+L06–L09 and earlier course scopes remain unchanged.
 
 ## Safety boundary
 

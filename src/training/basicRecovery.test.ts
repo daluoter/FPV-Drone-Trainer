@@ -8,6 +8,7 @@ import { TrainingSession } from './machine'
 import type { TrainingCheckpointState, TrainingEvaluation, TrainingEvaluationContext, TrainingSample, TrainingSceneReference } from './types'
 import {
   BASIC_RECOVERY_AREA_RADIUS_M, BASIC_RECOVERY_HOLD_SECONDS, BASIC_RECOVERY_LEARNING_CONTENT, BASIC_RECOVERY_LESSON,
+  BASIC_RECOVERY_PREPARATION_SECONDS, BASIC_RECOVERY_TARGET_HEIGHT_M,
   BASIC_RECOVERY_PHASE_IDS, BASIC_RECOVERY_TIME_LIMIT_SECONDS, basicRecoveryEvaluator, measureBasicRecoveryMotion,
 } from './basicRecovery'
 
@@ -92,7 +93,7 @@ class Observer {
   }
 }
 
-function prepared(phase: number, altitude = 6): Observer {
+function prepared(phase: number, altitude = BASIC_RECOVERY_TARGET_HEIGHT_M): Observer {
   const observer = new Observer(DEFAULT_DRONE_CONFIG, phase, { x: 0, y: altitude, z: 0 })
   observer.repeat(4)
   expect(observer.evaluation?.metrics?.exerciseReady).toBe(1)
@@ -119,7 +120,7 @@ function completeTrace(config = DEFAULT_DRONE_CONFIG): readonly TrainingSample[]
 function sessionRun(trace: readonly TrainingSample[], mode: 'practice' | 'challenge', config = DEFAULT_DRONE_CONFIG) {
   const session = new TrainingSession({
     lessons: [BASIC_RECOVERY_LESSON], initialLessonId: 'basic-recovery', countdownDurationSeconds: 0, sceneReferences: references(config),
-    attemptContext: { rulesVersion: 5, physicsVersion: 1, presetId: 'beginner', settingsFingerprint: 'settings.v1:{}', inputSource: 'keyboard', mode, assistance: 'none' },
+    attemptContext: { rulesVersion: 6, physicsVersion: 1, presetId: 'beginner', settingsFingerprint: 'settings.v1:{}', inputSource: 'keyboard', mode, assistance: 'none' },
   })
   session.start(0)
   session.tick(0)
@@ -152,13 +153,13 @@ describe('guided manual basic recovery', () => {
     expect(BASIC_RECOVERY_LEARNING_CONTENT.prerequisiteIds).toEqual(['wide-gate'])
   })
 
-  it('requires the real launch ground and five metres of actual self-takeoff before any recovery exercise', () => {
+  it('requires the real launch ground and three metres of actual self-takeoff before any recovery exercise', () => {
     expect(basicRecoveryEvaluator.evaluate(sample(), context(0)).checkpointIds).toBeUndefined()
     const ground = basicRecoveryEvaluator.evaluate(sample(0, { altitude: 0 }), context(0))
     expect(ground.checkpointIds).toEqual(['recovery-ground'])
     expect(ground.metrics?.recoveryPhase).toBe(1)
-    expect(basicRecoveryEvaluator.evaluate(sample(0, { altitude: 4.9 }), context(1)).checkpointIds).toBeUndefined()
-    expect(basicRecoveryEvaluator.evaluate(sample(0, { altitude: 5 }), context(1)).checkpointIds).toEqual(['recovery-liftoff'])
+    expect(basicRecoveryEvaluator.evaluate(sample(0, { altitude: 2.9 }), context(1)).checkpointIds).toBeUndefined()
+    expect(basicRecoveryEvaluator.evaluate(sample(0, { altitude: 3 }), context(1)).checkpointIds).toEqual(['recovery-liftoff'])
     expect(basicRecoveryEvaluator.evaluate(sample(0, { position: { x: 3, y: 0, z: 0 } }), context(0)).checkpointIds).toBeUndefined()
   })
 
@@ -185,7 +186,7 @@ describe('guided manual basic recovery', () => {
     expect(observer.evaluation?.metrics).toMatchObject({ recoveryPhase: 3, exerciseReady: 1, currentEpisodeValid: 0 })
     expect(observer.checkpointStates['recovery-tilt-level']).toBeUndefined()
     observer.tick({ orientation: tilt(20) })
-    observer.repeat(6)
+    observer.repeat(4)
     expect(observer.evaluation?.checkpointIds).toEqual(['recovery-tilt-level'])
   })
 
@@ -200,36 +201,95 @@ describe('guided manual basic recovery', () => {
     expect(drift.checkpointStates['recovery-drift-onset']).toBeUndefined()
   })
 
-  it('requires a continuous half-second near-level hold with low rotation after an actual tilt', () => {
+  it('prepares at three metres without forcing horizontal hover before the tilt exercise', () => {
+    const observer = new Observer(DEFAULT_DRONE_CONFIG, 2, { x: 0, y: 3, z: 0 })
+    const moving = { velocity: { x: 2.5, y: 1.2, z: 0 }, orientation: tilt(10), angularVelocity: { x: 1, y: 0, z: 0 } }
+    observer.repeat(2, moving)
+    expect(observer.evaluation?.metrics).toMatchObject({ exerciseReady: 1, preparationDwellSeconds: 0.1 })
+    expect(observer.checkpointStates['recovery-tilt-onset']).toBeUndefined()
+    observer.tick({ ...moving, orientation: tilt(16) })
+    expect(observer.evaluation?.checkpointIds).toEqual(['recovery-tilt-onset'])
+    observer.repeat(4, { ...moving, orientation: tilt(11) })
+    expect(observer.checkpointStates['recovery-tilt-level']?.completed).toBe(true)
+    expect(BASIC_RECOVERY_PREPARATION_SECONDS).toBe(0.1)
+    expect(BASIC_RECOVERY_TARGET_HEIGHT_M).toBe(4)
+  })
+
+  it('allows modest drift and a moderate upward correction when stopping an actual descent', () => {
+    const observer = new Observer(DEFAULT_DRONE_CONFIG, 4, { x: 0, y: 3, z: 0 })
+    observer.repeat(2, { velocity: { x: 2.5, y: 0.8, z: 0 }, orientation: tilt(22) })
+    expect(observer.evaluation?.metrics?.exerciseReady).toBe(1)
+    observer.tick({ velocity: { x: 2.5, y: -0.55, z: 0 }, orientation: tilt(22) })
+    expect(observer.evaluation?.checkpointIds).toEqual(['recovery-sink-onset'])
+    observer.repeat(4, { velocity: { x: 2.5, y: 1.8, z: 0 }, orientation: tilt(24), angularVelocity: { x: 1.4, y: 0, z: 0 } })
+    expect(observer.checkpointStates['recovery-sink-stop']?.completed).toBe(true)
+    expect(observer.evaluation?.metrics?.recoveryPhase).toBe(6)
+  })
+
+  it('accepts a gentle remaining drift and ordinary height corrections after slowing down', () => {
+    const observer = new Observer(DEFAULT_DRONE_CONFIG, 6, { x: 0, y: 3, z: 0 })
+    observer.repeat(2, { velocity: { x: 0.7, y: 1.2, z: 0 }, orientation: tilt(18) })
+    expect(observer.evaluation?.metrics?.exerciseReady).toBe(1)
+    observer.tick({ velocity: { x: 1.3, y: 1.2, z: 0 }, orientation: tilt(18) })
+    expect(observer.evaluation?.checkpointIds).toEqual(['recovery-drift-onset'])
+    observer.repeat(4, { velocity: { x: 0.9, y: 1.8, z: 0 }, orientation: tilt(18), angularVelocity: { x: 1.4, y: 0, z: 0 } })
+    expect(observer.evaluation?.status).toBe('success')
+  })
+
+  it('retains distinct preparation and onset ranges after easing the thresholds', () => {
+    const sink = new Observer(DEFAULT_DRONE_CONFIG, 4, { x: 0, y: 4, z: 0 })
+    sink.repeat(4, { velocity: { x: 0, y: -0.5, z: 0 } })
+    expect(sink.evaluation?.metrics?.exerciseReady).toBe(0)
+    expect(sink.checkpointStates['recovery-sink-onset']).toBeUndefined()
+    const drift = new Observer(DEFAULT_DRONE_CONFIG, 6, { x: 0, y: 4, z: 0 })
+    drift.repeat(4, { velocity: { x: 1.2, y: 0, z: 0 } })
+    expect(drift.evaluation?.metrics?.exerciseReady).toBe(0)
+    expect(drift.checkpointStates['recovery-drift-onset']).toBeUndefined()
+    const tiltObserver = prepared(2)
+    tiltObserver.tick({ orientation: tilt(15) })
+    tiltObserver.repeat(5, { orientation: tilt(15) })
+    expect(tiltObserver.checkpointStates['recovery-tilt-level']).toBeUndefined()
+  })
+
+  it('still requires descent to slow and cannot substitute a continuing sink for recovery', () => {
+    const observer = prepared(4)
+    observer.tick({ velocity: { x: 0, y: -0.5, z: 0 } })
+    observer.repeat(5, { velocity: { x: 0, y: -0.3, z: 0 } })
+    expect(observer.checkpointStates['recovery-sink-stop']).toBeUndefined()
+    observer.repeat(4, { velocity: { x: 0, y: -0.2, z: 0 } })
+    expect(observer.checkpointStates['recovery-sink-stop']?.completed).toBe(true)
+  })
+
+  it('requires a continuous quarter-second near-level hold with low rotation after an actual tilt', () => {
     const observer = prepared(2)
     observer.tick({ orientation: tilt(20) })
-    observer.repeat(4)
-    expect(observer.evaluation?.metrics?.recoveryDwellSeconds).toBeCloseTo(0.3)
-    observer.tick({ orientation: tilt(12) })
+    observer.repeat(3)
+    expect(observer.evaluation?.metrics?.recoveryDwellSeconds).toBeCloseTo(0.2)
+    observer.tick({ orientation: tilt(13) })
     expect(observer.evaluation?.metrics?.recoveryDwellSeconds).toBe(0)
     observer.repeat(3, { angularVelocity: { x: 0, y: Math.PI, z: 0 } })
     expect(observer.checkpointStates['recovery-tilt-level']).toBeUndefined()
-    observer.repeat(6)
+    observer.repeat(4)
     expect(observer.evaluation?.checkpointIds).toEqual(['recovery-tilt-level'])
     expect(observer.evaluation?.metrics).toMatchObject({ recoveryPhase: 4, exerciseReady: 0, recoveryDwellSeconds: 0 })
-    expect(BASIC_RECOVERY_HOLD_SECONDS).toBe(0.5)
+    expect(BASIC_RECOVERY_HOLD_SECONDS).toBe(0.25)
   })
 
   it('accepts a real pitch tilt and an arbitrary heading instead of requiring one stick direction', () => {
     const observer = prepared(2)
     observer.tick({ orientation: quaternionFromRotationVector({ x: -0.3, y: 0, z: 0 }) })
     const yaw = quaternionFromRotationVector({ x: 0, y: 1.8, z: 0 })
-    observer.repeat(6, { orientation: yaw })
+    observer.repeat(4, { orientation: yaw })
     expect(observer.evaluation?.checkpointIds).toEqual(['recovery-tilt-level'])
   })
 
-  it('requires new preparation between the three exercises and refuses a fast climb as stopped descent', () => {
+  it('requires new preparation between exercises and accepts moderate climb but refuses a fast rebound', () => {
     const observer = prepared(4)
     observer.tick({ velocity: { x: 0, y: -1, z: 0 } })
     expect(observer.evaluation?.checkpointIds).toEqual(['recovery-sink-onset'])
-    observer.repeat(7, { velocity: { x: 0, y: 2, z: 0 } })
+    observer.repeat(7, { velocity: { x: 0, y: 3, z: 0 } })
     expect(observer.checkpointStates['recovery-sink-stop']).toBeUndefined()
-    observer.repeat(6)
+    observer.repeat(4, { velocity: { x: 0, y: 1.5, z: 0 } })
     expect(observer.evaluation?.checkpointIds).toEqual(['recovery-sink-stop'])
     observer.tick({ velocity: { x: 2, y: 0, z: 0 } })
     expect(observer.checkpointStates['recovery-drift-onset']).toBeUndefined()
@@ -239,17 +299,17 @@ describe('guided manual basic recovery', () => {
   it('cannot pass drift recovery while still tilted, rotating, or descending quickly', () => {
     const observer = prepared(6)
     observer.tick({ velocity: { x: 2, y: 0, z: 0 } })
-    observer.repeat(6, { orientation: tilt(20) })
+    observer.repeat(6, { orientation: tilt(25) })
     expect(observer.checkpointStates['recovery-drift-stop']).toBeUndefined()
-    observer.repeat(6, { velocity: { x: 0, y: -1, z: 0 } })
+    observer.repeat(6, { velocity: { x: 0, y: -2.2, z: 0 } })
     expect(observer.checkpointStates['recovery-drift-stop']).toBeUndefined()
-    observer.repeat(6, { angularVelocity: { x: 1, y: 0, z: 0 } })
+    observer.repeat(6, { angularVelocity: { x: 2, y: 0, z: 0 } })
     expect(observer.checkpointStates['recovery-drift-stop']).toBeUndefined()
     observer.repeat(6)
     expect(observer.evaluation?.status).toBe('success')
   })
 
-  it.each([0, 2.4])('invalidates the current episode at altitude %s and requires fresh preparation and onset', (altitude) => {
+  it.each([0, 0.9])('invalidates the current episode at altitude %s and requires fresh preparation and onset', (altitude) => {
     const previous = { status: 'continue', metrics: { recoveryPhase: 5, currentEpisodeValid: 1, recoveryDwellSeconds: 0.4, recoveryQualifying: 1 } } as const
     const interrupted = basicRecoveryEvaluator.evaluate(sample(0, { altitude }), context(5, { previousEvaluation: previous }))
     expect(interrupted.status).toBe('continue')
@@ -263,7 +323,7 @@ describe('guided manual basic recovery', () => {
     observer.tick({ velocity: { x: 0, y: -1, z: 0 } })
     expect(observer.evaluation?.metrics).toMatchObject({ currentEpisodeValid: 1, episodeInterrupted: 0 })
     expect(observer.evaluation?.checkpointIds).toBeUndefined()
-    observer.repeat(6)
+    observer.repeat(4)
     expect(observer.evaluation?.checkpointIds).toEqual(['recovery-sink-stop'])
     expect(observer.checkpointStates['recovery-tilt-level']?.completed).toBe(true)
   })
@@ -273,7 +333,7 @@ describe('guided manual basic recovery', () => {
     const previous = { status: 'continue', metrics: { recoveryPhase: 7, currentEpisodeValid: 1, recoveryDwellSeconds: 0.4, recoveryQualifying: 1, exerciseReady: 1 } } as const
     const paused = basicRecoveryEvaluator.evaluate(outside, context(7, { previousEvaluation: previous }))
     expect(paused.metrics).toMatchObject({ currentEpisodeValid: 1, recoveryDwellSeconds: 0, exerciseReady: 0, insideRecoveryArea: 0 })
-    const observer = new Observer(DEFAULT_DRONE_CONFIG, 7, { x: 24, y: 6, z: 0 })
+    const observer = new Observer(DEFAULT_DRONE_CONFIG, 7, { x: BASIC_RECOVERY_AREA_RADIUS_M - 1, y: 6, z: 0 })
     observer.evaluation = paused
     observer.repeat(6)
     expect(observer.evaluation?.status).toBe('success')
@@ -281,10 +341,10 @@ describe('guided manual basic recovery', () => {
 
   it('does not prepare or detect a new onset outside the field and cannot start sink onset without altitude margin', () => {
     const ready = { status: 'continue', metrics: { recoveryPhase: 2, exerciseReady: 1 } } as const
-    const outside = basicRecoveryEvaluator.evaluate(sample(0, { position: { x: 26, y: 6, z: 0 }, orientation: tilt(20) }), context(2, { previousEvaluation: ready }))
+    const outside = basicRecoveryEvaluator.evaluate(sample(0, { position: { x: BASIC_RECOVERY_AREA_RADIUS_M + 1, y: 6, z: 0 }, orientation: tilt(20) }), context(2, { previousEvaluation: ready }))
     expect(outside.metrics?.exerciseReady).toBe(0)
     expect(outside.checkpointIds).toBeUndefined()
-    const low = basicRecoveryEvaluator.evaluate(sample(0, { altitude: 4.4, velocity: { x: 0, y: -1, z: 0 } }), context(4, {
+    const low = basicRecoveryEvaluator.evaluate(sample(0, { altitude: 2.4, velocity: { x: 0, y: -1, z: 0 } }), context(4, {
       previousEvaluation: { status: 'continue', metrics: { recoveryPhase: 4, exerciseReady: 1 } },
     }))
     expect(low.checkpointIds).toBeUndefined()

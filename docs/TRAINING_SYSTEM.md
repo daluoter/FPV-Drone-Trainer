@@ -8,7 +8,7 @@ Split-S and Orbit / 刷鍋 lessons. See [the learning contracts](LEARNING_CONTRA
 for the current beginner workflow and [the roadmap](LEARNING_ROADMAP.md) for
 remaining work. L09 passed the user's latest manual review of the preceding
 `2026.10.23.4` / `265f818` delivery; exact local build, browser and hardware were
-not supplied. L10 is delivered in `2026.10.23.5` and awaits manual review.
+not supplied. L10 was delivered in `2026.10.23.5`; learner feedback requested easier goals and clearer demo progress. Release `2026.10.23.6` revises it under rules 6 and still awaits manual acceptance.
 
 The evaluator result is based on finite fixed-step drone state and geometry. A
 stick sequence cannot pass a lesson. Synthetic fixture success is deterministic
@@ -158,42 +158,37 @@ guidance overlay advances. See [the L09 guide](L09_WIDE_GATE.md).
 
 ### Basic recovery
 
-L10 (`basic-recovery`, rules 5) contains eight ordered checkpoints: actual launch
-ground, manual takeoff to at least 5 m above ground, tilt onset, level recovery,
-descent onset, descent recovery, drift onset and drift braking. Recommended
-working height is 6 m, with visual guidance at 5–8 m. The learner deliberately
-creates each small deviation from a visible prompt. Actual quaternion attitude,
-body rotation rate and world velocity determine onset and recovery; an input
-gesture alone cannot pass, and no live automatic disturbance or leveling is
-introduced.
+L10 (`basic-recovery`, rules 6) keeps eight ordered checkpoints: launch ground,
+manual takeoff to at least 3 m, tilt onset / recovery, descent onset / recovery,
+and drift onset / braking. Recommended height is now 4 m. The learner deliberately
+creates each deviation from a visible prompt; actual quaternion attitude and
+velocity determine onset and recovery, without live automatic disturbance or leveling.
 
-Each exercise first prepares for 0.2 s within 25 m horizontally of launch, at
-least 5 m high, with tilt at most 10°, body rotation rate at most 45°/s, absolute
-vertical speed at most 0.6 m/s and horizontal speed at most 1 m/s. Readiness
-must already be latched from a preceding sample before an onset can count. Then:
+Preparation lasts 0.1 s within a 40 m horizontal radius and at least 3 m above
+ground, with body rate at most 90°/s. Its other conditions depend on the exercise:
 
-| Exercise | Observed onset | Recovery for 0.5 consecutive seconds |
-| --- | --- | --- |
-| Tilt | Actual tilt at least 15° | Tilt at most 10° and body rate at most 45°/s |
-| Descent | Vertical velocity at most −0.8 m/s while at least 4.5 m high | Absolute vertical speed at most 0.6 m/s, near-level attitude and low body rate |
-| Drift | Horizontal speed at least 1.5 m/s | Horizontal speed at most 0.8 m/s, absolute vertical speed at most 0.8 m/s, near-level attitude and low body rate |
+| Exercise | Preparation | Observed onset | Recovery for 0.25 consecutive seconds |
+| --- | --- | --- | --- |
+| Tilt | Tilt ≤12°, vertical speed within ±1.5 m/s; horizontal drift allowed | Tilt ≥15° | Tilt ≤12° and body rate ≤90°/s |
+| Descent | Tilt ≤25°, horizontal speed ≤3 m/s, vertical velocity −0.2 to +1.5 m/s | Vertical velocity ≤−0.5 m/s while at least 2.5 m high | Vertical velocity −0.2 to +2 m/s, tilt ≤25° and body rate ≤90°/s |
+| Drift | Tilt ≤20°, horizontal speed ≤0.8 m/s, vertical speed within ±1.5 m/s | Horizontal speed ≥1.2 m/s | Horizontal speed ≤1.0 m/s, vertical speed within ±2 m/s, tilt ≤20° and body rate ≤90°/s |
 
-All recoveries remain airborne, at least 2.5 m above ground, inside the broad
-practice area. Landing cannot count as stopping descent or drift. A short flash
-through a threshold does not replace the consecutive 0.5 s confirmation.
-Contact or insufficient height invalidates the current onset and dwell; after
-climbing and preparing again, the learner must reproduce the current deviation
-even if its onset checkpoint was already observed. Leaving the area resets
-preparation / dwell but retains an already valid onset; returning allows that
-recovery to continue. Previously completed exercise pairs stay completed. A
-terminal retry clears the attempt's checkpoints. Crash, disarm, focus loss, reset and invalid/discontinuous
-samples remain terminal. Practice is untimed; challenge allows 300 s.
+Readiness must be latched from a preceding sample. Preparation and onset retain
+separate ranges, so a continuing sink or drift cannot prepare and trigger itself.
+All recoveries remain airborne, at least 1 m above ground, inside the practice area.
+Landing cannot substitute for stopping descent or drift, and a short flash does
+not replace the 0.25 s confirmation. Contact or insufficient height invalidates
+the current onset and dwell; after climbing and preparing again the learner must
+reproduce that deviation. Earlier completed exercise pairs remain. Leaving the
+area resets preparation / dwell while retaining an already valid onset; return
+allows recovery to continue. Terminal retry clears the attempt's checkpoints.
+Crash, disarm, focus loss, reset and invalid/discontinuous samples stay terminal.
+Practice is untimed; challenge allows 300 s.
 
-These are prototype training thresholds pending human calibration. There is no
-fixed-position return, heading target or long hover dwell. The motion HUD and
-stage prompt show preparation, onset and recovery explicitly, including during
-paused ghost playback. The visual area is not a physical fence. See [the L10
-tryout guide](L10_BASIC_RECOVERY.md).
+The wider ranges reduce all-axis hover demands, especially between steps 4 and 5.
+They remain prototype thresholds pending learner and pilot calibration. No fixed
+XYZ return, heading target or long hover dwell is imposed. The motion HUD reads
+live state or the paused ghost as appropriate. See [the L10 guide](L10_BASIC_RECOVERY.md).
 
 ### Split-S
 
@@ -231,7 +226,7 @@ the exact shared collider boxes; the opening outline and arrow are guidance
 only. `setWideGateTarget(id | null)` toggles those overlays without removing
 passed physical frames. Other lesson targets, the Split-S reference and orbit
 tower remain visual guides without static collision. L10 appends `recovery-zone`
-at launch X/Z and ground + 6 m, with size `{ x: 50, y: 3, z: 50 }`. The
+at launch X/Z and ground + 4 m, with a 40 m horizontal practice radius. The
 `basic-recovery-field` is a visual practice boundary and height guide; it does
 not add collision or move the drone. Stage changes preserve the scene and canvas.
 
@@ -265,20 +260,32 @@ input source, challenge/practice label and assistance state. Contextual progress
 uses separate validated envelopes, preserving the original v1 document. Result
 and best-score views remain bound to the result context after changing settings;
 failed writes are visible and malformed history is not automatically overwritten.
-Current L06–L10 attempts use rules 5; earlier lesson scopes stay unchanged
-(including rules 4 for L03–L05). L10 is a new lesson with empty initial progress;
-its recovery checkpoints do not rewrite earlier completion or increase their
-rules/physics version. Physics context remains version 1. Settings, input source
-and practice/challenge remain separate comparison conditions.
+Current L10 attempts use rules 6; L06–L09 stay on rules 5 and earlier scopes
+remain unchanged, including rules 4 for L03–L05. The prior L10 rules-5 document
+remains readable as historical data and is not overwritten or relabeled as a
+rules-6 completion. Current progress loads the per-lesson rule scope. Physics
+context stays version 1; settings, input source and practice/challenge remain
+separate comparison conditions.
 
-Four-axis and L01/L03–L10 examples are bounded recordings generated through the real
-240 Hz simulator. They play through the existing independent ghost mechanism;
-pose, normalized input and captions share its timeline. They never feed training,
-never grant progress or mastery and remain labeled as simulated pending pilot
-review. The L09 recording uses the same physical gate field as live practice.
-The L10 recording produces the actual deviation / recovery sequence through
-normal RC inputs and physics; it never injects its inputs into live practice.
+The 12 existing demo kinds cover three L00 axis examples, L01 and L03–L10.
+Their bounded recordings are generated through the real 240 Hz simulator and
+play through the independent ghost. This release does not add L02, Split-S or
+Orbit demonstration videos.
 
+`createDemonstrationProgress` observes each retained course recording once with
+its own checkpoint/evaluator state, outside the live session and progress store.
+It creates a bounded immutable timeline; playback reads the current/completed/
+pending snapshot for its clock. L00 has authored teaching-action chapters rather
+than flight mastery checkpoints. Clicking a chapter pauses at its retained start;
+seeking backward restores the earlier demo checkmarks. The demo panel replaces
+live objective/checkpoint/result presentation while viewing, then restores the
+unchanged learner view on exit. No demo progress is saved as learner completion.
+
+Pose, recorded sticks, captions, scene stage and independent progress share the
+same playback clock. L10 starts at 0.5×, with 2 s to read preparation and 0.75 s
+to observe a real onset before its recorded correction. The L09 demo uses the
+same physical frame field as live practice. All remain labeled as simulated
+pending pilot review; their generated controls never override live practice.
 
 ## Historical beginner-school batch two (rules 2)
 

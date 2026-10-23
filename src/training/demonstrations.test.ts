@@ -20,7 +20,12 @@ import { COORDINATED_TURN_LESSON } from './coordinatedTurn'
 import { SQUARE_ROUTE_LESSON } from './squareRoute'
 import { FIGURE_EIGHT_LESSON } from './figureEight'
 import { WIDE_GATE_LESSON } from './wideGate'
-import { BASIC_RECOVERY_LESSON, measureBasicRecoveryMotion } from './basicRecovery'
+import {
+  BASIC_RECOVERY_DRIFT_ONSET_MPS, BASIC_RECOVERY_DRIFT_STOP_MPS, BASIC_RECOVERY_HOLD_SECONDS,
+  BASIC_RECOVERY_LESSON, BASIC_RECOVERY_LEVEL_DEGREES, BASIC_RECOVERY_MAX_BODY_RATE_DEGREES,
+  BASIC_RECOVERY_MIN_HEIGHT_M, BASIC_RECOVERY_SINK_CLIMB_MPS, BASIC_RECOVERY_SINK_ONSET_MPS,
+  BASIC_RECOVERY_SINK_STOP_MPS, BASIC_RECOVERY_TILT_ONSET_DEGREES, measureBasicRecoveryMotion,
+} from './basicRecovery'
 import { createWideGates } from '../world/wideGates'
 import { findSweptObstacleHit, OBSTACLE_CRASH_WARNING_PREFIX } from '../simulation/obstacles'
 import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample, TrainingSceneReference } from './types'
@@ -75,9 +80,9 @@ describe('bounded simulation teaching recordings', () => {
     const before = JSON.stringify(settings)
     const demo = createTeachingDemonstration(settings, 'basic-recovery')
     const { launch } = createTrainingFieldAnchors(settings.drone)
-    expect(demo).toMatchObject({ lessonId: 'basic-recovery', source: 'simulated', rulesVersion: 5, physicsVersion: 1 })
+    expect(demo).toMatchObject({ lessonId: 'basic-recovery', source: 'simulated', rulesVersion: 6, physicsVersion: 1 })
     expect(demo.recording.samples[0]!.positionM).toEqual(launch)
-    expect(demo.recording.durationSeconds).toBeGreaterThan(10)
+    expect(demo.recording.durationSeconds).toBeGreaterThan(15)
     expect(demo.recording.durationSeconds).toBeLessThanOrEqual(120)
     expect(demo.recording).toMatchObject({ capacity: 7_500, decimation: 4, droppedSamples: 0 })
     expect(demo.recording.samples.length).toBeLessThanOrEqual(7_500)
@@ -131,19 +136,31 @@ describe('bounded simulation teaching recordings', () => {
     const sinkRecovered = observedAt('recovery-sink-stop')
     const driftOnset = observedAt('recovery-drift-onset')
     const driftRecovered = observedAt('recovery-drift-stop')
-    expect(measureBasicRecoveryMotion(tiltOnset).tiltDegrees).toBeGreaterThanOrEqual(15)
-    expect(measureBasicRecoveryMotion(tiltRecovered).tiltDegrees).toBeLessThanOrEqual(10)
-    expect(measureBasicRecoveryMotion(sinkOnset).verticalSpeedMps).toBeLessThanOrEqual(-0.8)
-    expect(Math.abs(measureBasicRecoveryMotion(sinkRecovered).verticalSpeedMps)).toBeLessThanOrEqual(0.6)
-    expect(measureBasicRecoveryMotion(driftOnset).horizontalSpeedMps).toBeGreaterThanOrEqual(1.5)
-    expect(measureBasicRecoveryMotion(driftRecovered).horizontalSpeedMps).toBeLessThanOrEqual(0.8)
+    expect(measureBasicRecoveryMotion(tiltOnset).tiltDegrees).toBeGreaterThanOrEqual(BASIC_RECOVERY_TILT_ONSET_DEGREES)
+    expect(measureBasicRecoveryMotion(tiltRecovered).tiltDegrees).toBeLessThanOrEqual(BASIC_RECOVERY_LEVEL_DEGREES)
+    expect(measureBasicRecoveryMotion(sinkOnset).verticalSpeedMps).toBeLessThanOrEqual(-BASIC_RECOVERY_SINK_ONSET_MPS)
+    expect(measureBasicRecoveryMotion(sinkRecovered).verticalSpeedMps).toBeGreaterThanOrEqual(-BASIC_RECOVERY_SINK_STOP_MPS)
+    expect(measureBasicRecoveryMotion(sinkRecovered).verticalSpeedMps).toBeLessThanOrEqual(BASIC_RECOVERY_SINK_CLIMB_MPS)
+    expect(measureBasicRecoveryMotion(driftOnset).horizontalSpeedMps).toBeGreaterThanOrEqual(BASIC_RECOVERY_DRIFT_ONSET_MPS)
+    expect(measureBasicRecoveryMotion(driftRecovered).horizontalSpeedMps).toBeLessThanOrEqual(BASIC_RECOVERY_DRIFT_STOP_MPS)
     expect(tiltOnset.normalizedInput!.roll).toBeGreaterThan(0)
     expect(sinkOnset.normalizedInput!.throttle).toBeLessThan(sinkRecovered.normalizedInput!.throttle)
     expect(driftOnset.normalizedInput!.pitch).toBeLessThan(0)
     for (const [onset, recovered] of [[tiltOnset, tiltRecovered], [sinkOnset, sinkRecovered], [driftOnset, driftRecovered]]) {
-      expect(recovered.timestampSeconds - onset.timestampSeconds).toBeGreaterThanOrEqual(0.5)
-      expect(recovered.positionM.y - settings.drone.ground.heightM).toBeGreaterThanOrEqual(2.5)
-      expect(measureBasicRecoveryMotion(recovered).bodyRateDegreesPerSecond).toBeLessThanOrEqual(45)
+      expect(recovered.timestampSeconds - onset.timestampSeconds).toBeGreaterThanOrEqual(0.75 + BASIC_RECOVERY_HOLD_SECONDS)
+      expect(recovered.positionM.y - settings.drone.ground.heightM).toBeGreaterThanOrEqual(BASIC_RECOVERY_MIN_HEIGHT_M)
+      expect(measureBasicRecoveryMotion(recovered).bodyRateDegreesPerSecond).toBeLessThanOrEqual(BASIC_RECOVERY_MAX_BODY_RATE_DEGREES)
+    }
+    for (const phase of [2, 4, 6]) {
+      const prepared = demo.cues.find((cue) => cue.recoveryPhase === phase && cue.text.startsWith('準備完成；'))!
+      const induced = demo.cues.find((cue) => cue.recoveryPhase === phase && cue.text.includes('現在開始：'))!
+      expect(prepared).toBeDefined()
+      expect(induced.timeSeconds - prepared.timeSeconds).toBeGreaterThanOrEqual(2)
+    }
+    for (const phase of [3, 5, 7]) {
+      const observed = demo.cues.find((cue) => cue.recoveryPhase === phase)!
+      const corrected = demo.cues.find((cue) => cue.recoveryPhase === phase && cue.text.includes('現在修正：'))!
+      expect(corrected.timeSeconds - observed.timeSeconds).toBeGreaterThanOrEqual(0.75)
     }
     expect(JSON.stringify(settings)).toBe(before)
   })

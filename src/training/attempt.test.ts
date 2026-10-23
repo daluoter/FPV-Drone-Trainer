@@ -58,7 +58,8 @@ describe('training attempt provenance', () => {
     expect(isTrainingAttemptContext({ ...context(), rulesVersion: 3 })).toBe(true)
     expect(isTrainingAttemptContext({ ...context(), rulesVersion: 4 })).toBe(true)
     expect(isTrainingAttemptContext({ ...context(), rulesVersion: 5 })).toBe(true)
-    expect(isTrainingAttemptContext({ ...context(), rulesVersion: 6 })).toBe(false)
+    expect(isTrainingAttemptContext({ ...context(), rulesVersion: 6 })).toBe(true)
+    expect(isTrainingAttemptContext({ ...context(), rulesVersion: 7 })).toBe(false)
     expect(isTrainingAttemptContext({ ...context(), settingsFingerprint: '' })).toBe(false)
     expect(() => trainingAttemptContextKey({ ...context(), inputSource: 'unknown' } as unknown as TrainingAttemptContext)).toThrow()
   })
@@ -69,7 +70,7 @@ describe('training attempt provenance', () => {
     expect(trainingRulesVersionForLesson('square-route')).toBe(5)
     expect(trainingRulesVersionForLesson('figure-eight')).toBe(5)
     expect(trainingRulesVersionForLesson('wide-gate')).toBe(5)
-    expect(trainingRulesVersionForLesson('basic-recovery')).toBe(5)
+    expect(trainingRulesVersionForLesson('basic-recovery')).toBe(6)
     for (const lessonId of [null, 'takeoff', 'hover', 'straight-line', 'landing', 'direction-control', 'split-s', 'orbit']) {
       expect(trainingRulesVersionForLesson(lessonId)).toBe(4)
     }

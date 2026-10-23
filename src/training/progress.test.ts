@@ -197,7 +197,7 @@ describe('training progress persistence', () => {
     storage.setItem(key, JSON.stringify({ schemaVersion: 1, context: context({ inputSource: 'keyboard' }), progress: createDefaultTrainingProgress() }))
     expect(store.load(source).loaded).toBe(false)
     expect(store.load(source).errors.join(' ')).toMatch(/context.*incompatible/i)
-    const invalid = { ...source, rulesVersion: 6 } as unknown as TrainingAttemptContext
+    const invalid = { ...source, rulesVersion: 7 } as unknown as TrainingAttemptContext
     expect(store.recordResult(result({ attemptContext: invalid })).saved).toBe(false)
     expect(store.loadCurrent(invalid).errors.join(' ')).toMatch(/context.*invalid/i)
     expect(storage.getItem(TRAINING_PROGRESS_STORAGE_KEY)).toBeNull()
@@ -276,22 +276,31 @@ describe('training progress persistence', () => {
     }
     expect(afterL09.lessons['basic-recovery']).toMatchObject({ completed: false, attempts: 0 })
     expect(store.recordResult(result({
-      lessonId: 'basic-recovery', sessionId: 'basic-recovery:new', attemptContext: revised,
+      lessonId: 'basic-recovery', sessionId: 'basic-recovery:original', attemptContext: revised,
+      completedCheckpoints: 8, totalCheckpoints: 8,
+    })).saved).toBe(true)
+    const originalL10Scope = storage.getItem(trainingAttemptContextKey(revised))
+    expect(store.loadCurrent(revised).progress.lessons['basic-recovery']).toMatchObject({ completed: false, attempts: 0 })
+    expect(store.recordResult(result({
+      lessonId: 'basic-recovery', sessionId: 'basic-recovery:new', attemptContext: { ...revised, rulesVersion: 6 },
       completedCheckpoints: 8, totalCheckpoints: 8, metrics: { exercisesCompleted: 3 },
     })).saved).toBe(true)
     const afterL10 = new TrainingProgressStore(storage).loadCurrent(revised).progress
     expect(afterL10.lessons['basic-recovery']).toMatchObject({ completed: true, attempts: 1 })
+    expect(store.load(revised).progress.lessons['basic-recovery']?.best?.sessionId).toBe('basic-recovery:original')
+    expect(storage.getItem(trainingAttemptContextKey(revised))).toBe(originalL10Scope)
     for (const lessonId of ['straight-line', 'landing', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate']) {
       expect(afterL10.lessons[lessonId]).toEqual(afterL09.lessons[lessonId])
     }
     expect(storage.getItem(trainingAttemptContextKey(baseline))).toBe(originalBaseline)
   })
 
-  it('keeps both current rule scopes isolated by mode, preset, input and settings', () => {
+  it('keeps all current rule scopes isolated by mode, preset, input and settings', () => {
     const store = new TrainingProgressStore(new MemoryStorage())
     const baseline = context({ rulesVersion: 4, mode: 'practice' })
     store.recordResult(result({ lessonId: 'direction-control', attemptContext: baseline }))
     store.recordResult(result({ lessonId: 'coordinated-turn', attemptContext: { ...baseline, rulesVersion: 5 } }))
+    store.recordResult(result({ lessonId: 'basic-recovery', attemptContext: { ...baseline, rulesVersion: 6 } }))
     for (const variation of [
       { mode: 'challenge' as const },
       { presetId: 'standard' as const },
@@ -301,17 +310,18 @@ describe('training progress persistence', () => {
       const loaded = store.loadCurrent({ ...baseline, ...variation })
       expect(loaded.progress.lessons['direction-control']?.completed).toBe(false)
       expect(loaded.progress.lessons['coordinated-turn']?.completed).toBe(false)
+      expect(loaded.progress.lessons['basic-recovery']?.completed).toBe(false)
       expect(loaded.errors).toEqual([])
     }
   })
 
   it.each([null, '{broken-json'])('retains a healthy current scope when the other scope is missing or corrupt (%s)', (damaged) => {
-    for (const healthyVersion of [4, 5] as const) {
+    for (const healthyVersion of [4, 5, 6] as const) {
       const storage = new MemoryStorage()
       const store = new TrainingProgressStore(storage)
       const healthy = context({ rulesVersion: healthyVersion })
       const other = context({ rulesVersion: healthyVersion === 4 ? 5 : 4 })
-      const healthyLessonId = healthyVersion === 4 ? 'direction-control' : 'coordinated-turn'
+      const healthyLessonId = healthyVersion === 4 ? 'direction-control' : healthyVersion === 5 ? 'coordinated-turn' : 'basic-recovery'
       const missingLessonId = healthyVersion === 4 ? 'coordinated-turn' : 'direction-control'
       expect(store.recordResult(result({ lessonId: healthyLessonId, attemptContext: healthy })).saved).toBe(true)
       const otherKey = trainingAttemptContextKey(other)

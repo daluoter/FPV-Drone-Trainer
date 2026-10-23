@@ -1,4 +1,28 @@
 import type { TrainingEvaluation } from './types'
+import {
+  BASIC_RECOVERY_AREA_RADIUS_M as RECOVERY_AREA_RADIUS,
+  BASIC_RECOVERY_TARGET_HEIGHT_M as RECOVERY_TARGET_HEIGHT,
+  BASIC_RECOVERY_MIN_PREPARATION_HEIGHT_M as RECOVERY_PREP_HEIGHT,
+  BASIC_RECOVERY_MIN_HEIGHT_M as RECOVERY_MIN_HEIGHT,
+  BASIC_RECOVERY_SINK_ONSET_MIN_HEIGHT_M as RECOVERY_SINK_HEIGHT,
+  BASIC_RECOVERY_HOLD_SECONDS as RECOVERY_HOLD_SECONDS,
+  BASIC_RECOVERY_PREPARATION_SECONDS as RECOVERY_PREP_SECONDS,
+  BASIC_RECOVERY_PREPARATION_VERTICAL_MPS as RECOVERY_PREP_VERTICAL,
+  BASIC_RECOVERY_PREPARATION_HORIZONTAL_MPS as RECOVERY_PREP_HORIZONTAL,
+  BASIC_RECOVERY_DRIFT_PREPARATION_MPS as RECOVERY_DRIFT_PREP,
+  BASIC_RECOVERY_TILT_ONSET_DEGREES as RECOVERY_TILT_ONSET,
+  BASIC_RECOVERY_LEVEL_DEGREES as RECOVERY_TILT_LEVEL,
+  BASIC_RECOVERY_SINK_LEVEL_DEGREES as RECOVERY_SINK_LEVEL,
+  BASIC_RECOVERY_DRIFT_LEVEL_DEGREES as RECOVERY_DRIFT_LEVEL,
+  BASIC_RECOVERY_MAX_BODY_RATE_DEGREES as RECOVERY_MAX_RATE,
+  BASIC_RECOVERY_SINK_ONSET_MPS as RECOVERY_SINK_ONSET,
+  BASIC_RECOVERY_SINK_STOP_MPS as RECOVERY_SINK_STOP,
+  BASIC_RECOVERY_SINK_CLIMB_MPS as RECOVERY_SINK_CLIMB,
+  BASIC_RECOVERY_DRIFT_ONSET_MPS as RECOVERY_DRIFT_ONSET,
+  BASIC_RECOVERY_DRIFT_STOP_MPS as RECOVERY_DRIFT_STOP,
+  BASIC_RECOVERY_DRIFT_VERTICAL_MPS as RECOVERY_DRIFT_VERTICAL,
+  BASIC_RECOVERY_TIME_LIMIT_SECONDS as RECOVERY_TIME_LIMIT,
+} from './basicRecovery'
 import { LANDING_LIFTOFF_HEIGHT_M, LANDING_ZONE_DISTANCE_M, LANDING_ZONE_RADIUS_M } from './landing'
 import {
   STRAIGHT_LINE_BRAKE_ZONE_START_M,
@@ -71,8 +95,8 @@ const METRICS: Readonly<Record<string, MetricDefinition>> = {
   exercisesCompleted: { label: '已完成恢復練習', unit: '/ 3', digits: 0 },
   tiltDegrees: { label: '機身傾角', unit: '°', digits: 1 },
   bodyRateDegreesPerSecond: { label: '機身旋轉速度', unit: '°/s', digits: 1 },
-  preparationDwellSeconds: { label: '準備確認時間', unit: '/ 0.20 s', digits: 2 },
-  recoveryDwellSeconds: { label: '恢復確認時間', unit: '/ 0.50 s', digits: 2 },
+  preparationDwellSeconds: { label: '準備確認時間', unit: `/ ${RECOVERY_PREP_SECONDS.toFixed(2)} s`, digits: 2 },
+  recoveryDwellSeconds: { label: '恢復確認時間', unit: `/ ${RECOVERY_HOLD_SECONDS.toFixed(2)} s`, digits: 2 },
   positionErrorM: { label: '位置偏差', unit: 'm', digits: 2 },
   radialErrorM: { label: '繞行半徑偏差', unit: 'm', digits: 2 },
   orbitRadiusM: { label: '繞行半徑', unit: 'm', digits: 2 },
@@ -101,13 +125,14 @@ function metricPriorities(metrics: Readonly<Record<string, number>>, lessonId: s
     if (metrics.recoveryPhase <= 1 || metrics.groundTouching > 0.5) return ['altitudeM', 'groundTouching', 'exercisesCompleted']
     if (metrics.recoveryPhase >= 8) return ['exercisesCompleted', 'altitudeM', 'horizontalSpeedMps']
     if (metrics.insideRecoveryArea === 0) return ['launchDistanceM', 'altitudeM', 'exercisesCompleted']
-    if (Number.isFinite(metrics.altitudeM) && metrics.altitudeM < 2.5) return ['altitudeM', 'verticalSpeedMps', 'exercisesCompleted']
+    if (Number.isFinite(metrics.altitudeM) && metrics.altitudeM < RECOVERY_MIN_HEIGHT) return ['altitudeM', 'verticalSpeedMps', 'exercisesCompleted']
     if (!(metrics.currentEpisodeValid > 0.5) && !(metrics.exerciseReady > 0.5)) {
-      if (Number.isFinite(metrics.altitudeM) && metrics.altitudeM < 5) return ['altitudeM', 'verticalSpeedMps', 'preparationDwellSeconds']
-      if (metrics.tiltDegrees > 10) return ['tiltDegrees', 'bodyRateDegreesPerSecond', 'preparationDwellSeconds']
-      if (metrics.bodyRateDegreesPerSecond > 45) return ['bodyRateDegreesPerSecond', 'tiltDegrees', 'preparationDwellSeconds']
-      if (metrics.horizontalSpeedMps > 1) return ['horizontalSpeedMps', 'tiltDegrees', 'preparationDwellSeconds']
-      if (Math.abs(metrics.verticalSpeedMps) > 0.6) return ['verticalSpeedMps', 'altitudeM', 'preparationDwellSeconds']
+      const limits = basicRecoveryPreparationLimits(metrics)
+      if (Number.isFinite(metrics.altitudeM) && metrics.altitudeM < RECOVERY_PREP_HEIGHT) return ['altitudeM', 'verticalSpeedMps', 'preparationDwellSeconds']
+      if (metrics.tiltDegrees > limits.tilt) return ['tiltDegrees', 'bodyRateDegreesPerSecond', 'preparationDwellSeconds']
+      if (metrics.bodyRateDegreesPerSecond > RECOVERY_MAX_RATE) return ['bodyRateDegreesPerSecond', 'tiltDegrees', 'preparationDwellSeconds']
+      if (limits.horizontal !== null && metrics.horizontalSpeedMps > limits.horizontal) return ['horizontalSpeedMps', 'tiltDegrees', 'preparationDwellSeconds']
+      if (metrics.verticalSpeedMps < limits.minVertical || metrics.verticalSpeedMps > RECOVERY_PREP_VERTICAL) return ['verticalSpeedMps', 'altitudeM', 'preparationDwellSeconds']
       return ['altitudeM', 'tiltDegrees', 'preparationDwellSeconds']
     }
     if (metrics.recoveryPhase <= 3) return ['tiltDegrees', 'bodyRateDegreesPerSecond', 'recoveryDwellSeconds']
@@ -225,7 +250,7 @@ const LESSON_HINTS: Readonly<Record<string, string>> = {
   'square-route': '從地面自行起飛，依序沿四段直線與右轉角飛行，再回到起點上方；漏點可補飛，不需精準速度、停留或降落。',
   'figure-eight': '從地面自行起飛，進中央入口後先飛左圈，經中央換向點接右圈，再回到中央空中終點；依目前亮起的目標前進，漏點可補飛。',
   'wide-gate': '從地面自行起飛，依序向前穿過三道寬門的門洞；對準約 3 m 高的中心並留出槳葉空間，碰到實體門框會墜毀。',
-  'basic-recovery': '從地面自行起飛到約 6 m，按提示製造小幅傾斜、下沉與漂移，再親手修正；先偵測到實際偏差，才開始判定恢復。',
+  'basic-recovery': `從地面自行起飛到約 ${RECOVERY_TARGET_HEIGHT} m，按提示製造小幅傾斜、下沉與漂移，再親手修正；先偵測到實際偏差，才開始判定恢復。`,
   'split-s': '先確認進入高度，再依序完成倒置、下降半圈與恢復正向。',
   orbit: '沿目標周圍保持同一繞行方向，先穩住半徑與高度。',
 }
@@ -284,14 +309,26 @@ export function basicRecoveryStageLabel(phase: number): string {
     ? BASIC_RECOVERY_STAGE_LABELS[phase] : '目前恢復練習'
 }
 
+function basicRecoveryPreparationLimits(metrics: Readonly<Record<string, number>>) {
+  const phase = Number.isFinite(metrics.recoveryPhase) ? metrics.recoveryPhase : 2
+  return {
+    tilt: phase <= 3 ? RECOVERY_TILT_LEVEL : phase <= 5 ? RECOVERY_SINK_LEVEL : RECOVERY_DRIFT_LEVEL,
+    horizontal: phase <= 3 ? null : phase <= 5 ? RECOVERY_PREP_HORIZONTAL : RECOVERY_DRIFT_PREP,
+    minVertical: phase >= 4 && phase <= 5 ? -RECOVERY_SINK_STOP : -RECOVERY_PREP_VERTICAL,
+  }
+}
+
 function basicRecoveryPreparation(metrics: Readonly<Record<string, number>>): string {
-  if (Number.isFinite(metrics.altitudeM) && metrics.altitudeM < 5) return `目前離地 ${metrics.altitudeM.toFixed(1)} m；先自行升到 5 m 以上，建議約 6 m，再準備製造小偏差。`
-  if (Number.isFinite(metrics.tiltDegrees) && metrics.tiltDegrees > 10) return `目前傾角 ${metrics.tiltDegrees.toFixed(1)}°；先主動修回 10° 內，準備下一次小偏差。`
-  if (Number.isFinite(metrics.bodyRateDegreesPerSecond) && metrics.bodyRateDegreesPerSecond > 45) return `目前旋轉速度 ${metrics.bodyRateDegreesPerSecond.toFixed(1)}°/s；先小量修正並回中，讓旋轉減緩到 45°/s 內。`
-  if (Number.isFinite(metrics.horizontalSpeedMps) && metrics.horizontalSpeedMps > 1) return `目前水平速度 ${metrics.horizontalSpeedMps.toFixed(1)} m/s；先朝移動反方向適度傾斜減速至 1.0 m/s 內，再主動帶回接近水平。`
-  if (Number.isFinite(metrics.verticalSpeedMps) && Math.abs(metrics.verticalSpeedMps) > 0.6) return `目前升降速度 ${metrics.verticalSpeedMps.toFixed(1)} m/s（上＋／下−）；用小量油門調整到 ±0.6 m/s 內，保留高度再準備。`
-  const dwell = Number.isFinite(metrics.preparationDwellSeconds) ? Math.max(0, Math.min(0.2, metrics.preparationDwellSeconds)).toFixed(2) : '0.00'
-  return `準備確認 ${dwell}／0.20 s：保持離地 5 m 以上、接近水平，讓升降、漂移與旋轉稍微減緩，確認後才依提示製造偏差。不要求固定位置或精準懸停。`
+  const limits = basicRecoveryPreparationLimits(metrics)
+  if (Number.isFinite(metrics.altitudeM) && metrics.altitudeM < RECOVERY_PREP_HEIGHT) return `目前離地 ${metrics.altitudeM.toFixed(1)} m；先自行升到 ${RECOVERY_PREP_HEIGHT} m 以上，建議約 ${RECOVERY_TARGET_HEIGHT} m，再準備製造小偏差。`
+  if (Number.isFinite(metrics.tiltDegrees) && metrics.tiltDegrees > limits.tilt) return `目前傾角 ${metrics.tiltDegrees.toFixed(1)}°；先主動修回 ${limits.tilt}° 內，準備下一次小偏差。`
+  if (Number.isFinite(metrics.bodyRateDegreesPerSecond) && metrics.bodyRateDegreesPerSecond > RECOVERY_MAX_RATE) return `目前旋轉速度 ${metrics.bodyRateDegreesPerSecond.toFixed(1)}°/s；先小量修正並回中，讓旋轉減緩到 ${RECOVERY_MAX_RATE}°/s 內。`
+  if (limits.horizontal !== null && Number.isFinite(metrics.horizontalSpeedMps) && metrics.horizontalSpeedMps > limits.horizontal) return `目前水平速度 ${metrics.horizontalSpeedMps.toFixed(1)} m/s；先朝移動反方向適度傾斜減速至 ${limits.horizontal.toFixed(1)} m/s 內，再主動帶回接近水平。`
+  if (Number.isFinite(metrics.verticalSpeedMps) && (metrics.verticalSpeedMps < limits.minVertical || metrics.verticalSpeedMps > RECOVERY_PREP_VERTICAL)) return `目前升降速度 ${metrics.verticalSpeedMps.toFixed(1)} m/s（上＋／下−）；用小量油門調整到 ${limits.minVertical}～+${RECOVERY_PREP_VERTICAL} m/s，保留高度再準備。`
+  const dwell = Number.isFinite(metrics.preparationDwellSeconds) ? Math.max(0, Math.min(RECOVERY_PREP_SECONDS, metrics.preparationDwellSeconds)).toFixed(2) : '0.00'
+  const preparation = metrics.recoveryPhase <= 3 ? '先把機身稍微帶回平順，容許持續水平移動'
+    : metrics.recoveryPhase <= 5 ? '容許些微傾斜與側移，先止住既有下沉' : '先降低水平速度，容許些微傾斜與升降'
+  return `準備確認 ${dwell}／${RECOVERY_PREP_SECONDS.toFixed(2)} s：保持離地 ${RECOVERY_PREP_HEIGHT} m 以上，${preparation}；確認後才依提示製造偏差。不要求固定位置或精準懸停。`
 }
 
 function basicRecoveryObjective(metrics: Readonly<Record<string, number>>): TrainingObjective {
@@ -302,19 +339,19 @@ function basicRecoveryObjective(metrics: Readonly<Record<string, number>>): Trai
   }
   const title = `${phase + 1}／8 ${basicRecoveryStageLabel(phase)}`
   if (phase === 0) return { title, detail: '先在起飛區實際地面開始；倒數後保持低油門，明確 Arm，再自行加油門起飛。' }
-  if (phase === 1) return { title, detail: '從地面自行起飛到離地 5 m 以上，建議約 6 m，取得修正餘裕；接著依提示製造小偏差，再親手恢復。' }
+  if (phase === 1) return { title, detail: `從地面自行起飛到離地 ${RECOVERY_PREP_HEIGHT} m 以上，建議約 ${RECOVERY_TARGET_HEIGHT} m，取得修正餘裕；接著依提示製造小偏差，再親手恢復。` }
   const retained = '先前已完成的整項練習會保留；本項需重新製造偏差，再修正。'
   if (metrics.groundTouching > 0.5) return {
     title,
-    detail: `目前已接地，碰地停住不算空中恢復；未墜毀時可就地自行起飛，回到 5 m 以上完成準備。${retained}`,
+    detail: `目前已接地，碰地停住不算空中恢復；未墜毀時可就地自行起飛，回到 ${RECOVERY_PREP_HEIGHT} m 以上完成準備。${retained}`,
   }
   if (metrics.insideRecoveryArea === 0) return {
     title,
-    detail: `目前超出起飛點半徑 25 m 的練習區，先回到區內；不必回到原起飛點。${metrics.currentEpisodeValid > 0.5 ? '本項已偵測到的偏差會保留，回到區內可繼續恢復確認；出區期間不累積確認時間。' : '回到區內後重新準備，再依提示製造小偏差。'}先前已完成的整項練習會保留。`,
+    detail: `目前超出起飛點半徑 ${RECOVERY_AREA_RADIUS} m 的練習區，先回到區內；不必回到原起飛點。${metrics.currentEpisodeValid > 0.5 ? '本項已偵測到的偏差會保留，回到區內可繼續恢復確認；出區期間不累積確認時間。' : '回到區內後重新準備，再依提示製造小偏差。'}先前已完成的整項練習會保留。`,
   }
-  if (Number.isFinite(metrics.altitudeM) && metrics.altitudeM < 2.5) return {
+  if (Number.isFinite(metrics.altitudeM) && metrics.altitudeM < RECOVERY_MIN_HEIGHT) return {
     title,
-    detail: `目前離地 ${metrics.altitudeM.toFixed(1)} m，低於本項恢復需要的 2.5 m 餘裕；先止住下沉並升回 5 m 以上，再重新準備。${retained}`,
+    detail: `目前離地 ${metrics.altitudeM.toFixed(1)} m，低於本項恢復需要的 ${RECOVERY_MIN_HEIGHT} m 餘裕；先止住下沉並升回 ${RECOVERY_PREP_HEIGHT} m 以上，再重新準備。${retained}`,
   }
   const interrupted = metrics.episodeInterrupted > 0.5
   const observed = metrics.currentEpisodeValid > 0.5
@@ -328,32 +365,32 @@ function basicRecoveryObjective(metrics: Readonly<Record<string, number>>): Trai
     const again = interrupted ? '請重新製造本項偏差；先前的偏差不會沿用。' : '準備完成，現在由你製造小幅偏差。'
     if (exercise === 'tilt') return {
       title,
-      detail: `${again}小量推動 Roll 或 Pitch，讓實際傾角達到 15°；偵測到後立刻反向小量修正，主動帶回水平。Acro 回中會停止旋轉，回到水平需要主動修正。`,
+      detail: `${again}小量推動 Roll 或 Pitch，讓實際傾角達到 ${RECOVERY_TILT_ONSET}°；偵測到後立刻反向小量修正，主動帶回水平。Acro 回中會停止旋轉，回到水平需要主動修正。`,
     }
     if (exercise === 'sink') return {
       title,
-      detail: Number.isFinite(metrics.altitudeM) && metrics.altitudeM < 4.5
-        ? `${again}目前離地 ${metrics.altitudeM.toFixed(1)} m；下沉練習要先回到至少 4.5 m，再稍收油門。`
-        : `${again}保持接近水平，稍收油門，讓實際下降速度達到 0.8 m/s（升降速度 −0.8 m/s）；偵測到後適量補油，止住下沉。`,
+      detail: Number.isFinite(metrics.altitudeM) && metrics.altitudeM < RECOVERY_SINK_HEIGHT
+        ? `${again}目前離地 ${metrics.altitudeM.toFixed(1)} m；下沉練習要先回到至少 ${RECOVERY_SINK_HEIGHT} m，再稍收油門。`
+        : `${again}先稍收油門，看升降速度變成負值；下降速度達到 ${RECOVERY_SINK_ONSET} m/s（升降速度 −${RECOVERY_SINK_ONSET} m/s）後，就補油止降。`,
     }
     return {
       title,
-      detail: `${again}小量前傾或側傾，讓實際水平速度達到 1.5 m/s；偵測到後朝移動反方向適度傾斜減速，再主動把機身帶回接近水平。`,
+      detail: `${again}小量前傾或側傾，讓實際水平速度達到 ${RECOVERY_DRIFT_ONSET} m/s；偵測到後朝移動反方向適度傾斜減速，再主動把機身帶回接近水平。`,
     }
   }
-  const dwell = Number.isFinite(metrics.recoveryDwellSeconds) ? Math.max(0, Math.min(0.5, metrics.recoveryDwellSeconds)).toFixed(2) : '0.00'
-  const confirmation = `恢復確認 ${dwell}／0.50 s；持續在空中並保留至少 2.5 m 高度，不要求回到原位置。`
+  const dwell = Number.isFinite(metrics.recoveryDwellSeconds) ? Math.max(0, Math.min(RECOVERY_HOLD_SECONDS, metrics.recoveryDwellSeconds)).toFixed(2) : '0.00'
+  const confirmation = `恢復確認 ${dwell}／${RECOVERY_HOLD_SECONDS.toFixed(2)} s；持續在空中並保留至少 ${RECOVERY_MIN_HEIGHT} m 高度，不要求回到原位置。`
   if (exercise === 'tilt') return {
     title,
-    detail: `已偵測到實際傾斜；朝傾斜的反方向小量修正，主動修回 10° 內，再回中讓旋轉減緩到 45°/s 內。${confirmation}`,
+    detail: `已偵測到實際傾斜；朝傾斜的反方向小量修正，主動修回 ${RECOVERY_TILT_LEVEL}° 內，再回中讓旋轉減緩到 ${RECOVERY_MAX_RATE}°/s 內。${confirmation}`,
   }
   if (exercise === 'sink') return {
     title,
-    detail: `已偵測到實際下沉；保持接近水平，適量補油，把升降速度收斂到 ±0.6 m/s 內，避免突然大幅爬升；傾角需在 10° 內、旋轉速度在 45°/s 內。${confirmation}`,
+    detail: `已偵測到實際下沉；現在補油止降，升降速度回到 −${RECOVERY_SINK_STOP}～+${RECOVERY_SINK_CLIMB} m/s 即可，容許適度爬升。機身在 ${RECOVERY_SINK_LEVEL}° 內、旋轉速度在 ${RECOVERY_MAX_RATE}°/s 內便能確認。${confirmation}`,
   }
   return {
     title,
-    detail: `已偵測到實際水平漂移；朝移動反方向適度傾斜減速，再主動修回 10° 內。水平速度降至 0.8 m/s 內、升降速度在 ±0.8 m/s 內、旋轉速度在 45°/s 內才會確認恢復；回中不會自動煞停。${confirmation}`,
+    detail: `已偵測到實際水平漂移；朝移動反方向適度傾斜減速，再主動修回 ${RECOVERY_DRIFT_LEVEL}° 內。水平速度降至 ${RECOVERY_DRIFT_STOP.toFixed(1)} m/s 內、升降速度在 ±${RECOVERY_DRIFT_VERTICAL} m/s 內、旋轉速度在 ${RECOVERY_MAX_RATE}°/s 內即可確認恢復；回中不會自動煞停。${confirmation}`,
   }
 }
 
@@ -622,7 +659,7 @@ export function trainingObjective(
 
 /** Short route instructions remain visible before a lesson starts. */
 export function trainingRouteGuide(lessonId: string | null): string | null {
-  if (lessonId === 'basic-recovery') return '地面自行起飛至 5 m 以上（建議約 6 m）→ 按提示製造小幅傾斜並修回水平 → 稍收油門產生下沉並止住下降 → 建立水平漂移並減速回平。每項先確認實際偏差，再確認恢復 0.5 秒；準備時先減緩升降、漂移與旋轉，確認 0.2 秒後才開始。練習區為起飛點半徑 25 m，恢復時保持空中且高度至少 2.5 m；接地或過低會中斷本項，先前完成的整項保留，重新準備後再製造本項偏差；出區會暫停確認，回區後可繼續有效的恢復。不要求回到固定座標或精準懸停，全程由你操控。引導練習不限時，挑戰 300 秒。'
+  if (lessonId === 'basic-recovery') return `地面自行起飛至 ${RECOVERY_PREP_HEIGHT} m 以上（建議約 ${RECOVERY_TARGET_HEIGHT} m）→ 按提示製造小幅傾斜並修回水平 → 稍收油門產生下沉並補油止降 → 建立水平漂移並減速回平。每項先確認實際偏差，再確認恢復 ${RECOVERY_HOLD_SECONDS} 秒；各段只準備目前要練的動作，確認 ${RECOVERY_PREP_SECONDS} 秒後才開始。練習區為起飛點半徑 ${RECOVERY_AREA_RADIUS} m，恢復時保持空中且高度至少 ${RECOVERY_MIN_HEIGHT} m；接地或過低會中斷本項，先前完成的整項保留，重新準備後再製造本項偏差；出區會暫停確認，回區後可繼續有效的恢復。不要求回到固定座標或精準懸停，全程由你操控。引導練習不限時，挑戰 ${RECOVERY_TIME_LIMIT} 秒。`
   if (lessonId === 'wide-gate') return '地面起飛 → 前方 8 m 第一道門 → 16 m 第二道門 → 24 m 第三道門。三道門洞寬、高各 4 m，中心離地 3 m；依序從門前向前穿過，反向穿越不算。門框是實體障礙，碰到柱子或橫樑會墜毀；對準中心並為機身、槳葉留出空間。漏門可回該門前補飛，已通過的門及未墜毀接地的進度會保留；不要求精準速度、朝向、停留或降落。引導練習不限時，挑戰 240 秒。'
   if (lessonId === 'figure-eight') return '地面起飛 → 中央入口 → 左圈 → 中央換向點 → 右圈 → 中央空中終點。中央區位於起飛點前方 6 m；相同位置要依順序經過，不能提早當作終點。沿淡色八字路線依序飛入亮起目標，先左轉再右轉；目標半徑 1.8 m，不要求精準速度、停留或降落。漏點及未墜毀接地保留進度，方位提示依目前機頭，XYZ 維持固定場地方向。引導練習不限時，挑戰 300 秒。'
   if (lessonId === 'square-route') return '地面起飛 → 第 1 段前進 → 右轉 → 第 2 段 → 右轉 → 第 3 段 → 右轉 → 第 4 段返回起點上方。沿淡色方形路線，依序飛入亮起的直線、轉角與綠色終點；目標半徑 1.8 m，不要求精準速度、停留或降落。漏點及未墜毀接地保留進度，方位提示依目前機頭，XYZ 維持固定場地方向。'
