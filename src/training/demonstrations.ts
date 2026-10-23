@@ -5,11 +5,12 @@ import { applyActualRates, applyConfiguredRateLimit, type RateAxis } from '../ra
 import { FlightReplayRecorder, type ReplayRecording } from '../replay'
 import { flightSimulationConfigFromTuning, validateTuningSettings, type TuningSettings } from '../tuning/config'
 import { identifyTuningPreset, type TuningPresetSelection } from '../tuning/presets'
-import { CURRENT_TRAINING_RULES_VERSION, fingerprintTrainingSettings } from './attempt'
+import { CURRENT_TRAINING_RULES_VERSION, fingerprintTrainingSettings, trainingRulesVersionForLesson, type TrainingAttemptContext } from './attempt'
 import { createTrainingFieldAnchors, LANDING_TARGET_DISTANCE_M } from './field'
 import { recordDirectionDemonstration } from './directionDemonstration'
+import { recordTurnDemonstration } from './turnDemonstration'
 
-export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'roll' | 'pitch' | 'yaw'
+export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'roll' | 'pitch' | 'yaw'
 
 export interface TeachingCue {
   readonly timeSeconds: number
@@ -20,8 +21,8 @@ export interface TeachingCue {
 export interface TeachingDemonstration {
   readonly schemaVersion: 1
   readonly kind: TeachingDemonstrationKind
-  readonly lessonId: 'intro' | 'takeoff' | 'landing' | 'straight-line' | 'direction-control'
-  readonly rulesVersion: typeof CURRENT_TRAINING_RULES_VERSION
+  readonly lessonId: 'intro' | 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn'
+  readonly rulesVersion: TrainingAttemptContext['rulesVersion']
   readonly physicsVersion: 1
   readonly presetId: TuningPresetSelection
   readonly settingsFingerprint: string
@@ -164,13 +165,24 @@ export function createTeachingDemonstration(
   kind: TeachingDemonstrationKind,
 ): TeachingDemonstration {
   if (!validateTuningSettings(settings).valid) throw new RangeError('示範設定未通過驗證，請先還原有效設定。')
-  if (!['takeoff', 'landing', 'straight-line', 'direction-control', 'roll', 'pitch', 'yaw'].includes(kind)) {
+  if (!['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'roll', 'pitch', 'yaw'].includes(kind)) {
     throw new RangeError('不支援此示範種類。')
   }
   const simulation = new FlightSimulation(flightSimulationConfigFromTuning(settings))
   const maximumThrust = settings.drone.motors.reduce((sum, motor) => sum + motor.maxThrustN, 0)
   if (settings.drone.massKg * settings.drone.gravityMps2 / maximumThrust >= 0.8) {
     throw new RangeError('目前推力不足以完成穩定示範，請檢查機體設定。')
+  }
+  if (kind === 'coordinated-turn') {
+    const { recording, cues } = recordTurnDemonstration(simulation, settings, stickForRate, collectiveThrottle)
+    return Object.freeze({
+      schemaVersion: 1, kind, lessonId: 'coordinated-turn',
+      rulesVersion: trainingRulesVersionForLesson(kind), physicsVersion: 1,
+      presetId: identifyTuningPreset(settings), settingsFingerprint: fingerprintTrainingSettings(settings),
+      title: 'L06 協調轉彎：右轉、左轉與出彎回正',
+      description: '模擬示範，尚待真人飛手驗證。畫面、搖桿、字幕與目標共用同一時間軸；示範不會計入通關。',
+      source: 'simulated', recording, cues,
+    })
   }
   if (kind === 'direction-control') {
     const { recording, cues } = recordDirectionDemonstration(simulation, settings, stickForRate, collectiveThrottle)

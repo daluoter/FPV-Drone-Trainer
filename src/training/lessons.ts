@@ -1,8 +1,8 @@
 import { LANDING_LESSON } from './landing'
 import { STRAIGHT_LINE_LESSON } from './straightLine'
 import { DIRECTION_CONTROL_LESSON } from './directionControl'
+import { COORDINATED_TURN_LESSON } from './coordinatedTurn'
 import {
-  coordinatedTurnEvaluator,
   hoverEvaluator,
   orbitEvaluator,
   splitSEvaluator,
@@ -85,49 +85,7 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
     hints: ['Enter the target gently, then let velocity settle before making the next correction.'],
     evaluator: hoverEvaluator,
   }),
-  phase7Lesson({
-    id: 'coordinated-turn',
-    priority: 2,
-    title: 'Coordinated Turn',
-    description: 'Track the ordered turn-entry, apex, and exit references through a bounded route with real heading change.',
-    objectives: [
-      'Enter the route at the reference altitude and heading.',
-      'Pass the apex inside the route corridor while the trajectory changes heading.',
-      'Exit aligned with the second route leg without relying on an exact stick sequence.',
-    ],
-    setup: lessonSetup(['takeoff-pad', 'turn-entry', 'turn-apex', 'turn-exit']),
-    checkpoints: [
-      { id: 'turn-entry', title: 'Turn entry', description: 'Reach the entry reference with bounded speed and route alignment.' },
-      { id: 'turn-apex', title: 'Turn apex', description: 'Pass the apex in order after an actual trajectory heading change.' },
-      { id: 'turn-exit', title: 'Turn exit', description: 'Leave the route aligned with the exit leg and bounded altitude.' },
-    ],
-    success: {
-      title: 'Coordinated turn verified',
-      description: 'The ordered route was flown with a measured position/velocity heading change and aligned exit.',
-      criteria: ['Ordered gate progression', 'Route corridor and altitude', 'Actual trajectory heading change'],
-    },
-    failure: {
-      title: 'Turn route not completed',
-      description: 'The route was out of order, disconnected, or left its bounded corridor.',
-      criteria: ['Continuous fixed-step path', 'Entry before apex before exit', 'No stick-only pass'],
-    },
-    scoring: {
-      maxScore: 100,
-      minimumPassingScore: 70,
-      minimumActiveSeconds: 2,
-      metricLabels: [
-        'entryErrorM',
-        'apexErrorM',
-        'exitErrorM',
-        'headingChangeDegrees',
-        'routeCorridorErrorM',
-        'routeHeadingAlignment',
-        'speedMps',
-      ],
-    },
-    hints: ['Look through the route and keep altitude bounded while the heading changes from the flown line.'],
-    evaluator: coordinatedTurnEvaluator,
-  }),
+  COORDINATED_TURN_LESSON,
   phase7Lesson({
     id: 'split-s',
     priority: 3,

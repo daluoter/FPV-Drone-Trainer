@@ -5,7 +5,7 @@ import { lessonLearningContent } from './catalog'
 
 
 describe('lesson catalog', () => {
-  it('keeps existing lesson IDs stable and adds the L05 direction lesson', () => {
+  it('keeps existing lesson IDs stable and offers the beginner L05 and L06 lessons', () => {
     expect(DEFAULT_LESSONS).toHaveLength(8)
     expect(DEFAULT_LESSONS.map((lesson) => lesson.id)).toEqual([
       'hover',
@@ -19,7 +19,7 @@ describe('lesson catalog', () => {
     ])
     expect(DEFAULT_LESSONS.map((lesson) => lesson.title)).toEqual([
       'Hover',
-      'Coordinated Turn',
+      '協調轉彎',
       'Split-S',
       'Orbit / 刷鍋',
       '穩定起飛',
@@ -30,7 +30,7 @@ describe('lesson catalog', () => {
     expect(DEFAULT_LESSONS.every((lesson) => lesson.available && lesson.availability === 'available' && lesson.evaluator)).toBe(true)
     expect(DEFAULT_LESSONS.map((lesson) => lesson.setup.sceneReferenceIds)).toEqual([
       ['takeoff-pad', 'hover-zone'],
-      ['takeoff-pad', 'turn-entry', 'turn-apex', 'turn-exit'],
+      ['training-launch', 'landing-surface'],
       ['split-s-reference'],
       ['takeoff-pad', 'orbit-poi'],
       ['takeoff-pad'],
@@ -46,6 +46,7 @@ describe('lesson catalog', () => {
     expect(lessonLearningContent('takeoff')?.prerequisiteIds).toEqual(['intro'])
     expect(lessonLearningContent('hover')?.prerequisiteIds).toEqual(['takeoff'])
     expect(lessonLearningContent('direction-control')?.prerequisiteIds).toEqual(['landing'])
+    expect(lessonLearningContent('coordinated-turn')?.prerequisiteIds).toEqual(['direction-control'])
     expect(lessonLearningContent('unknown')).toBeNull()
     expect(DEFAULT_LESSONS.every((lesson) => {
       const content = lessonLearningContent(lesson.id)

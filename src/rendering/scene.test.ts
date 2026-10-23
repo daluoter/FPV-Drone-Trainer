@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type * as THREE from 'three'
 
 import { createDefaultDroneConfig, createInitialDroneState } from '../drone'
 import { rotateVectorByQuaternion } from '../math/quaternion'
+import { createCoordinatedTurnTargets, COORDINATED_TURN_TARGET_RADIUS_M } from '../training/coordinatedTurn'
 
 import { createFlightScene } from './scene'
 
@@ -173,6 +174,12 @@ describe('flight scene reference contract', () => {
         'direction-yaw',
         'direction-turned-forward',
         'direction-turned-right',
+        'turn-right-entry',
+        'turn-right-apex',
+        'turn-right-exit',
+        'turn-left-entry',
+        'turn-left-apex',
+        'turn-left-exit',
       ])
       expect(scene.getReference('hover-zone')?.kind).toBe('zone')
       expect(scene.getReference('hover-zone')?.positionM).toEqual({ x: 0, y: 3, z: 0 })
@@ -269,5 +276,100 @@ describe('flight scene reference contract', () => {
     } finally {
       scene.dispose()
     }
+  })
+
+  it('shows one L06 target plus the faint route and hides the old turn prototype', () => {
+    const scene = createFlightScene()
+    const targets = scene.scene.getObjectByName('coordinated-turn-targets')!
+    const route = scene.scene.getObjectByName('coordinated-turn-route')!
+    const before = scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM: { ...positionM }, sizeM }))
+    const droneBefore = scene.drone.position.toArray()
+    const visibleGoals = () => targets.children.filter((marker) => marker.visible).map((marker) => marker.name)
+    try {
+      expect(targets.visible).toBe(false)
+      expect(route.visible).toBe(false)
+      scene.setLessonTarget('coordinated-turn')
+      expect(targets.visible).toBe(true)
+      expect(route.visible).toBe(true)
+      expect(route.children.map((object) => object.name)).toEqual(['coordinated-turn-right-route', 'coordinated-turn-left-route'])
+      expect(visibleGoals()).toEqual(['turn-right-entry-zone'])
+      for (const id of ['hover-zone', 'turn-entry', 'turn-apex', 'turn-exit', 'orbit-poi', 'split-s-reference']) {
+        expect(scene.getReference(id)?.object.visible).toBe(false)
+      }
+      expect(scene.scene.getObjectByName('direction-control-targets')?.visible).toBe(false)
+      scene.setTurnTarget('turn-right-apex')
+      expect(visibleGoals()).toEqual(['turn-right-apex-zone'])
+      scene.setTurnTarget('turn-left-entry')
+      expect(visibleGoals()).toEqual(['turn-left-entry-zone'])
+      scene.setTurnTarget(null)
+      expect(visibleGoals()).toEqual([])
+      scene.setTurnTarget('unknown')
+      expect(visibleGoals()).toEqual([])
+      scene.setTurnTarget('turn-left-exit')
+      scene.setLessonTarget('direction-control')
+      expect(targets.visible).toBe(false)
+      expect(route.visible).toBe(false)
+      scene.setLessonTarget(null)
+      expect(scene.getReference('turn-entry')?.object.visible).toBe(true)
+      expect(scene.getReference('orbit-poi')?.object.visible).toBe(true)
+      expect(scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM, sizeM }))).toEqual(before)
+      expect(scene.drone.position.toArray()).toEqual(droneBefore)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('shares L06 target positions, radii and headings with scoring on raised custom ground', () => {
+    const defaults = createDefaultDroneConfig()
+    const config = { ...defaults, ground: { ...defaults.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 20, z: -3 } }
+    const before = JSON.stringify(config)
+    const scene = createFlightScene(config)
+    try {
+      const launch = scene.getReference('training-launch')!.positionM
+      for (const target of createCoordinatedTurnTargets(launch, config.ground.heightM)) {
+        const reference = scene.getReference(target.id)!
+        expect(reference.positionM).toEqual(target.positionM)
+        expect(reference.object.position.toArray()).toEqual([target.positionM.x, target.positionM.y, target.positionM.z])
+        const diameter = COORDINATED_TURN_TARGET_RADIUS_M * 2
+        expect(reference.sizeM).toEqual({ x: diameter, y: diameter, z: diameter })
+        const ring = scene.scene.getObjectByName(`${target.id}-outline-0`) as THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>
+        expect(ring.geometry.parameters.innerRadius).toBe(COORDINATED_TURN_TARGET_RADIUS_M)
+        expect(ring.material.color.getHex()).toBe(target.direction === 'right' ? 0xffc978 : 0x45d7f7)
+        const paint = scene.scene.getObjectByName(`${target.id}-ground-paint`)!
+        expect(reference.object.position.y + paint.position.y).toBeCloseTo(5.018)
+        const arrow = scene.scene.getObjectByName(`${target.id}-heading`)!
+        const heading = rotateVectorByQuaternion(arrow.quaternion, { x: 0, y: 1, z: 0 })
+        expect(heading.x).toBeCloseTo(target.headingForward.x)
+        expect(heading.y).toBeCloseTo(target.headingForward.y)
+        expect(heading.z).toBeCloseTo(target.headingForward.z)
+      }
+      expect(scene.getReference('turn-right-entry')?.positionM).toEqual({ x: 6, y: 8, z: -9 })
+      expect(scene.getReference('turn-left-exit')?.positionM).toEqual({ x: 22, y: 8, z: -21 })
+      for (const name of ['coordinated-turn-right-route', 'coordinated-turn-left-route']) {
+        const route = scene.scene.getObjectByName(name) as THREE.Line<THREE.BufferGeometry, THREE.LineDashedMaterial>
+        const points = route.geometry.getAttribute('position')
+        expect(points.count).toBe(65)
+        for (let index = 0; index < points.count; index++) expect(points.getY(index)).toBeCloseTo(5.025)
+        expect(route.material.opacity).toBeLessThan(0.5)
+      }
+      expect(JSON.stringify(config)).toBe(before)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('disposes the L06 route and hidden arrival geometry with the scene', () => {
+    const scene = createFlightScene()
+    const ring = scene.scene.getObjectByName('turn-left-exit-outline-0') as THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>
+    const route = scene.scene.getObjectByName('coordinated-turn-left-route') as THREE.Line<THREE.BufferGeometry, THREE.LineDashedMaterial>
+    const ringGeometry = vi.spyOn(ring.geometry, 'dispose')
+    const ringMaterial = vi.spyOn(ring.material, 'dispose')
+    const routeGeometry = vi.spyOn(route.geometry, 'dispose')
+    const routeMaterial = vi.spyOn(route.material, 'dispose')
+    scene.dispose()
+    expect(ringGeometry).toHaveBeenCalledOnce()
+    expect(ringMaterial).toHaveBeenCalledOnce()
+    expect(routeGeometry).toHaveBeenCalledOnce()
+    expect(routeMaterial).toHaveBeenCalledOnce()
   })
 })

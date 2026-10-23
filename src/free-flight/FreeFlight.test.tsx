@@ -57,46 +57,58 @@ function attemptUnload(): Event {
 }
 
 describe('Free Flight native navigation confirmation', () => {
-  it('switches the active L05 scene goal with actual lesson progress while preserving the canvas', () => {
-    const base = createTrainingMachineState({ initialLessonId: 'direction-control' })
+  const routeLessons = [
+    { lessonId: 'direction-control', code: 'L05', prefix: 'direction', total: 9,
+      targets: ['direction-right', 'direction-left', 'direction-forward', 'direction-back', 'direction-yaw', 'direction-turned-forward', 'direction-turned-right'],
+      button: 'L05 方向示範', group: 'direction-control-targets', completion: '已完成側移、前後移動與換向後方向感' },
+    { lessonId: 'coordinated-turn', code: 'L06', prefix: 'turn', total: 8,
+      targets: ['turn-right-entry', 'turn-right-apex', 'turn-right-exit', 'turn-left-entry', 'turn-left-apex', 'turn-left-exit'],
+      button: 'L06 轉彎示範', group: 'coordinated-turn-targets', completion: '已完成右轉與左轉協調航線' },
+  ] as const
+
+  it.each(routeLessons)('switches the active $code scene goal with actual progress while preserving the canvas', ({ lessonId, prefix, total, targets }) => {
+    const base = createTrainingMachineState({ initialLessonId: lessonId })
     const props = { poller: createBrowserGamepadPoller(), profile: null, settings: createDefaultTuningSettings() }
     const { rerender, container } = render(<FreeFlight {...props} trainingState={base} />)
     const canvas = screen.getByLabelText('Free Flight 3D scene')
-    const visible = () => ['direction-right', 'direction-left', 'direction-forward', 'direction-back', 'direction-yaw', 'direction-turned-forward', 'direction-turned-right']
-      .filter((id) => frames.renderer!.flightScene.getReference(id)!.object.visible)
-    expect(visible()).toEqual(['direction-right'])
+    const visible = () => targets.filter((id) => frames.renderer!.flightScene.getReference(id)!.object.visible)
+    expect(visible()).toEqual([targets[0]])
     const active: TrainingMachineState = { ...base, phase: 'ACTIVE', lastEvaluation: { status: 'continue',
-      metrics: { directionPhase: 3, directionTargetIndex: 1, directionTargetsCompleted: 1,
+      metrics: { [`${prefix}Phase`]: 3, [`${prefix}TargetIndex`]: 1, [`${prefix}TargetsCompleted`]: 1,
         targetRightM: -4, targetForwardM: 0, targetUpM: 0, targetDistanceM: 4, headingErrorDegrees: 0 } } }
     rerender(<FreeFlight {...props} trainingState={active} />)
-    expect(visible()).toEqual(['direction-left'])
+    expect(visible()).toEqual([targets[1]])
     expect(container.querySelector('.school-viewport-hint')).toHaveTextContent('左方 4.0 m')
     expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
-    rerender(<FreeFlight {...props} trainingState={{ ...active, lastEvaluation: { status: 'success', metrics: { directionPhase: 9, directionTargetIndex: 7 } } }} />)
+    rerender(<FreeFlight {...props} trainingState={{ ...active, lastEvaluation: { status: 'success', metrics: { [`${prefix}Phase`]: total, [`${prefix}TargetIndex`]: targets.length } } }} />)
     expect(visible()).toEqual([])
   })
 
-  it('seeks the L05 demonstration goal with its ghost and captions without advancing live training', () => {
+  it.each(routeLessons)('seeks the $code demonstration goal with its ghost and captions without advancing live training', ({ button, targets, completion, group, lessonId }) => {
     const onFixedStep = vi.fn()
     render(<FreeFlight poller={createBrowserGamepadPoller()} profile={null} settings={createDefaultTuningSettings()} onFixedStep={onFixedStep} />)
-    fireEvent.click(screen.getByRole('button', { name: 'L05 方向示範' }))
+    fireEvent.click(screen.getByRole('button', { name: button }))
     fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
     const scene = frames.renderer!.flightScene
-    expect(scene.getReference('direction-right')!.object.visible).toBe(true)
+    expect(scene.getReference(targets[0])!.object.visible).toBe(true)
     fireEvent.change(screen.getByRole('slider'), { target: { value: frames.runtime!.getReplayPlayback()!.getState().durationSeconds } })
-    expect(scene.getReference('direction-turned-right')!.object.visible).toBe(true)
-    expect(scene.getReference('direction-right')!.object.visible).toBe(false)
-    expect(screen.getByText(/已完成側移、前後移動與換向後方向感；真人/)).toBeInTheDocument()
-    expect(parseFloat(screen.getByTestId('flight-position-z').textContent!)).toBeGreaterThan(3)
+    expect(scene.getReference(targets.at(-1)!)!.object.visible).toBe(true)
+    expect(scene.getReference(targets[0])!.object.visible).toBe(false)
+    expect(screen.getByText(new RegExp(completion))).toBeInTheDocument()
+    if (lessonId === 'direction-control') expect(parseFloat(screen.getByTestId('flight-position-z').textContent!)).toBeGreaterThan(3)
+    else {
+      expect(parseFloat(screen.getByTestId('flight-position-right').textContent!)).toBeGreaterThan(14)
+      expect(parseFloat(screen.getByTestId('flight-position-z').textContent!)).toBeLessThan(-16)
+    }
     frame(200)
     frame(400)
     expect(onFixedStep).not.toHaveBeenCalled()
     fireEvent.change(screen.getByRole('slider'), { target: { value: 0 } })
-    expect(scene.getReference('direction-right')!.object.visible).toBe(true)
-    expect(scene.getReference('direction-turned-right')!.object.visible).toBe(false)
+    expect(scene.getReference(targets[0])!.object.visible).toBe(true)
+    expect(scene.getReference(targets.at(-1)!)!.object.visible).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
     expect(screen.getByRole('button', { name: /^Disarm$/ })).toBeDisabled()
-    expect(scene.scene.getObjectByName('direction-control-targets')!.visible).toBe(false)
+    expect(scene.scene.getObjectByName(group)!.visible).toBe(false)
   })
 
   it('requests confirmation while armed and removes it after an explicit disarm', () => {

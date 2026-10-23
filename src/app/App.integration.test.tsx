@@ -289,11 +289,14 @@ describe('integrated training/runtime UI boundaries', () => {
     runtimeHarness.instances.length = 0
   })
 
-  it('records an ordered L05 result once, offers L06 and restores its saved progress after reload', () => {
+  it.each([
+    { lessonId: 'direction-control', code: 'L05', steps: 9, nextCode: 'L06' },
+    { lessonId: 'coordinated-turn', code: 'L06', steps: 8, nextCode: 'L13' },
+  ] as const)('records an ordered $code result once and restores its current-rule progress after reload', ({ lessonId, steps, nextCode }) => {
     const { unmount } = render(<App />)
     const training = trainingSection()
     const canvas = screen.getByLabelText('Free Flight 3D scene')
-    fireEvent.change(within(training).getByLabelText('選擇課程'), { target: { value: 'direction-control' } })
+    fireEvent.change(within(training).getByLabelText('選擇課程'), { target: { value: lessonId } })
     fireEvent.change(screen.getByLabelText('控制方式'), { target: { value: 'keyboard' } })
     fireEvent.click(within(training).getByRole('button', { name: '開始課程' }))
     const runtime = runtimeHarness.instances[0]!
@@ -302,7 +305,7 @@ describe('integrated training/runtime UI boundaries', () => {
     // Feed a physics-generated recording through the real App/session/store
     // boundary. The runtime/renderer are mocked here; this is UI evidence.
     const settings = createTuningPreset('beginner')
-    const demo = createTeachingDemonstration(settings, 'direction-control')
+    const demo = createTeachingDemonstration(settings, lessonId)
     const initial = createInitialDroneState(settings.drone)
     act(() => {
       for (const pose of demo.recording.samples) {
@@ -319,17 +322,17 @@ describe('integrated training/runtime UI boundaries', () => {
       }
     })
     expect(within(training).getByText('引導目標完成！')).toBeInTheDocument()
-    expect(within(training).getByText(/9 \/ 9 個步驟完成/)).toBeInTheDocument()
-    expect(persistedAttempts('direction-control')).toBe(1)
+    expect(within(training).getByText(`${steps} / ${steps} 個步驟完成`)).toBeInTheDocument()
+    expect(persistedAttempts(lessonId)).toBe(1)
     expect(persistedAttempts('landing')).toBe(0)
     expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
-    expect(within(training).getByRole('button', { name: /^下一課：L06/ })).toBeEnabled()
+    expect(within(training).getByRole('button', { name: new RegExp(`^下一課：${nextCode}`) })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: /^Disarm$/ }))
     unmount()
     render(<App />)
-    expect(within(trainingSection()).getByLabelText('選擇課程')).toHaveValue('direction-control')
+    expect(within(trainingSection()).getByLabelText('選擇課程')).toHaveValue(lessonId)
     expect(within(trainingSection()).getByText(/本次條件已練 1 次/)).toBeInTheDocument()
-    expect(persistedAttempts('direction-control')).toBe(1)
+    expect(persistedAttempts(lessonId)).toBe(1)
   })
 
   it('clears a pending lesson when keyboard/runtime reset rewinds its clock', () => {

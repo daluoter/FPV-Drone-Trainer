@@ -161,4 +161,75 @@ describe('observed result coaching', () => {
     expect(feedback.nextPractice).toContain('目前機頭的哪一側')
     expect(feedback.scopeNote).toContain('不代表已熟練')
   })
+
+  it('names a partial L06 target and retains progress without applying historical corridor limits', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'coordinated-turn',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, completedCheckpoints: 3, totalCheckpoints: 8,
+      metrics: { turnPhase: 3, turnTargetIndex: 1, turnTargetsCompleted: 1, targetDistanceM: 2.4,
+        turnEntryRecorded: 1, headingErrorDegrees: 10, routeCorridorErrorM: 15, speedMps: 20 } })
+    expect(feedback.observedStrength).toContain('1 / 6 個轉彎目標')
+    expect(feedback.observedGap).toContain('右轉轉彎點')
+    expect(feedback.observedGap).toContain('尚餘 5 個轉彎目標')
+    expect(feedback.observedGap).toContain('距該目標 2.4 m')
+    expect(feedback.nextPractice).toContain('已完成的目標會保留')
+    expect(feedback.observedGap).not.toMatch(/3.20|速度|走廊/)
+  })
+
+  it('distinguishes the actual left-turn exit blocker from a yaw or speed requirement', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'coordinated-turn',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, completedCheckpoints: 7, totalCheckpoints: 8,
+      metrics: { turnPhase: 7, turnTargetIndex: 5, turnTargetsCompleted: 5, turnEntryRecorded: 1,
+        turnMotionReady: 1, headingErrorDegrees: 5, targetDistanceM: 0.1, turnChangeDegrees: -10 } })
+    expect(feedback.observedStrength).toContain('右轉航線已完成')
+    expect(feedback.observedGap).toContain('左轉出口')
+    expect(feedback.observedGap).toContain('相反方向轉了 10°')
+    expect(feedback.observedGap).toContain('朝左轉至少 25°')
+    expect(feedback.nextPractice).toContain('讓移動方向朝左轉')
+  })
+
+  it('describes new L06 completion separately from the old three-gate criteria', () => {
+    const metrics = { turnPhase: 8, turnTargetsCompleted: 6, routeCorridorErrorM: 5, headingChangeDegrees: 15, contiguousDwellSeconds: 0 }
+    const completed = summarizeTrainingResult({ ...result, lessonId: 'coordinated-turn',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, outcome: 'SUCCESS', completedCheckpoints: 8, totalCheckpoints: 8, metrics })
+    expect(completed.observedStrength).toContain('右轉與左轉')
+    expect(completed.observedGap).toBeNull()
+    expect(completed.nextPractice).not.toMatch(/55|3.20|連續.*秒/)
+    expect(completed.scopeNote).toContain('不代表已熟練')
+    const historical = summarizeTrainingResult({ ...result, lessonId: 'coordinated-turn', attemptContext: currentContext, metrics })
+    expect(historical.observedGap).toMatch(/3.20 m|55.0 °/)
+    expect(historical.nextPractice).toContain('舊版單彎航線紀錄')
+    expect(historical.scopeNote).toContain('舊規則 4')
+    expect(historical.observedStrength).not.toContain('右轉與左轉')
+  })
+
+  it('keeps a grounded L06 result tied to its current target and a local relaunch', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'coordinated-turn',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, completedCheckpoints: 4, totalCheckpoints: 8,
+      metrics: { turnPhase: 4, turnTargetIndex: 2, turnTargetsCompleted: 2, groundTouching: 1,
+        groundClearanceM: 0, turnChangeDegrees: 0, turnMotionReady: 0 } })
+    expect(feedback.observedGap).toContain('右轉出口')
+    expect(feedback.observedGap).toContain('結束時尚未在空中')
+    expect(feedback.nextPractice).toContain('目前位置再次自行起飛')
+    expect(feedback.nextPractice).toContain('已完成的目標會保留')
+  })
+
+  it.each([
+    ['Ground impact latched a crash; reset required.', '發生墜毀'],
+    ['Attempt disarmed because focus was lost.', '解除解鎖、失去焦點'],
+    ['轉彎練習停止：缺少有效的地面接觸資料。', '飛行資料無效或中斷'],
+  ])('preserves the L06 terminal cause with zero samples: %s', (message, expected) => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'coordinated-turn',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, sampleCount: 0, metrics: {}, message })
+    expect(feedback.observedGap).toContain(expected)
+    expect(feedback.observedGap).not.toContain('沒有有效的已解鎖飛行樣本')
+    expect(feedback.observedStrength).toBeNull()
+  })
+
+  it('does not invent a takeoff failure when L06 stage metrics are missing', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'coordinated-turn',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, metrics: {} })
+    expect(feedback.observedGap).toContain('分段資料不足')
+    expect(feedback.observedGap).not.toContain('尚未完成從地面')
+    expect(feedback.observedStrength).toBeNull()
+  })
 })

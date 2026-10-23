@@ -19,18 +19,29 @@ import {
 } from './fixtures'
 import { TrainingSession } from './machine'
 import { evaluateCoordinatedTurn, evaluateHover, evaluateOrbit, evaluateSplitS } from './evaluators'
-import type { TrainingEvaluationContext, TrainingSample, TrainingSceneReference } from './types'
+import type { LessonDefinition, TrainingEvaluationContext, TrainingSample, TrainingSceneReference } from './types'
+
+// These fixtures retain the Phase 7 three-gate prototype and its historical
+// strict rules. Current beginner L06 has independent ground/left/right tests.
+const legacyTurn: LessonDefinition = {
+  ...DEFAULT_LESSONS.find((lesson) => lesson.id === 'coordinated-turn')!,
+  setup: { requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: ['takeoff-pad', 'turn-entry', 'turn-apex', 'turn-exit'] },
+  checkpoints: ['turn-entry', 'turn-apex', 'turn-exit'].map((id) => ({ id, title: id, description: id })),
+  scoring: { maxScore: 100, minimumPassingScore: 70, minimumActiveSeconds: 2, metricLabels: ['headingChangeDegrees', 'routeCorridorErrorM'] },
+  evaluator: { evaluate: evaluateCoordinatedTurn },
+}
+const prototypeLessons = DEFAULT_LESSONS.map((lesson) => lesson.id === legacyTurn.id ? legacyTurn : lesson)
 
 function context(lessonId: string, overrides: Partial<TrainingEvaluationContext> = {}): TrainingEvaluationContext {
   return {
-    lesson: DEFAULT_LESSONS.find((lesson) => lesson.id === lessonId)!, elapsedSeconds: 0,
+    lesson: prototypeLessons.find((lesson) => lesson.id === lessonId)!, elapsedSeconds: 0,
     trajectory: [], checkpoints: {}, sceneReferences: TRAINING_SCENE_REFERENCES, ...overrides,
   }
 }
 
 function run(lessonId: string, samples: readonly TrainingSample[], sceneReferences: readonly TrainingSceneReference[] = TRAINING_SCENE_REFERENCES) {
   const session = new TrainingSession({
-    lessons: DEFAULT_LESSONS,
+    lessons: prototypeLessons,
     initialLessonId: lessonId,
     countdownDurationSeconds: 0,
     sceneReferences,
@@ -244,7 +255,7 @@ describe('Phase 7 geometric lesson evaluators', () => {
 
   it('clears Phase 7 trajectory/checkpoints and session identity on retry', () => {
     const session = new TrainingSession({
-      lessons: DEFAULT_LESSONS,
+      lessons: prototypeLessons,
       initialLessonId: 'hover',
       countdownDurationSeconds: 0,
       sceneReferences: TRAINING_SCENE_REFERENCES,

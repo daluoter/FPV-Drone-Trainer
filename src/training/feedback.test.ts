@@ -198,4 +198,80 @@ describe('beginner-facing training feedback', () => {
     expect(unknown?.detail).not.toMatch(/NaN|Infinity/)
     expect(unknown?.detail).toContain('方向以目前機頭為準')
   })
+
+  it('introduces a ground-start right and left route without a speed or dwell target', () => {
+    expect(trainingRouteGuide('coordinated-turn')).toMatch(/地面起飛.*右轉入口.*左轉入口/)
+    expect(trainingRouteGuide('coordinated-turn')).toContain('只原地轉頭不算')
+    expect(trainingRouteGuide('coordinated-turn')).toContain('不要求精準速度或停留')
+    expect(trainingObjective('coordinated-turn', null)?.title).toContain('1／8')
+    expect(trainingObjective('coordinated-turn', { metrics: { turnPhase: 1 } })?.detail).toContain('不需要先懸停')
+    expect(trainingObjective('coordinated-turn', { metrics: { turnPhase: 8 } })?.detail).toContain('現在可以 Disarm')
+  })
+
+  it('directs a turn learner using at most two body-relative directions and the current stage', () => {
+    const objective = trainingObjective('coordinated-turn', { metrics: {
+      turnPhase: 3, turnTargetIndex: 1, targetRightM: 4, targetForwardM: -2,
+      targetUpM: 0.3, targetDistanceM: 4.5, headingErrorDegrees: 20, turnEntryRecorded: 1,
+    } })
+    expect(objective?.title).toBe('4／8 右轉轉彎點')
+    expect(objective?.detail).toContain('以目前機頭為準：目標在右方 4.0 m、後方 2.0 m')
+    expect(objective?.detail).not.toContain('上方')
+    expect(objective?.detail).toContain('用小量 Roll 向右傾斜')
+    expect(objective?.detail).toContain('已完成的目標會保留')
+    const invalidOffsets = trainingObjective('coordinated-turn', { metrics: {
+      turnPhase: 6, turnTargetIndex: 4, targetRightM: Number.NaN, targetForwardM: Infinity,
+    } })
+    expect(invalidOffsets?.detail).not.toMatch(/NaN|Infinity/)
+    expect(invalidOffsets?.detail).toContain('方向以目前機頭為準')
+  })
+
+  it('keeps a noncrash landing local and distinguishes a stationary entry from a missed target', () => {
+    const grounded = trainingObjective('coordinated-turn', { metrics: {
+      turnPhase: 6, turnTargetIndex: 4, groundTouching: 1, groundClearanceM: 0, headingErrorDegrees: 110,
+    } })
+    expect(grounded?.detail).toContain('目前位置再次自行起飛')
+    expect(grounded?.detail).toContain('已完成的目標會保留')
+    expect(grounded?.detail).not.toContain('110°')
+    const atEntry = { turnPhase: 2, turnTargetIndex: 0, turnMotionReady: 0, targetDistanceM: 0.2 }
+    expect(trainingObjective('coordinated-turn', { metrics: atEntry })?.detail).toContain('尚未觀察到入口的實際移動方向')
+    expect(trainingObjective('coordinated-turn', { metrics: { ...atEntry, targetDistanceM: 5 } })?.detail).toContain('通過右轉入口後再逐步帶入轉彎')
+  })
+
+  it('explains missing and wrong-way exit turns using the signed measured flight direction', () => {
+    const exit = { turnPhase: 4, turnTargetIndex: 2, turnEntryRecorded: 1,
+      turnMotionReady: 1, headingErrorDegrees: 5, targetDistanceM: 0.3, turnChangeDegrees: 8 }
+    expect(trainingObjective('coordinated-turn', { metrics: exit })?.detail).toContain('實際航線已朝右轉 8°')
+    expect(trainingObjective('coordinated-turn', { metrics: exit })?.detail).toContain('本彎需至少 25°')
+    const wrongLeft = trainingObjective('coordinated-turn', { metrics: {
+      ...exit, turnPhase: 7, turnTargetIndex: 5, turnChangeDegrees: -14,
+    } })
+    expect(wrongLeft?.title).toBe('8／8 左轉出口')
+    expect(wrongLeft?.detail).toContain('往相反方向轉了 14°')
+    expect(wrongLeft?.detail).toContain('朝左轉至少 25°')
+    expect(trainingObjective('coordinated-turn', { metrics: { ...exit, turnEntryRecorded: 0 } })?.detail).toContain('尚缺本彎入口')
+    expect(trainingObjective('coordinated-turn', { metrics: { ...exit, turnMotionReady: 0 } })?.detail).toContain('尚未觀察到出口')
+    expect(trainingObjective('coordinated-turn', { metrics: { ...exit, headingErrorDegrees: 95 } })?.detail).toContain('需在 70° 內')
+  })
+
+  it('prioritizes measured turn progress while retaining historical route metric names', () => {
+    expect(formatTrainingMetrics({ turnPhase: 7, turnTargetIndex: 5, turnChangeDegrees: -12,
+      targetDistanceM: 0.5, turnTargetsCompleted: 5, routeCorridorErrorM: 10 }, 'coordinated-turn'))
+      .toEqual([
+        { key: 'turnChangeDegrees', label: '朝本彎方向的航線轉角', value: '-12.0 °' },
+        { key: 'targetDistanceM', label: '距目前目標', value: '0.50 m' },
+        { key: 'turnTargetsCompleted', label: '已完成轉彎目標', value: '5 / 6' },
+      ])
+    expect(formatTrainingMetrics({ routeCorridorErrorM: 1, headingChangeDegrees: 60, speedMps: 4 }, 'coordinated-turn').map(({ key }) => key))
+      .toEqual(['routeCorridorErrorM', 'headingChangeDegrees', 'speedMps'])
+  })
+
+  it.each([
+    ['Ground impact latched a crash; reset required.', '發生墜毀'],
+    ['Flight disarmed after focus was lost.', '解除解鎖、失去焦點'],
+    ['轉彎練習停止：缺少有效的地面接觸資料。', '飛行資料無效或中斷'],
+  ])('keeps the explicit L06 stop cause ahead of missing stage facts: %s', (message, expected) => {
+    const hint = trainingHint('coordinated-turn', { status: 'failure', message, metrics: {} })
+    expect(hint).toContain(expected)
+    expect(hint).not.toContain('尚未觀察到實際起飛')
+  })
 })

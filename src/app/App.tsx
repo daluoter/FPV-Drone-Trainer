@@ -24,7 +24,7 @@ import type { FlightRuntimeFixedStepSample, FlightRuntimeTelemetry } from '../ru
 import IntroLesson from '../training/IntroLesson'
 import type { TeachingDemonstrationKind } from '../training/demonstrations'
 import { loadLearningPreferences, saveLearningPreferences, type LearningPreferences } from '../training/learningPreferences'
-import { CURRENT_TRAINING_RULES_VERSION, fingerprintTrainingSettings, type TrainingAttemptContext } from '../training/attempt'
+import { fingerprintTrainingSettings, trainingRulesVersionForLesson, type TrainingAttemptContext } from '../training/attempt'
 import { prepareTrainingSetup } from '../training/setup'
 import { APP_RELEASE } from './release'
 
@@ -67,9 +67,9 @@ export default function App() {
   const [workspace, setWorkspace] = useState<'learning' | 'free'>('learning')
   const [showSetup, setShowSetup] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const attemptContext = useMemo<TrainingAttemptContext>(() => ({ rulesVersion: CURRENT_TRAINING_RULES_VERSION, physicsVersion: 1, presetId: identifyTuningPreset(tuningSettings), settingsFingerprint: fingerprintTrainingSettings(tuningSettings), inputSource, mode: learningPreferences.mode, assistance: 'none' }), [tuningSettings, inputSource, learningPreferences.mode])
+  const attemptContext = useMemo<TrainingAttemptContext>(() => ({ rulesVersion: trainingRulesVersionForLesson(trainingState.lessonId), physicsVersion: 1, presetId: identifyTuningPreset(tuningSettings), settingsFingerprint: fingerprintTrainingSettings(tuningSettings), inputSource, mode: learningPreferences.mode, assistance: 'none' }), [trainingState.lessonId, tuningSettings, inputSource, learningPreferences.mode])
   const progressContext = trainingState.result?.attemptContext ?? attemptContext
-  const progressLoad = useMemo(() => progressStore.load(progressContext), [progressStore, progressContext, progressRevision])
+  const progressLoad = useMemo(() => progressStore.loadCurrent(progressContext), [progressStore, progressContext, progressRevision])
   const trainingProgress = progressLoad.progress
   const [trainingResetKey, setTrainingResetKey] = useState(0)
   const [trainingDisarmKey, setTrainingDisarmKey] = useState(0)

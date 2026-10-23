@@ -188,3 +188,27 @@
 修正後再跑示範／FreeFlight focused 測試 2 檔、23 項通過，lint、嚴格建置與完整瀏覽器流程亦通過。瀏覽器產物：`/tmp/fpv-browser-smoke/run-ov1w4j65/`，含 report、console、preview log 及逐流程截圖。已檢視 `l05-demonstration-fpv.png`、`l05-demonstration-chase.png`、`direction-control-ground-start.png`：可見目標、3.0 m 回放高度／固定 XYZ 及地面等待 Arm 狀態正常；此為軟體畫面核對，不是使用者操控驗收。
 
 使用者試用與人工驗收清單見 [L05_DIRECTION_CONTROL.md](L05_DIRECTION_CONTROL.md)。L05 尚待使用者實際試飛核准；既有 L03／L04 人工驗收維持通過。此次不包含 L06 改版、UAT／正式 Pages 發布、硬體或飛手校準。
+
+## L05 使用者確認與 L06 協調轉彎（2026-10-23）
+
+使用者確認「L05 側移與方向感與方向示範都通過人工驗證」，並要求繼續開發。記錄為對應交付版本 `2026.10.22.2`／`43935b2` 脈絡的課程與示範功能驗收；未另提供其本機 SHA、輸入設備或瀏覽器。共通硬體／飛手校準仍獨立追蹤。
+
+本批基準 `43935b2`，顯示版本 **2026.10.23.1**，依已核准順序交付 L06：
+
+- 保留 `coordinated-turn` ID，將課堂改為地面準備、自行起飛、右轉入口／彎中／出口、左轉入口／彎中／出口，共 8 步。場景、判定與示範共用六個目標；地面上方 3 m、球形半徑 1.8 m、邊緣容差 0.1 m。
+- 移動需進入目前目標區，並大致順著該段朝向（70° 容差）；每個出口檢查相對該彎入口的實際水平移動方向，朝指定側改變至少 25°。不要求精準速度、停留或貼航廊；漏點與非墜毀接地保留進度。練習不限時、挑戰 180 秒；完整性與墜毀防護保留，物理未變動。
+- 右轉金色、左轉藍色，單一目前目標、光柱與箭頭配合淡色地面路線；FPV 提示最多顯示兩個機身相對方位，指出朝向、移動證據或實際轉角不足等具體原因。
+- 新示範用實際 RC／固定步進物理錄製，先起飛再連續完成右／左彎；新手、一般及高地面／高空自由飛行 spawn 三種設定均通過真實 8 步幾何判定。錄影約 30.75 秒、1,846 筆、零淘汰、8 段字幕；上限 95 秒／6,000 筆。字幕與目標對齊實際保留影格，保留原生時間軸微小浮點誤差處理，不安裝真人自動控制。
+- 新 L06 嘗試使用規則 5，其他課程保留規則 4。`loadCurrent` 按各課目前規則合併顯示，舊 L06 規則 4 不計入新版完成或最佳；原紀錄仍保留、可依原 context 讀取。測試涵蓋 L03～L05 完成標記、模式／設定／輸入隔離、缺失／損壞單一資料區時保留其他資料，沒有搬移或重算舊成績。
+- App 整合測試用真實物理示範的 pose 通過 mock runtime 與真正 session／store，確認結果只保存一次、重載選課與次數、下一個可用課程、相同 canvas 及進度隔離。原 Phase 7 三點嚴格 Turn 的正反例使用明確歷史 fixture 繼續測試，未冒稱它是新版課程。
+
+| 最終檢查 | 結果 |
+| --- | --- |
+| `npm test -- --maxWorkers=2` | PASS：50 檔、381 項，24.94 秒。 |
+| `npm run lint` | PASS，零警告規則。 |
+| `npm run build -- --base=/FPV-Drone-Trainer/` | PASS，含嚴格 TypeScript；entry 1,055.12 kB／gzip 296.86 kB，既知 >500 kB 建議仍存在。 |
+| 正式產物 Chromium smoke | PASS：21 項，Chromium 154.0.8037.57；頁面版本 2026.10.23.1，無 page／console error／資源錯誤。包含 L06 原生 Home／End、位置／暫停、進度隔離、選課重載及實際地面起點。 |
+
+瀏覽器產物：`/tmp/fpv-browser-smoke/run-dnpmte1n/`，含 report、console、preview log 及逐流程截圖。已檢視 `l06-demonstration-fpv.png`、`l06-demonstration-chase.png`、`coordinated-turn-ground-start.png`：藍色出口目標、3.0 m 回放高度與固定 XYZ 正常；地面等待顯示 0.0 m、前方金色入口、Arm 及正確版本。另有手機與矮桌面 HUD／原生全螢幕／真實鍵盤爬升後墜毀回歸。本紀錄為軟體畫面核對，不代表使用者已飛完 L06。
+
+獨立 TypeScript 檢查先發現歷史 fixture 缺少必要 `metricLabels`，補齊後完整測試、lint 與嚴格建置通過。使用者人工試飛清單見 [L06_COORDINATED_TURN.md](L06_COORDINATED_TURN.md)。L06 人工驗收待使用者回報；L05 課程與方向示範、L03／L04 已有的人工核准維持通過。此次不包含 L07 實作、UAT／正式 Pages 發布、硬體或飛手校準。

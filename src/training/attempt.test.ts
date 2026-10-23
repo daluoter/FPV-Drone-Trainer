@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  CURRENT_TRAINING_RULES_VERSION,
   fingerprintTrainingSettings,
   isTrainingAttemptContext,
   trainingAttemptContextKey,
+  trainingRulesVersionForLesson,
   type TrainingAttemptContext,
 } from './attempt'
 
@@ -43,6 +45,7 @@ describe('training attempt provenance', () => {
       context({ rulesVersion: 2 }),
       context({ rulesVersion: 3 }),
       context({ rulesVersion: 4 }),
+      context({ rulesVersion: 5 }),
       context({ settingsFingerprint: fingerprintTrainingSettings({ rates: 900 }) }),
     ].map(trainingAttemptContextKey)
     expect(new Set(keys).size).toBe(keys.length)
@@ -54,8 +57,23 @@ describe('training attempt provenance', () => {
     expect(isTrainingAttemptContext({ ...context(), rulesVersion: 2 })).toBe(true)
     expect(isTrainingAttemptContext({ ...context(), rulesVersion: 3 })).toBe(true)
     expect(isTrainingAttemptContext({ ...context(), rulesVersion: 4 })).toBe(true)
-    expect(isTrainingAttemptContext({ ...context(), rulesVersion: 5 })).toBe(false)
+    expect(isTrainingAttemptContext({ ...context(), rulesVersion: 5 })).toBe(true)
+    expect(isTrainingAttemptContext({ ...context(), rulesVersion: 6 })).toBe(false)
     expect(isTrainingAttemptContext({ ...context(), settingsFingerprint: '' })).toBe(false)
     expect(() => trainingAttemptContextKey({ ...context(), inputSource: 'unknown' } as unknown as TrainingAttemptContext)).toThrow()
+  })
+
+  it('versions the revised L06 separately while retaining every other lesson baseline', () => {
+    expect(CURRENT_TRAINING_RULES_VERSION).toBe(4)
+    expect(trainingRulesVersionForLesson('coordinated-turn')).toBe(5)
+    for (const lessonId of [null, 'takeoff', 'hover', 'straight-line', 'landing', 'direction-control', 'split-s', 'orbit']) {
+      expect(trainingRulesVersionForLesson(lessonId)).toBe(4)
+    }
+    // Reading old contexts must not add fields or relabel their original rules.
+    for (const rulesVersion of [1, 2, 3, 4] as const) {
+      const source = context({ rulesVersion })
+      const key = trainingAttemptContextKey(source)
+      expect(JSON.parse(decodeURIComponent(key.slice('fpv-drone-trainer.training-progress.context.v1.'.length)))).toEqual(source)
+    }
   })
 })

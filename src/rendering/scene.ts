@@ -6,6 +6,7 @@ import { createTrainingFieldAnchors } from '../training/field'
 import { STRAIGHT_LINE_BRAKE_ZONE_START_M, STRAIGHT_LINE_GATE_RADIUS_M, STRAIGHT_LINE_ROUTE_LENGTH_M, STRAIGHT_LINE_TRANSIT_DISTANCE_M } from '../training/straightLine'
 import { LANDING_ZONE_RADIUS_M } from '../training/landing'
 import { createDirectionControlTargets, DIRECTION_CONTROL_TARGET_RADIUS_M } from '../training/directionControl'
+import { createCoordinatedTurnTargets, COORDINATED_TURN_TARGET_RADIUS_M } from '../training/coordinatedTurn'
 import type { Vector3 } from '../math/vector'
 import type { ReplayGhostState } from '../replay'
 
@@ -39,6 +40,8 @@ export interface FlightScene {
   setLessonTarget(lessonId: string | null): void
   /** Select a single L05 guide; null hides the active instructional marker. */
   setDirectionTarget(targetId: string | null): void
+  /** Select a single L06 arrival guide; null hides the current target. */
+  setTurnTarget(targetId: string | null): void
   /** Presentation-only bounded path trace; evaluators remain renderer-independent. */
   setTrainingPath(path: readonly Vector3[]): void
   setReplayPath(path: readonly Vector3[]): void
@@ -443,9 +446,77 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     directionReferences.push({ id: target.id, kind: 'zone', object: marker, positionM: { ...target.positionM }, sizeM: { x: diameter, y: diameter, z: diameter } })
   }
   scene.add(directionTargets)
+
+  const turnTargets = new THREE.Group()
+  turnTargets.name = 'coordinated-turn-targets'
+  turnTargets.visible = false
+  const turnReferences: FlightSceneReference[] = []
+  const turnLayout = createCoordinatedTurnTargets(field.launch, config.ground.heightM)
+  const turnColors = { right: 0xffc978, left: 0x45d7f7 } as const
+  for (const [targetIndex, target] of turnLayout.entries()) {
+    const marker = new THREE.Group()
+    marker.name = `${target.id}-zone`
+    marker.position.set(target.positionM.x, target.positionM.y, target.positionM.z)
+    marker.visible = targetIndex === 0
+    const color = turnColors[target.direction]
+    for (const [index, rotation] of [[0, 0], [Math.PI / 2, 0], [0, Math.PI / 2]].entries()) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(COORDINATED_TURN_TARGET_RADIUS_M, COORDINATED_TURN_TARGET_RADIUS_M + 0.045, 64),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }),
+      )
+      ring.name = `${target.id}-outline-${index}`
+      ring.rotation.set(rotation[0], rotation[1], 0)
+      marker.add(ring)
+    }
+    const groundOffset = config.ground.heightM - target.positionM.y
+    const paint = new THREE.Mesh(
+      new THREE.RingGeometry(0.04, COORDINATED_TURN_TARGET_RADIUS_M, 48),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }),
+    )
+    paint.name = `${target.id}-ground-paint`
+    paint.rotation.x = -Math.PI / 2
+    paint.position.y = groundOffset + 0.018
+    const beacon = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.035, 0.035, -groundOffset, 8, 1, true),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false }),
+    )
+    beacon.name = `${target.id}-beacon`
+    beacon.position.y = groundOffset / 2
+    const heading = new THREE.ArrowHelper(
+      new THREE.Vector3(target.headingForward.x, target.headingForward.y, target.headingForward.z).normalize(),
+      new THREE.Vector3(), 1.4, color, 0.4, 0.26,
+    )
+    heading.name = `${target.id}-heading`
+    marker.add(paint, beacon, heading)
+    turnTargets.add(marker)
+    const diameter = COORDINATED_TURN_TARGET_RADIUS_M * 2
+    turnReferences.push({ id: target.id, kind: 'zone', object: marker, positionM: { ...target.positionM }, sizeM: { x: diameter, y: diameter, z: diameter } })
+  }
+  scene.add(turnTargets)
+
+  // The ground trace previews the two bends. It is a guide, never a collider
+  // or a corridor that can reset the learner's completed checkpoints.
+  const turnRoute = new THREE.Group()
+  turnRoute.name = 'coordinated-turn-route'
+  turnRoute.visible = false
+  for (const direction of ['right', 'left'] as const) {
+    const targets = turnLayout.filter((target) => target.direction === direction)
+    const start = direction === 'right' ? field.launch : turnLayout[2].positionM
+    const points = [start, ...targets.map((target) => target.positionM)]
+      .map((point) => new THREE.Vector3(point.x, config.ground.heightM + 0.025, point.z))
+    const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal')
+    const route = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(curve.getPoints(64)),
+      new THREE.LineDashedMaterial({ color: turnColors[direction], transparent: true, opacity: 0.38, dashSize: 0.7, gapSize: 0.4, depthWrite: false }),
+    )
+    route.name = `coordinated-turn-${direction}-route`
+    route.computeLineDistances()
+    turnRoute.add(route)
+  }
+  scene.add(turnRoute)
   const landingSurface: FlightSceneReference = { id: 'landing-surface', kind: 'zone', object: landingTarget, positionM: { ...field.landing }, sizeM: { x: LANDING_ZONE_RADIUS_M * 2, y: 0, z: LANDING_ZONE_RADIUS_M * 2 } }
   const launchReference: FlightSceneReference = { id: 'training-launch', kind: 'pad', object: takeoffPad, positionM: { ...field.launch } }
-  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences]
+  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences]
   const referenceById = new Map(sceneReferences.map((reference) => [reference.id, reference]))
 
   const drone = createQuadVisual()
@@ -517,7 +588,9 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     landingTarget.visible = lessonId === 'landing'
     straightTargets.visible = lessonId === 'straight-line'
     directionTargets.visible = lessonId === 'direction-control'
-    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control'].includes(lessonId ?? '')
+    turnTargets.visible = lessonId === 'coordinated-turn'
+    turnRoute.visible = lessonId === 'coordinated-turn'
+    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn'].includes(lessonId ?? '')
     for (const reference of referenceSet.contract) {
       reference.object.visible = !beginner
     }
@@ -525,6 +598,10 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
 
   const setDirectionTarget = (targetId: string | null): void => {
     for (const reference of directionReferences) reference.object.visible = reference.id === targetId
+  }
+
+  const setTurnTarget = (targetId: string | null): void => {
+    for (const reference of turnReferences) reference.object.visible = reference.id === targetId
   }
 
   const setPath = (line: THREE.Line, path: readonly Vector3[], yOffset: number): void => {
@@ -568,6 +645,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     setReplayVisible,
     setLessonTarget,
     setDirectionTarget,
+    setTurnTarget,
     setTrainingPath,
     setReplayPath,
     dispose: () => disposeFlightScene(scene),

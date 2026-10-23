@@ -1,6 +1,7 @@
 import { LANDING_LEARNING_CONTENT } from './landing'
 import { STRAIGHT_LINE_LEARNING_CONTENT } from './straightLine'
 import { DIRECTION_CONTROL_LEARNING_CONTENT } from './directionControl'
+import { COORDINATED_TURN_LEARNING_CONTENT } from './coordinatedTurn'
 
 export interface LessonLearningContent {
   readonly code: string
@@ -53,24 +54,7 @@ const LEARNING_CONTENT: Readonly<Record<string, LessonLearningContent>> = {
       '離開目標區後急著追回，反而越修越大。',
     ],
   },
-  'coordinated-turn': {
-    code: 'L06',
-    title: '協調轉彎',
-    level: '進階',
-    prerequisiteIds: ['direction-control'],
-    objectives: ['依序通過進入、頂點與出口參考。', '讓實際飛行軌跡轉向並維持高度。'],
-    steps: [
-      '先熟悉路線與出口位置，緩慢接近進入標記。',
-      '以滾轉建立轉彎，再配合偏航與俯仰維持路線。',
-      '沿路線通過頂點，持續觀察高度與飛行方向。',
-      '在出口逐步回正，讓速度方向對齊出口路線。',
-    ],
-    commonMistakes: [
-      '只原地偏航，機頭轉了但飛行軌跡沒有轉向。',
-      '未先通過進入標記就切向頂點，造成順序不符。',
-      '轉彎時過度傾斜而失高，或過晚回正飛出路線。',
-    ],
-  },
+  'coordinated-turn': COORDINATED_TURN_LEARNING_CONTENT,
   'split-s': {
     code: 'L13',
     title: 'Split-S 翻轉下降',

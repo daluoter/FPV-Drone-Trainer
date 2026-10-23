@@ -15,6 +15,7 @@ import { CURRENT_TRAINING_RULES_VERSION } from './attempt'
 import { createTrainingFieldAnchors } from './field'
 import { GROUND_CONTACT_SLOP_M } from '../simulation/dynamics'
 import { DIRECTION_CONTROL_LESSON } from './directionControl'
+import { COORDINATED_TURN_LESSON } from './coordinatedTurn'
 import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample, TrainingSceneReference } from './types'
 
 function at(samples: readonly ReplaySample[], timeSeconds: number): ReplaySample {
@@ -59,6 +60,98 @@ function referencesFor(settings: TuningSettings): readonly TrainingSceneReferenc
 }
 
 describe('bounded simulation teaching recordings', () => {
+  it.each(['beginner', 'standard', 'raised-field'] as const)('flies both complete L06 physical turns with %s settings', (preset) => {
+    const defaults = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
+    const settings = preset === 'raised-field' ? {
+      ...defaults, drone: { ...defaults.drone, ground: { ...defaults.drone.ground, heightM: 10 }, spawnPositionM: { x: 6, y: 25, z: -3 } },
+    } : defaults
+    const before = JSON.stringify(settings)
+    const demo = createTeachingDemonstration(settings, 'coordinated-turn')
+    expect(demo).toMatchObject({ lessonId: 'coordinated-turn', source: 'simulated', rulesVersion: 5, physicsVersion: 1 })
+    expect(demo.recording.samples[0]!.positionM).toEqual(createTrainingFieldAnchors(settings.drone).launch)
+    expect(demo.recording.durationSeconds).toBeGreaterThan(20)
+    expect(demo.recording.durationSeconds).toBeLessThanOrEqual(95)
+    expect(demo.recording.samples.length).toBeLessThanOrEqual(6_000)
+    expect(demo.recording.droppedSamples).toBe(0)
+    expect(Object.isFrozen(demo)).toBe(true)
+    expect(Object.isFrozen(demo.cues)).toBe(true)
+    expect(demo.cues.every(Object.isFrozen)).toBe(true)
+    const retainedTimes = new Set(demo.recording.samples.map((pose) => pose.timestampSeconds))
+    expect(demo.cues.every((cue) => retainedTimes.has(cue.timeSeconds))).toBe(true)
+    expect(demo.cues.at(-1)!.timeSeconds).toBe(demo.recording.durationSeconds)
+    expect(teachingCueAt(demo, demo.recording.durationSeconds)).toContain('已完成右轉與左轉協調航線')
+    const session = new TrainingSession({
+      lessons: [COORDINATED_TURN_LESSON], initialLessonId: 'coordinated-turn', countdownDurationSeconds: 0,
+      sceneReferences: referencesFor(settings),
+    })
+    session.start(0)
+    session.tick(0)
+    for (let index = 0; index < demo.recording.samples.length; index += 1) {
+      const pose = demo.recording.samples[index]
+      expect(Object.values(pose.normalizedInput!).every(Number.isFinite)).toBe(true)
+      expect(quaternionNorm(pose.orientation)).toBeCloseTo(1, 8)
+      if (index > 0) {
+        const previous = demo.recording.samples[index - 1]
+        const dt = pose.timestampSeconds - previous.timestampSeconds
+        expect(dt).toBeGreaterThan(0)
+        expect(dt).toBeLessThan(0.02)
+        expect(Math.hypot(
+          pose.positionM.x - previous.positionM.x - (pose.velocityMps.x + previous.velocityMps.x) * 0.5 * dt,
+          pose.positionM.y - previous.positionM.y - (pose.velocityMps.y + previous.velocityMps.y) * 0.5 * dt,
+          pose.positionM.z - previous.positionM.z - (pose.velocityMps.z + previous.velocityMps.z) * 0.5 * dt,
+        )).toBeLessThan(0.003)
+      }
+      if (session.getState().phase !== 'SUCCESS') {
+        const state = session.consumeSample(geometricSample(settings, pose))
+        expect(state.phase, JSON.stringify({ time: pose.timestampSeconds, result: state.result, evaluation: state.lastEvaluation })).not.toBe('FAILED')
+      }
+    }
+    expect(session.getState().phase, JSON.stringify(session.getState().lastEvaluation)).toBe('SUCCESS')
+    expect(session.getState().result?.completedCheckpoints).toBe(8)
+    expect(Object.values(session.getState().checkpoints).every((checkpoint) => checkpoint.completed)).toBe(true)
+    const rightEntry = at(demo.recording.samples, demo.cues.find((cue) => cue.targetReferenceId === 'turn-right-apex')!.timeSeconds)
+    const rightExit = at(demo.recording.samples, demo.cues.find((cue) => cue.targetReferenceId === 'turn-left-entry')!.timeSeconds)
+    const leftEntry = at(demo.recording.samples, demo.cues.find((cue) => cue.targetReferenceId === 'turn-left-apex')!.timeSeconds)
+    const leftExit = demo.recording.samples.at(-1)!
+    const signedMotionChange = (before: ReplaySample, after: ReplaySample): number => Math.atan2(
+      before.velocityMps.x * after.velocityMps.z - before.velocityMps.z * after.velocityMps.x,
+      before.velocityMps.x * after.velocityMps.x + before.velocityMps.z * after.velocityMps.z,
+    ) * 180 / Math.PI
+    expect(signedMotionChange(rightEntry, rightExit)).toBeGreaterThan(25)
+    expect(signedMotionChange(leftEntry, leftExit)).toBeLessThan(-25)
+    expect(rotateVectorByQuaternion(rightExit.orientation, { x: 0, y: 0, z: -1 }).x).toBeGreaterThan(0.95)
+    expect(rotateVectorByQuaternion(leftExit.orientation, { x: 0, y: 0, z: -1 }).z).toBeLessThan(-0.95)
+    expect(JSON.stringify(settings)).toBe(before)
+  })
+
+  it('keeps L06 right/left goals, captions and recorded poses on one paused or seeked clock', () => {
+    const demo = createTeachingDemonstration(createTuningPreset('beginner'), 'coordinated-turn')
+    const player = new ReplayPlayback(demo.recording)
+    expect(teachingTargetAt(demo, 0)).toBe('turn-right-entry')
+    expect(teachingCueAt(demo, 0)).toContain('從地面自行起飛')
+    const leftCue = demo.cues.find((cue) => cue.targetReferenceId === 'turn-left-apex')!
+    player.seek(leftCue.timeSeconds + 0.1)
+    expect(teachingTargetAt(demo, player.currentTime)).toBe('turn-left-apex')
+    expect(teachingCueAt(demo, player.currentTime)).toContain('左傾')
+    const frozen = player.getGhostState()
+    player.pause()
+    player.advance(20)
+    expect(player.getGhostState()).toEqual(frozen)
+    expect(teachingTargetAt(demo, player.currentTime)).toBe('turn-left-apex')
+    player.setSpeed(0.5)
+    player.play()
+    player.advance(0.4)
+    expect(player.currentTime).toBeCloseTo(leftCue.timeSeconds + 0.3)
+    expect(teachingTargetAt(demo, player.currentTime)).toBe('turn-left-apex')
+    player.seek(demo.recording.durationSeconds)
+    expect(teachingTargetAt(demo, player.currentTime)).toBe('turn-left-exit')
+    expect(teachingCueAt(demo, player.currentTime - 5e-10)).toContain('已完成右轉與左轉協調航線')
+    expect(teachingCueAt(demo, player.currentTime - 0.001)).not.toContain('已完成右轉與左轉協調航線')
+    player.seek(0)
+    expect(player.getGhostState()?.positionM).toEqual(demo.recording.samples[0]!.positionM)
+    expect(teachingTargetAt(demo, player.currentTime)).toBe('turn-right-entry')
+  })
+
   it.each(['beginner', 'standard', 'raised-field'] as const)('flies the complete L05 physical example with %s settings', (preset) => {
     const defaults = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
     const settings = preset === 'raised-field' ? {

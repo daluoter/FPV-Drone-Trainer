@@ -3,6 +3,7 @@ import {
   copyTrainingAttemptContext,
   isTrainingAttemptContext,
   trainingAttemptContextKey,
+  trainingRulesVersionForLesson,
   type TrainingAttemptContext,
 } from './attempt'
 import type {
@@ -241,6 +242,28 @@ export class TrainingProgressStore {
       if (knownLessonIds.has(lessonId)) lessons[lessonId] = copyLessonProgress(progress)
     }
     return { progress: { ...merged, lessons }, loaded: true, errors: [] }
+  }
+
+  /** Read each lesson's current rules without rewriting or merging its scores. */
+  public loadCurrent(context: TrainingAttemptContext): TrainingProgressLoadResult {
+    const fallback = createDefaultTrainingProgress(this.lessonIds)
+    if (!isTrainingAttemptContext(context)) {
+      return { progress: fallback, loaded: false, errors: ['Training attempt context is invalid.'] }
+    }
+    const versions = new Set(this.lessonIds.map(trainingRulesVersionForLesson))
+    const scopes = new Map([...versions].map((rulesVersion) => [
+      rulesVersion, this.load({ ...context, rulesVersion }),
+    ]))
+    const lessons: Record<string, LessonProgress> = {}
+    for (const lessonId of this.lessonIds) {
+      const scope = scopes.get(trainingRulesVersionForLesson(lessonId))
+      lessons[lessonId] = copyLessonProgress(scope?.progress.lessons[lessonId] ?? createEmptyLessonProgress())
+    }
+    return {
+      progress: { ...fallback, lessons },
+      loaded: [...scopes.values()].some((scope) => scope.loaded),
+      errors: [...new Set([...scopes.entries()].flatMap(([version, scope]) => scope.errors.map((error) => `Rules ${version}: ${error}`)))],
+    }
   }
 
   public save(progress: TrainingProgressDocument, context?: TrainingAttemptContext): TrainingProgressPersistenceResult {

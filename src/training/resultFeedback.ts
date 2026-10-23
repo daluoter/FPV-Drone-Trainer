@@ -1,4 +1,4 @@
-import { directionControlTargetLabel, trainingHint } from './feedback'
+import { coordinatedTurnTargetLabel, directionControlTargetLabel, trainingHint, trainingObjective } from './feedback'
 import { LANDING_LIFTOFF_HEIGHT_M, LANDING_ZONE_RADIUS_M } from './landing'
 import { TAKEOFF_SETTLED_DWELL_SECONDS } from './takeoff'
 import type { TrainingResult } from './types'
@@ -19,8 +19,8 @@ interface MetricGoal {
   readonly tip: string
 }
 
-// Route goals here describe historical rules 1–3 only. New route results use
-// observed gate/ground facts below, so old precision limits cannot reject them.
+// Route goals here describe historical rules: L03/L04 before 4 and L06 before
+// 5. New results use observed progress below instead of the old precision goals.
 const GOALS: Readonly<Record<string, readonly MetricGoal[]>> = {
   takeoff: [
     { key: 'altitudeErrorM', label: '高度偏差', unit: 'm', target: 0.35, tip: '下一次接近目標高度時，改用小量油門修正上升或下降速度。' },
@@ -46,6 +46,10 @@ const GOALS: Readonly<Record<string, readonly MetricGoal[]>> = {
     { key: 'horizontalSpeedMps', label: '水平速度', unit: 'm/s', target: 0.35, tip: '下一次觀察實際速度下降後，再把機體帶回接近水平；回中不會自動煞停。' },
     { key: 'contiguousDwellSeconds', label: '終點連續穩定時間', unit: 's', target: 1.2, minimum: true, tip: '下一次在終點先穩住位置、速度與高度，再連續保持。' },
   ],
+  'coordinated-turn': [
+    { key: 'routeCorridorErrorM', label: '偏離航線', unit: 'm', target: 3.2, tip: '這是舊版單彎航線紀錄；依當時入口、轉彎點及出口練習，讓實際航線留在走廊內。' },
+    { key: 'headingChangeDegrees', label: '實際航向變化', unit: '°', target: 55, minimum: true, tip: '這是舊版單彎航線紀錄；讓實際飛行方向隨入口、轉彎點到出口改變，原地轉頭不能代替轉彎。' },
+  ],
 }
 
 function amount(value: number, unit: string): string {
@@ -53,8 +57,88 @@ function amount(value: number, unit: string): string {
 }
 
 function isLegacyRouteResult(result: TrainingResult): boolean {
-  return ['straight-line', 'landing'].includes(result.lessonId)
-    && result.attemptContext !== undefined && result.attemptContext.rulesVersion < 4
+  const version = result.attemptContext?.rulesVersion
+  return version !== undefined && (['straight-line', 'landing'].includes(result.lessonId) && version < 4
+    || result.lessonId === 'coordinated-turn' && version < 5)
+}
+
+function coordinatedTurnResultFeedback(result: TrainingResult, scope: string): TrainingResultFeedback | null {
+  if (result.lessonId !== 'coordinated-turn' || result.attemptContext === undefined || result.attemptContext.rulesVersion < 5) return null
+  if (result.outcome !== 'SUCCESS') {
+    const message = result.message ?? ''
+    if (/墜毀|撞擊|crash|impact/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: '本次發生墜毀，左右轉彎航線尚未完成。',
+      nextPractice: '先按 Reset 重設，再從地面自行起飛；用小量傾斜與偏航帶動轉彎，接近地面時提早修正高度。',
+      scopeNote: scope,
+    }
+    if (/解除解鎖|失焦|斷線|disarm|focus|disconnect/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: '本次因解除解鎖、失去焦點或連線中斷而停止，不能據此判定轉彎技巧。',
+      nextPractice: '確認網頁與控制器就緒，重試課程；倒數結束後再明確 Arm。',
+      scopeNote: scope,
+    }
+    if (/無效|資料中斷|時間倒退|位置跳躍|缺少有效|支撐高度不一致|invalid|non-finite|telemetry.*gap|impossible.*jump/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: '本次飛行資料無效或中斷，無法以這段資料判定轉彎表現。',
+      nextPractice: '重設課程，保持網頁在前景，從地面重新起飛後依序完成左右轉目標。',
+      scopeNote: scope,
+    }
+  }
+  if (!Number.isFinite(result.sampleCount) || result.sampleCount <= 0) return null
+  if (result.outcome === 'SUCCESS') return {
+    observedStrength: '本次已依序完成右轉與左轉的入口、轉彎點及出口，並觀察到實際航線朝兩側轉向。',
+    observedGap: null,
+    nextPractice: '以相同條件再練一次，練習小量 Roll 傾斜、Yaw 跟隨路線與油門修正高度，逐步讓轉彎連貫。',
+    scopeNote: scope,
+  }
+  const metrics = result.metrics
+  const phase = Number.isInteger(metrics.turnPhase) && metrics.turnPhase >= 0 && metrics.turnPhase <= 8
+    ? metrics.turnPhase : null
+  const passed = Number.isInteger(metrics.turnTargetsCompleted) && metrics.turnTargetsCompleted >= 0 && metrics.turnTargetsCompleted <= 6
+    ? metrics.turnTargetsCompleted : null
+  const index = Number.isInteger(metrics.turnTargetIndex) && metrics.turnTargetIndex >= 0 && metrics.turnTargetIndex < 6
+    ? metrics.turnTargetIndex : phase !== null && phase >= 2 && phase <= 7 ? phase - 2 : null
+  const strength = passed !== null && passed > 0
+    ? `本次已依序完成 ${passed} / 6 個轉彎目標${passed >= 3 ? '，其中右轉航線已完成' : ''}。`
+    : phase !== null && phase >= 2 ? '本次已觀察到從地面自行起飛。' : null
+  if (phase !== null && phase <= 1) return {
+    observedStrength: strength,
+    observedGap: '本次尚未完成從地面自行起飛。',
+    nextPractice: '從起飛區自行加油門離地，再前往前方亮起的右轉入口，不需要先懸停。',
+    scopeNote: scope,
+  }
+  if (index !== null) {
+    const direction = index < 3 ? '右' : '左'
+    let cause = ''
+    if (metrics.groundTouching > 0.5 || (Number.isFinite(metrics.groundClearanceM) && metrics.groundClearanceM < 0.15)) {
+      cause = '結束時尚未在空中；可在目前位置再次起飛，已完成目標會保留。'
+    } else if (Number.isFinite(metrics.headingErrorDegrees) && metrics.headingErrorDegrees > 70) {
+      cause = `結束時機頭偏離箭頭方向 ${metrics.headingErrorDegrees.toFixed(0)}°，需在 70° 內。`
+    } else if (index % 3 > 0 && metrics.turnEntryRecorded === 0) {
+      cause = '尚缺本彎入口的實際移動方向紀錄。'
+    } else if (metrics.turnMotionReady === 0 && (index % 3 === 0 || index % 3 === 2)) {
+      cause = '尚未觀察到本步的實際移動方向；原地轉頭不能完成航線。'
+    } else if (index % 3 === 2 && Number.isFinite(metrics.turnChangeDegrees) && metrics.turnChangeDegrees < 25) {
+      cause = metrics.turnChangeDegrees < 0
+        ? `實際航線朝相反方向轉了 ${Math.abs(metrics.turnChangeDegrees).toFixed(0)}°；本彎需朝${direction}轉至少 25°。`
+        : `實際航線已朝${direction}轉 ${metrics.turnChangeDegrees.toFixed(0)}°，尚未達到本彎至少 25° 的目標。`
+    } else if (Number.isFinite(metrics.targetDistanceM)) {
+      cause = `結束時距該目標 ${metrics.targetDistanceM.toFixed(1)} m。`
+    }
+    return {
+      observedStrength: strength,
+      observedGap: `本次尚未完成「${coordinatedTurnTargetLabel(index)}」${passed !== null ? `，尚餘 ${6 - passed} 個轉彎目標` : ''}。${cause}`,
+      nextPractice: trainingObjective('coordinated-turn', { metrics: { ...metrics, turnPhase: phase ?? index + 2, turnTargetIndex: index } })!.detail,
+      scopeNote: scope,
+    }
+  }
+  return {
+    observedStrength: null,
+    observedGap: '本次左右轉彎尚未完成；分段資料不足，無法判定卡在哪個目標。',
+    nextPractice: '重試課程，依亮起目標完成右轉與左轉的入口、轉彎點及出口；讓實際航線轉向，不只轉動機頭。',
+    scopeNote: scope,
+  }
 }
 
 function scopeNote(result: TrainingResult): string {
@@ -217,6 +301,8 @@ function phaseProgress(result: TrainingResult): { observedGap: string; nextPract
 /** Final-sample observations and checkpoint facts, never inferred causes or a claim about the whole flight. */
 export function summarizeTrainingResult(result: TrainingResult): TrainingResultFeedback {
   const scope = scopeNote(result)
+  const turn = coordinatedTurnResultFeedback(result, scope)
+  if (turn) return turn
   const direction = directionControlResultFeedback(result, scope)
   if (direction) return direction
   if (!Number.isFinite(result.sampleCount) || result.sampleCount <= 0) {

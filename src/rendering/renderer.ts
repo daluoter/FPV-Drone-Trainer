@@ -59,6 +59,7 @@ export class FlightRenderer {
   private currentFlightScene: FlightScene
   private lessonTarget: string | null = null
   private directionTarget: string | null = null
+  private turnTarget: string | null = null
   public get flightScene(): FlightScene { return this.currentFlightScene }
   public readonly cameraRig: FlightCameraRig
   public readonly renderer: THREE.WebGLRenderer
@@ -129,6 +130,13 @@ export class FlightRenderer {
     this.flightScene.setDirectionTarget(targetId)
   }
 
+  /** Advance the presentation-only L06 route without altering live flight. */
+  public setTurnTarget(targetId: string | null): void {
+    if (this.disposed) return
+    this.turnTarget = targetId
+    this.flightScene.setTurnTarget(targetId)
+  }
+
   /** Rebuild anchors only after the owner has explicitly reset and disarmed. */
   public reconfigureScene(config: DroneConfig): void {
     if (this.disposed) return
@@ -136,6 +144,7 @@ export class FlightRenderer {
     this.currentFlightScene = createFlightScene(config)
     this.currentFlightScene.setLessonTarget(this.lessonTarget)
     this.currentFlightScene.setDirectionTarget(this.directionTarget)
+    this.currentFlightScene.setTurnTarget(this.turnTarget)
     previous.dispose()
   }
 

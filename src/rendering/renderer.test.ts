@@ -120,4 +120,33 @@ describe('FlightRenderer lifecycle and failure contract', () => {
       renderer.dispose()
     }
   })
+
+  it('retains the active L06 turn target across scene reconfiguration on the same canvas', () => {
+    const rendererStub = createRendererStub()
+    const canvas = document.createElement('canvas')
+    const renderer = new FlightRenderer(canvas, { rendererFactory: () => rendererStub })
+    try {
+      renderer.setLessonTarget('coordinated-turn')
+      renderer.setTurnTarget('turn-left-apex')
+      const previous = renderer.flightScene
+      const disposePrevious = vi.spyOn(previous, 'dispose')
+      renderer.reconfigureScene({ ...DEFAULT_DRONE_CONFIG,
+        ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 20, z: -3 } })
+      const targets = renderer.scene.getObjectByName('coordinated-turn-targets')!
+      expect(targets.visible).toBe(true)
+      expect(targets.children.filter((marker) => marker.visible).map((marker) => marker.name)).toEqual(['turn-left-apex-zone'])
+      expect(renderer.flightScene.getReference('turn-left-apex')?.positionM).toEqual({ x: 20, y: 8, z: -17 })
+      expect(renderer.scene.getObjectByName('coordinated-turn-route')?.visible).toBe(true)
+      expect(renderer.flightScene.getReference('turn-entry')?.object.visible).toBe(false)
+      expect(renderer.canvas).toBe(canvas)
+      expect(renderer.renderer).toBe(rendererStub)
+      expect(disposePrevious).toHaveBeenCalledOnce()
+      renderer.setTurnTarget('turn-left-exit')
+      expect(targets.children.filter((marker) => marker.visible).map((marker) => marker.name)).toEqual(['turn-left-exit-zone'])
+      renderer.setTurnTarget(null)
+      expect(targets.children.every((marker) => !marker.visible)).toBe(true)
+    } finally {
+      renderer.dispose()
+    }
+  })
 })
