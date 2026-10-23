@@ -4,6 +4,7 @@ import type * as THREE from 'three'
 import { createDefaultDroneConfig, createInitialDroneState } from '../drone'
 import { rotateVectorByQuaternion } from '../math/quaternion'
 import { createCoordinatedTurnTargets, COORDINATED_TURN_TARGET_RADIUS_M } from '../training/coordinatedTurn'
+import { createSquareRouteTargets, SQUARE_ROUTE_TARGET_RADIUS_M } from '../training/squareRoute'
 
 import { createFlightScene } from './scene'
 
@@ -180,6 +181,14 @@ describe('flight scene reference contract', () => {
         'turn-left-entry',
         'turn-left-apex',
         'turn-left-exit',
+        'square-leg-1',
+        'square-corner-1',
+        'square-leg-2',
+        'square-corner-2',
+        'square-leg-3',
+        'square-corner-3',
+        'square-leg-4',
+        'square-finish',
       ])
       expect(scene.getReference('hover-zone')?.kind).toBe('zone')
       expect(scene.getReference('hover-zone')?.positionM).toEqual({ x: 0, y: 3, z: 0 })
@@ -372,4 +381,106 @@ describe('flight scene reference contract', () => {
     expect(routeGeometry).toHaveBeenCalledOnce()
     expect(routeMaterial).toHaveBeenCalledOnce()
   })
+
+  it('shows only the current L07 target and square outline while preserving other lesson guides', () => {
+    const scene = createFlightScene()
+    const targets = scene.scene.getObjectByName('square-route-targets')!
+    const path = scene.scene.getObjectByName('square-route-path')!
+    const anchors = scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM: { ...positionM }, sizeM }))
+    const dronePosition = scene.drone.position.toArray()
+    const visible = () => targets.children.filter((marker) => marker.visible).map((marker) => marker.name)
+    try {
+      expect(targets.visible).toBe(false)
+      expect(path.visible).toBe(false)
+      scene.setLessonTarget('square-route')
+      expect(targets.visible).toBe(true)
+      expect(path.visible).toBe(true)
+      expect(targets.children).toHaveLength(8)
+      expect(visible()).toEqual(['square-leg-1-zone'])
+      for (const id of ['hover-zone', 'turn-entry', 'turn-apex', 'turn-exit', 'orbit-poi', 'split-s-reference']) {
+        expect(scene.getReference(id)?.object.visible).toBe(false)
+      }
+      for (const name of ['direction-control-targets', 'coordinated-turn-targets', 'coordinated-turn-route', 'landing-target', 'straight-line-targets', 'takeoff-height-target']) {
+        expect(scene.scene.getObjectByName(name)?.visible).toBe(false)
+      }
+      scene.setSquareTarget('square-corner-2')
+      expect(visible()).toEqual(['square-corner-2-zone'])
+      scene.setSquareTarget('square-finish')
+      expect(visible()).toEqual(['square-finish-zone'])
+      scene.setSquareTarget(null)
+      expect(visible()).toEqual([])
+      scene.setSquareTarget('unknown')
+      expect(visible()).toEqual([])
+      scene.setSquareTarget('square-leg-3')
+      scene.setLessonTarget('coordinated-turn')
+      expect(targets.visible).toBe(false)
+      expect(path.visible).toBe(false)
+      expect(scene.scene.getObjectByName('coordinated-turn-targets')?.visible).toBe(true)
+      scene.setLessonTarget('direction-control')
+      expect(scene.scene.getObjectByName('direction-control-targets')?.visible).toBe(true)
+      expect(targets.visible).toBe(false)
+      scene.setLessonTarget(null)
+      expect(scene.getReference('turn-entry')?.object.visible).toBe(true)
+      expect(scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM, sizeM }))).toEqual(anchors)
+      expect(scene.drone.position.toArray()).toEqual(dronePosition)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('shares L07 spherical geometry and headings above raised ground and closes the four-leg ground guide', () => {
+    const defaults = createDefaultDroneConfig()
+    const config = { ...defaults, ground: { ...defaults.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 20, z: -3 } }
+    const before = JSON.stringify(config)
+    const scene = createFlightScene(config)
+    try {
+      const launch = scene.getReference('training-launch')!.positionM
+      for (const target of createSquareRouteTargets(launch, config.ground.heightM)) {
+        const reference = scene.getReference(target.id)!
+        expect(reference.positionM).toEqual(target.positionM)
+        expect(reference.object.position.toArray()).toEqual([target.positionM.x, target.positionM.y, target.positionM.z])
+        const diameter = SQUARE_ROUTE_TARGET_RADIUS_M * 2
+        expect(reference.sizeM).toEqual({ x: diameter, y: diameter, z: diameter })
+        const ring = scene.scene.getObjectByName(`${target.id}-outline-0`) as THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>
+        expect(ring.geometry.parameters.innerRadius).toBe(SQUARE_ROUTE_TARGET_RADIUS_M)
+        expect(ring.material.color.getHex()).toBe(target.kind === 'finish' ? 0xb8f36b : target.kind === 'corner' ? 0xffc978 : 0x45d7f7)
+        const paint = scene.scene.getObjectByName(`${target.id}-ground-paint`)!
+        expect(reference.object.position.y + paint.position.y).toBeCloseTo(5.018)
+        const arrow = scene.scene.getObjectByName(`${target.id}-heading`)!
+        const heading = rotateVectorByQuaternion(arrow.quaternion, { x: 0, y: 1, z: 0 })
+        expect(heading.x).toBeCloseTo(target.headingForward.x)
+        expect(heading.y).toBeCloseTo(target.headingForward.y)
+        expect(heading.z).toBeCloseTo(target.headingForward.z)
+      }
+      expect(scene.getReference('square-leg-1')?.positionM).toEqual({ x: 6, y: 8, z: -9 })
+      expect(scene.getReference('square-corner-2')?.positionM).toEqual({ x: 18, y: 8, z: -15 })
+      expect(scene.getReference('square-finish')?.positionM).toEqual({ x: 6, y: 8, z: -3 })
+      const route = scene.scene.getObjectByName('square-route-guide') as THREE.Line<THREE.BufferGeometry, THREE.LineDashedMaterial>
+      const points = route.geometry.getAttribute('position')
+      expect(points.count).toBe(5)
+      const actual = Array.from({ length: points.count }, (_, index) => [points.getX(index), points.getZ(index)])
+      expect(actual).toEqual([[6, -3], [6, -15], [18, -15], [18, -3], [6, -3]])
+      for (let index = 0; index < points.count; index++) expect(points.getY(index)).toBeCloseTo(5.025)
+      expect(route.material.opacity).toBeLessThan(0.5)
+      expect(JSON.stringify(config)).toBe(before)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('disposes the L07 path and hidden finish geometry with the scene', () => {
+    const scene = createFlightScene()
+    const ring = scene.scene.getObjectByName('square-finish-outline-0') as THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>
+    const path = scene.scene.getObjectByName('square-route-guide') as THREE.Line<THREE.BufferGeometry, THREE.LineDashedMaterial>
+    const ringGeometry = vi.spyOn(ring.geometry, 'dispose')
+    const ringMaterial = vi.spyOn(ring.material, 'dispose')
+    const pathGeometry = vi.spyOn(path.geometry, 'dispose')
+    const pathMaterial = vi.spyOn(path.material, 'dispose')
+    scene.dispose()
+    expect(ringGeometry).toHaveBeenCalledOnce()
+    expect(ringMaterial).toHaveBeenCalledOnce()
+    expect(pathGeometry).toHaveBeenCalledOnce()
+    expect(pathMaterial).toHaveBeenCalledOnce()
+  })
+
 })

@@ -1,9 +1,9 @@
 /** Shared baseline for lessons whose approved goals have not changed. */
 export const CURRENT_TRAINING_RULES_VERSION = 4
 
-/** Keep the revised L06 route separate without discarding other lesson progress. */
+/** Use the current route-course rules while preserving the approved earlier goals. */
 export function trainingRulesVersionForLesson(lessonId: string | null): 4 | 5 {
-  return lessonId === 'coordinated-turn' ? 5 : CURRENT_TRAINING_RULES_VERSION
+  return lessonId === 'coordinated-turn' || lessonId === 'square-route' ? 5 : CURRENT_TRAINING_RULES_VERSION
 }
 
 /** Conditions which must match before two attempts can share a progress view. */

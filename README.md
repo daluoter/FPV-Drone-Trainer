@@ -2,9 +2,11 @@
 
 A browser-based FPV flight school and freestyle trick trainer focused on trustworthy transmitter input, believable Acro / Rate flight, and measurable feedback.
 
-> **Status: beginner-school release 2026.10.23.1.** L05 and its demonstration passed learner review. The classroom now adds a ground-start **L06 coordinated-turn** course: right entry/apex/exit followed by left entry/apex/exit, active goals, body-relative hints, an actual-physics synchronized recording and stage-specific results. Ordinary misses and non-crash ground returns retain progress. L06 uses rules 5; approved L03–L05 remain under rules 4 and keep their saved progress. Altitude and explicit X/Y/Z remain visible. See [local update instructions](docs/DEVELOPMENT.md#confirm-the-updated-local-screen), [the L06 tryout guide](docs/L06_COORDINATED_TURN.md), and [validation records](docs/LEARNING_VALIDATION.md). L06 awaits learner review; physical-controller and pilot calibration remain separate validation items.
+> **Status: beginner-school release 2026.10.23.2.** L06 passed learner review. The classroom now adds **L07 square-route practice**: take off from ground, fly four 12-metre legs and their ordered corner goals, then return above launch. Active targets, a visible square route, body-relative hints, an actual-physics synchronized recording and progress are included. Ordinary misses and non-crash ground returns retain checkpoints. L06/L07 use rules 5; L03–L05 remain under rules 4 with saved progress preserved. See [local update instructions](docs/DEVELOPMENT.md#confirm-the-updated-local-screen), [the L07 tryout guide](docs/L07_SQUARE_ROUTE.md), and [validation records](docs/LEARNING_VALIDATION.md). L07 awaits learner review; shared hardware and pilot-calibration checks remain separate.
 
 ## Implemented
+
+- L07 ground-start square route, four straight legs and ordered corners, active goal markers, relative hints and a synchronized actual-physics demo; see [the L07 tryout guide](docs/L07_SQUARE_ROUTE.md).
 
 - L06 ground-start right/left coordinated turns, measured trajectory change, visible route and active targets, synchronized demo and rule-isolated progress; see [the L06 tryout guide](docs/L06_COORDINATED_TURN.md).
 

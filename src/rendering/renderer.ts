@@ -60,6 +60,7 @@ export class FlightRenderer {
   private lessonTarget: string | null = null
   private directionTarget: string | null = null
   private turnTarget: string | null = null
+  private squareTarget: string | null = null
   public get flightScene(): FlightScene { return this.currentFlightScene }
   public readonly cameraRig: FlightCameraRig
   public readonly renderer: THREE.WebGLRenderer
@@ -137,6 +138,13 @@ export class FlightRenderer {
     this.flightScene.setTurnTarget(targetId)
   }
 
+  /** Advance the presentation-only L07 square route without altering live flight. */
+  public setSquareTarget(targetId: string | null): void {
+    if (this.disposed) return
+    this.squareTarget = targetId
+    this.flightScene.setSquareTarget(targetId)
+  }
+
   /** Rebuild anchors only after the owner has explicitly reset and disarmed. */
   public reconfigureScene(config: DroneConfig): void {
     if (this.disposed) return
@@ -145,6 +153,7 @@ export class FlightRenderer {
     this.currentFlightScene.setLessonTarget(this.lessonTarget)
     this.currentFlightScene.setDirectionTarget(this.directionTarget)
     this.currentFlightScene.setTurnTarget(this.turnTarget)
+    this.currentFlightScene.setSquareTarget(this.squareTarget)
     previous.dispose()
   }
 

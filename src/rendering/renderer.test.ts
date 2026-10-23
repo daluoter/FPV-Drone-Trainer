@@ -149,4 +149,36 @@ describe('FlightRenderer lifecycle and failure contract', () => {
       renderer.dispose()
     }
   })
+
+  it('retains the active L07 step and ground path across scene reconfiguration on the same canvas', () => {
+    const rendererStub = createRendererStub()
+    const canvas = document.createElement('canvas')
+    const renderer = new FlightRenderer(canvas, { rendererFactory: () => rendererStub })
+    try {
+      renderer.setLessonTarget('square-route')
+      renderer.setSquareTarget('square-corner-3')
+      const previous = renderer.flightScene
+      const disposePrevious = vi.spyOn(previous, 'dispose')
+      renderer.reconfigureScene({ ...DEFAULT_DRONE_CONFIG,
+        ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 20, z: -3 } })
+      const targets = renderer.scene.getObjectByName('square-route-targets')!
+      expect(targets.visible).toBe(true)
+      expect(targets.children.filter((marker) => marker.visible).map((marker) => marker.name)).toEqual(['square-corner-3-zone'])
+      expect(renderer.flightScene.getReference('square-corner-3')?.positionM).toEqual({ x: 18, y: 8, z: -3 })
+      expect(renderer.scene.getObjectByName('square-route-path')?.visible).toBe(true)
+      expect(renderer.scene.getObjectByName('coordinated-turn-targets')?.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('direction-control-targets')?.visible).toBe(false)
+      expect(renderer.flightScene.getReference('turn-entry')?.object.visible).toBe(false)
+      expect(renderer.canvas).toBe(canvas)
+      expect(renderer.renderer).toBe(rendererStub)
+      expect(disposePrevious).toHaveBeenCalledOnce()
+      renderer.setSquareTarget('square-finish')
+      expect(targets.children.filter((marker) => marker.visible).map((marker) => marker.name)).toEqual(['square-finish-zone'])
+      renderer.setSquareTarget(null)
+      expect(targets.children.every((marker) => !marker.visible)).toBe(true)
+    } finally {
+      renderer.dispose()
+    }
+  })
+
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatTrainingMetrics, trainingHint, trainingObjective, trainingRouteGuide } from './feedback'
+import { formatTrainingMetrics, squareRouteTargetLabel, trainingHint, trainingObjective, trainingRouteGuide } from './feedback'
 
 describe('beginner-facing training feedback', () => {
   it('prioritizes lesson facts with Chinese names and units, without guessing error direction', () => {
@@ -273,5 +273,101 @@ describe('beginner-facing training feedback', () => {
     const hint = trainingHint('coordinated-turn', { status: 'failure', message, metrics: {} })
     expect(hint).toContain(expected)
     expect(hint).not.toContain('尚未觀察到實際起飛')
+  })
+
+  it('introduces four ordered square legs from ground without adding landing or dwell requirements', () => {
+    const guide = trainingRouteGuide('square-route')
+    expect(guide).toMatch(/地面起飛.*第 1 段.*第 2 段.*第 3 段.*第 4 段返回起點上方/)
+    expect(guide).toContain('不要求精準速度、停留或降落')
+    expect(guide).toContain('未墜毀接地保留進度')
+    expect(guide).toContain('XYZ 維持固定場地方向')
+    expect(trainingObjective('square-route', null)?.title).toBe('1／10 起飛區地面準備')
+    const takeoff = trainingObjective('square-route', { metrics: { squarePhase: 1 } })
+    expect(takeoff?.title).toBe('2／10 自行起飛')
+    expect(takeoff?.detail).toContain('約 3 m，不需要先懸停')
+    expect(trainingHint('square-route', null)).toContain('依序沿四段直線與右轉角')
+  })
+
+  it('keeps square directions body-relative and limits them to the two most useful offsets', () => {
+    const goal = trainingObjective('square-route', { metrics: {
+      squarePhase: 6, squareTargetIndex: 4, squareLeg: 3,
+      targetRightM: -4, targetForwardM: -2, targetUpM: 0.5, headingErrorDegrees: 10,
+      positionXM: 100, positionZM: 200,
+    } })
+    expect(goal?.title).toBe('7／10 第 3 段直線')
+    expect(goal?.detail).toContain('以目前機頭為準：目標在左方 4.0 m、後方 2.0 m')
+    expect(goal?.detail).not.toContain('上方 0.5 m')
+    expect(goal?.detail).not.toMatch(/100|200/)
+    expect(goal?.detail).toContain('固定 XYZ 不會跟著機頭轉向')
+    const corner = trainingObjective('square-route', { metrics: { squarePhase: 7, squareTargetIndex: 5 } })
+    expect(corner?.title).toBe('8／10 第 3 個右轉角')
+    expect(corner?.detail).toContain('Roll 右傾')
+    expect(corner?.detail).toContain('已完成的步驟會保留')
+  })
+
+  it('gives the measured square heading blocker before further forward flight instructions', () => {
+    const metrics = { squarePhase: 4, squareTargetIndex: 2, squareLeg: 2,
+      headingErrorDegrees: 96, targetDistanceM: 0.6, squareLegsCompleted: 1 }
+    const goal = trainingObjective('square-route', { metrics })
+    expect(goal?.title).toBe('5／10 第 2 段直線')
+    expect(goal?.detail).toContain('偏離本步箭頭方向 96°，需在 70° 內')
+    expect(goal?.detail).toContain('先小量偏航')
+    expect(goal?.detail).not.toContain('小量 Pitch 前進')
+    expect(formatTrainingMetrics(metrics, 'square-route').map(({ key }) => key))
+      .toEqual(['headingErrorDegrees', 'targetDistanceM', 'squareLegsCompleted'])
+  })
+
+  it('keeps a grounded square retry local and preserves existing steps without a heading distraction', () => {
+    const goal = trainingObjective('square-route', { metrics: {
+      squarePhase: 5, squareTargetIndex: 3, groundTouching: 1, groundClearanceM: 0,
+      headingErrorDegrees: 150, squareTargetsCompleted: 3,
+    } })
+    expect(goal?.title).toBe('6／10 第 2 個右轉角')
+    expect(goal?.detail).toContain('目前位置再次自行起飛')
+    expect(goal?.detail).toContain('已完成的步驟會保留')
+    expect(goal?.detail).toContain('不需要回原起飛點')
+    expect(goal?.detail).not.toContain('150°')
+    expect(formatTrainingMetrics({ squarePhase: 1, groundClearanceM: 0.05, altitudeM: 0.1,
+      squareTargetsCompleted: 0 }, 'square-route').map(({ key }) => key))
+      .toEqual(['groundClearanceM', 'altitudeM', 'squareTargetsCompleted'])
+  })
+
+  it('distinguishes the current airborne square finish from a completed ten-step route', () => {
+    const finish = trainingObjective('square-route', { metrics: { squarePhase: 9, squareTargetIndex: 7 } })
+    expect(finish?.title).toBe('10／10 返回起點上方')
+    expect(finish?.detail).toContain('仍需在空中，不必降落或停穩')
+    expect(finish?.detail).not.toContain('現在可以 Disarm')
+    const done = trainingObjective('square-route', { metrics: { squarePhase: 10, squareTargetsCompleted: 8 } })
+    expect(done?.title).toBe('10／10 方形航線已完成')
+    expect(done?.detail).toContain('四段方形航線並回到起點上方')
+    expect(done?.detail).toContain('不必降落或停留，現在可以 Disarm')
+  })
+
+  it('shows finite square progress without exposing internal state or inventing a speed goal', () => {
+    expect(formatTrainingMetrics({ squarePhase: 6, squareTargetsCompleted: 4, squareLegsCompleted: 2,
+      targetDistanceM: 2.5, headingErrorDegrees: 12, turnChangeDegrees: 0, contiguousDwellSeconds: 0 }, 'square-route'))
+      .toEqual([
+        { key: 'squareTargetsCompleted', label: '已完成方形目標', value: '4 / 8' },
+        { key: 'squareLegsCompleted', label: '已完成方形路段', value: '2 / 4' },
+        { key: 'targetDistanceM', label: '距目前目標', value: '2.50 m' },
+      ])
+    const unknown = trainingObjective('square-route', { metrics: {
+      squarePhase: 4, targetRightM: Number.NaN, targetForwardM: Infinity, targetUpM: Number.NaN,
+      headingErrorDegrees: Number.NaN,
+    } })
+    expect(unknown?.detail).not.toMatch(/NaN|Infinity/)
+    expect(unknown?.detail).toContain('方向以目前機頭為準')
+    expect(squareRouteTargetLabel(-1)).toBe('目前方形航線目標')
+  })
+
+  it.each([
+    ['Ground impact latched a crash; reset required.', '發生墜毀'],
+    ['Flight disarmed after focus was lost.', '解除解鎖、失去焦點'],
+    ['方形航線停止：缺少有效的地面接觸資料。', '飛行資料無效或中斷'],
+    ['方形航線停止：資料中斷、時間倒退或模擬被重設。', '飛行資料無效或中斷'],
+  ])('keeps the explicit L07 stop cause before missing stage facts: %s', (message, expected) => {
+    const hint = trainingHint('square-route', { status: 'failure', message, metrics: {} })
+    expect(hint).toContain(expected)
+    expect(hint).not.toContain('第一段亮起的直線目標')
   })
 })

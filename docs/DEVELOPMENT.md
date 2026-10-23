@@ -13,7 +13,7 @@ Open the Vite URL shown in the terminal. Phase 8 exposes the Controller Lab hand
 
 ### Confirm the updated local screen
 
-The current classroom shows **版本 2026.10.23.1** near the page heading and offers **L06 協調轉彎** after L05 側移與方向感. The simulation always shows altitude plus **X 左右／Y 上下／Z 前後**, including after a crash. Negative Z means forward from the supported launch origin. L05/L06 target-direction guidance instead follows the current drone heading. Developer HUD is optional.
+The current classroom shows **版本 2026.10.23.2** near the page heading and offers **L07 方形航線** after L06 協調轉彎. The simulation always shows altitude plus **X 左右／Y 上下／Z 前後**, including after a crash. Negative Z means forward from the supported launch origin. L05/L06/L07 target-direction guidance instead follows the current drone heading. Developer HUD is optional.
 
 If these are absent, stop the old terminal process with Ctrl+C, enter the intended repository, then update the feature branch and start the source server:
 
@@ -48,8 +48,8 @@ A Python Playwright smoke check opens that production build in Chromium and
 checks project-path assets, an initialized WebGL2 canvas, explicit keyboard
 arm/disarm, countdown and waiting for explicit arm, keyboard reset, training stop,
 practice/challenge progress isolation, L00 knowledge completion and reload,
-synchronized L01/L03/L04/L05/L06 demo controls without progress writes, L05/L06 seek/pause
-and lesson reload, L03/L04/L05/L06 ground starts, an inline L00 playback exit,
+synchronized L01/L03/L04/L05/L06/L07 demo controls without progress writes, L05/L06/L07 seek/pause
+and lesson reload, L03/L04/L05/L06/L07 ground starts, an inline L00 playback exit,
 session-bound result marker seek with progress isolation, fullscreen recovery,
 camera controls, and logo navigation. This workflow does
 not deploy the site; production publishing remains a separate manual workflow.

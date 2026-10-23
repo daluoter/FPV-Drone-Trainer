@@ -104,7 +104,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if response is None or response.status != 200:
                 raise AssertionError("The production entry page did not return HTTP 200.")
             expect(page).to_have_title("FPV Drone Trainer")
-            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.23.1")
+            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.23.2")
             report["release"] = page.get_by_test_id("app-release").inner_text()
 
             asset_urls = page.locator("script[src], link[rel='stylesheet'][href]").evaluate_all(
@@ -175,7 +175,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(mode).to_have_value("practice")
             expect(lesson).to_have_value("takeoff")
             expect(lesson.locator("option:checked")).to_contain_text("L01")
-            expect(lesson.locator("option")).to_have_count(8)
+            expect(lesson.locator("option")).to_have_count(9)
             expect(lesson.locator("option[value='landing']")).to_contain_text("L04")
             expect(lesson.locator("option[value='straight-line']")).to_contain_text("L03")
             expect(lesson.locator("option[value='direction-control']")).to_contain_text("L05")
@@ -326,7 +326,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
             if training_progress(page) != stored_attempts:
                 raise AssertionError("Changing learning mode modified stored flight results.")
-            checks.append("default practice mode, eight lessons and persisted practice/challenge isolation")
+            checks.append("default practice mode, nine lessons and persisted practice/challenge isolation")
 
             # Answer the actual radios/form. Wrong answers must not unlock the
             # next step; knowledge completion is separate from flight progress.
@@ -483,6 +483,51 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(training.locator(".school-progress")).to_contain_text("已練 0 次")
             checks.append("L06 right/left recorded turn demo, native seek/pause, progress isolation and current-rule lesson reload")
 
+            lesson.select_option("square-route")
+            expect(training.get_by_role("heading", name="方形航線", exact=True)).to_be_visible()
+            expect(training.locator(".school-route-guide")).to_contain_text("起飛")
+            before_square_demo = training_progress(page)
+            flight.get_by_role("button", name="L07 方形示範", exact=True).click()
+            expect(arm).to_be_disabled()
+            expect(lesson).to_be_disabled()
+            flight.get_by_role("button", name="Pause", exact=True).click()
+            timeline.press("Home")
+            expect(cue).to_contain_text("地面")
+            expect(altitude).to_have_text("0.0 m")
+            timeline.press("End")
+            expect(cue).to_contain_text("已完成四段方形航線並回到起點上方")
+            expect(altitude).to_have_text("3.0 m")
+            for coordinate in ("right", "z"):
+                if abs(float(flight.get_by_test_id(f"flight-position-{coordinate}").inner_text().split()[0])) > .6:
+                    raise AssertionError("L07 ghost did not return above its supported launch point.")
+            paused_square_position = position_hud.inner_text()
+            page.wait_for_timeout(200)
+            if position_hud.inner_text() != paused_square_position:
+                raise AssertionError("L07 paused position kept advancing.")
+            if screenshot:
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l07-demonstration-fpv.png"))
+                flight.get_by_role("button", name="Chase", exact=True).click()
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l07-demonstration-chase.png"))
+                flight.get_by_role("button", name="Free / debug", exact=True).click()
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l07-demonstration-free.png"))
+                flight.get_by_role("button", name="FPV", exact=True).click()
+            timeline.press("Home")
+            expect(altitude).to_have_text("0.0 m")
+            flight.get_by_role("button", name="結束示範", exact=True).click()
+            expect(disarm).to_be_disabled()
+            expect(arm).to_be_enabled()
+            if training_progress(page) != before_square_demo:
+                raise AssertionError("L07 demonstration wrote a flight result.")
+            page.reload(wait_until="networkidle")
+            expect(lesson).to_have_value("square-route")
+            expect(page.locator("#school-open-intro")).to_have_text("L00 觀念複習 ✓")
+            source.select_option("keyboard")
+            lesson.select_option("takeoff")
+            expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
+            lesson.select_option("square-route")
+            expect(training.locator(".school-progress")).to_contain_text("已練 0 次")
+            checks.append("L07 four-leg square demo, native seek/pause, return-to-launch position, progress isolation and lesson reload")
+
             # Ground-based lessons wait on actual supported ground and remain
             # safe after arm at zero throttle while the learner prepares to lift off.
             hud = flight.get_by_role("checkbox", name="Developer HUD", exact=True)
@@ -491,7 +536,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 has=page.get_by_text("Position m", exact=True)
             ).locator("code")
             report["ground_start_positions"] = {}
-            for lesson_id in ("landing", "straight-line", "direction-control", "coordinated-turn"):
+            for lesson_id in ("landing", "straight-line", "direction-control", "coordinated-turn", "square-route"):
                 lesson.select_option(lesson_id)
                 training.get_by_role("button", name="開始課程", exact=True).click()
                 coords = [float(value.strip()) for value in position.inner_text().split(",")]
@@ -518,7 +563,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 expect(phase).to_have_text("準備選課")
                 expect(source).to_be_enabled()
             hud.uncheck()
-            checks.append("L03/L04/L05/L06 actual ground start, safe low-throttle arm and visible stage guidance")
+            checks.append("L03/L04/L05/L06/L07 actual ground start, safe low-throttle arm and visible stage guidance")
 
             fullscreen = flight.locator(".school-fullscreen")
             fullscreen.click()

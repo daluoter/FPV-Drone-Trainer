@@ -5,8 +5,8 @@ import { lessonLearningContent } from './catalog'
 
 
 describe('lesson catalog', () => {
-  it('keeps existing lesson IDs stable and offers the beginner L05 and L06 lessons', () => {
-    expect(DEFAULT_LESSONS).toHaveLength(8)
+  it('keeps existing lesson IDs stable and adds L07 after the approved beginner lessons', () => {
+    expect(DEFAULT_LESSONS).toHaveLength(9)
     expect(DEFAULT_LESSONS.map((lesson) => lesson.id)).toEqual([
       'hover',
       'coordinated-turn',
@@ -16,6 +16,7 @@ describe('lesson catalog', () => {
       'landing',
       'straight-line',
       'direction-control',
+      'square-route',
     ])
     expect(DEFAULT_LESSONS.map((lesson) => lesson.title)).toEqual([
       'Hover',
@@ -26,6 +27,7 @@ describe('lesson catalog', () => {
       '起飛、前往降落區與降落',
       'Straight Line Through Rings',
       '側移與方向感',
+      '方形航線',
     ])
     expect(DEFAULT_LESSONS.every((lesson) => lesson.available && lesson.availability === 'available' && lesson.evaluator)).toBe(true)
     expect(DEFAULT_LESSONS.map((lesson) => lesson.setup.sceneReferenceIds)).toEqual([
@@ -37,16 +39,18 @@ describe('lesson catalog', () => {
       ['training-launch', 'landing-surface'],
       ['takeoff-pad', 'training-launch', 'landing-surface'],
       ['training-launch', 'landing-surface'],
+      ['training-launch', 'landing-surface'],
     ])
   })
 
   it('offers learning content in prerequisite order without requiring completion to select a lesson', () => {
     const ordered = [...DEFAULT_LESSONS].sort((left, right) => left.priority - right.priority)
-    expect(ordered.map((lesson) => lessonLearningContent(lesson.id)?.code)).toEqual(['L01', 'L02', 'L03', 'L04', 'L05', 'L06', 'L13', 'L14'])
+    expect(ordered.map((lesson) => lessonLearningContent(lesson.id)?.code)).toEqual(['L01', 'L02', 'L03', 'L04', 'L05', 'L06', 'L07', 'L13', 'L14'])
     expect(lessonLearningContent('takeoff')?.prerequisiteIds).toEqual(['intro'])
     expect(lessonLearningContent('hover')?.prerequisiteIds).toEqual(['takeoff'])
     expect(lessonLearningContent('direction-control')?.prerequisiteIds).toEqual(['landing'])
     expect(lessonLearningContent('coordinated-turn')?.prerequisiteIds).toEqual(['direction-control'])
+    expect(lessonLearningContent('square-route')?.prerequisiteIds).toEqual(['coordinated-turn'])
     expect(lessonLearningContent('unknown')).toBeNull()
     expect(DEFAULT_LESSONS.every((lesson) => {
       const content = lessonLearningContent(lesson.id)

@@ -236,6 +236,20 @@ describe('training progress persistence', () => {
     }
     expect(storage.getItem(trainingAttemptContextKey(baseline))).toBe(originalBaseline)
     expect(storage.getItem(trainingAttemptContextKey(revised))).toBe(originalRevised)
+
+    // Adding L07 in the same route-rule scope keeps the approved L06 result.
+    expect(store.loadCurrent(revised).progress.lessons['square-route']).toMatchObject({ completed: false, attempts: 0 })
+    expect(store.recordResult(result({
+      lessonId: 'square-route', sessionId: 'square-route:new', attemptContext: revised,
+      completedCheckpoints: 10, totalCheckpoints: 10, metrics: { squareTargetsCompleted: 8, squareLegsCompleted: 4 },
+    })).saved).toBe(true)
+    const afterL07 = new TrainingProgressStore(storage).loadCurrent(revised).progress
+    expect(afterL07.lessons['square-route']).toMatchObject({ completed: true, attempts: 1 })
+    expect(afterL07.lessons['coordinated-turn']).toMatchObject({ completed: true, attempts: 1, best: { sessionId: 'coordinated-turn:new' } })
+    for (const lessonId of ['straight-line', 'landing', 'direction-control']) {
+      expect(afterL07.lessons[lessonId]).toMatchObject({ completed: true, attempts: 1 })
+    }
+    expect(storage.getItem(trainingAttemptContextKey(baseline))).toBe(originalBaseline)
   })
 
   it('keeps both current rule scopes isolated by mode, preset, input and settings', () => {

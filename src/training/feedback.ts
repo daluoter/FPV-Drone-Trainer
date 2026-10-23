@@ -32,6 +32,8 @@ const METRICS: Readonly<Record<string, MetricDefinition>> = {
   directionTargetsCompleted: { label: '已完成方向目標', unit: '/ 7', digits: 0 },
   turnTargetsCompleted: { label: '已完成轉彎目標', unit: '/ 6', digits: 0 },
   turnChangeDegrees: { label: '朝本彎方向的航線轉角', unit: '°', digits: 1 },
+  squareTargetsCompleted: { label: '已完成方形目標', unit: '/ 8', digits: 0 },
+  squareLegsCompleted: { label: '已完成方形路段', unit: '/ 4', digits: 0 },
   targetDistanceM: { label: '距目前目標', unit: 'm', digits: 2 },
   gatesPassed: { label: '已通過圓環', unit: '/ 3', digits: 0 },
   nextGateDistanceM: { label: '距下一個圓環', unit: 'm', digits: 2 },
@@ -86,6 +88,11 @@ const LESSON_METRICS: Readonly<Record<string, readonly string[]>> = {
 }
 
 function metricPriorities(metrics: Readonly<Record<string, number>>, lessonId: string | null): readonly string[] {
+  if (lessonId === 'square-route') {
+    if (metrics.squarePhase <= 1) return ['groundClearanceM', 'altitudeM', 'squareTargetsCompleted']
+    if (metrics.headingErrorDegrees > 70) return ['headingErrorDegrees', 'targetDistanceM', 'squareLegsCompleted']
+    return ['squareTargetsCompleted', 'squareLegsCompleted', 'targetDistanceM']
+  }
   if (lessonId === 'coordinated-turn' && Number.isFinite(metrics.turnPhase)) {
     if (metrics.turnPhase <= 1) return ['groundClearanceM', 'altitudeM', 'turnTargetsCompleted']
     if (metrics.turnTargetIndex === 2 || metrics.turnTargetIndex === 5) return ['turnChangeDegrees', 'targetDistanceM', 'turnTargetsCompleted']
@@ -172,6 +179,7 @@ const LESSON_HINTS: Readonly<Record<string, string>> = {
   'direction-control': '從地面自行起飛，依亮起目標練左右、前後移動，再向右偏航換向；方向提示以目前機頭為準。',
   hover: '先減少水平移動，再用小量油門修正高度，避免連續大幅補桿。',
   'coordinated-turn': '從地面自行起飛，依序飛過右轉與左轉的入口、轉彎點和出口；小量傾斜並配合轉頭，讓實際航線一起轉彎。',
+  'square-route': '從地面自行起飛，依序沿四段直線與右轉角飛行，再回到起點上方；漏點可補飛，不需精準速度、停留或降落。',
   'split-s': '先確認進入高度，再依序完成倒置、下降半圈與恢復正向。',
   orbit: '沿目標周圍保持同一繞行方向，先穩住半徑與高度。',
 }
@@ -188,6 +196,7 @@ function fact(metrics: Readonly<Record<string, number>>, key: string, unit: stri
 
 const DIRECTION_TARGET_LABELS = ['向右側移', '向左側移', '向前移動', '向後移動', '向右偏航換向', '換向後向前移動', '換向後向右側移'] as const
 const TURN_TARGET_LABELS = ['右轉入口', '右轉轉彎點', '右轉出口', '左轉入口', '左轉轉彎點', '左轉出口'] as const
+const SQUARE_TARGET_LABELS = ['第 1 段直線', '第 1 個右轉角', '第 2 段直線', '第 2 個右轉角', '第 3 段直線', '第 3 個右轉角', '第 4 段直線', '返回起點上方'] as const
 
 /** Shared teaching names; the evaluator remains authoritative about progress. */
 export function directionControlTargetLabel(index: number): string {
@@ -198,6 +207,11 @@ export function directionControlTargetLabel(index: number): string {
 export function coordinatedTurnTargetLabel(index: number): string {
   return Number.isInteger(index) && index >= 0 && index < TURN_TARGET_LABELS.length
     ? TURN_TARGET_LABELS[index] : '目前轉彎目標'
+}
+
+export function squareRouteTargetLabel(index: number): string {
+  return Number.isInteger(index) && index >= 0 && index < SQUARE_TARGET_LABELS.length
+    ? SQUARE_TARGET_LABELS[index] : '目前方形航線目標'
 }
 
 /** At most two useful body-relative directions, never inferred from fixed XYZ. */
@@ -259,6 +273,39 @@ function directionObjective(metrics: Readonly<Record<string, number>>): Training
   }
 }
 
+function squareRouteObjective(metrics: Readonly<Record<string, number>>): TrainingObjective {
+  const phase = Number.isInteger(metrics.squarePhase) ? metrics.squarePhase : 0
+  if (phase <= 1) return {
+    title: phase === 0 ? '1／10 起飛區地面準備' : '2／10 自行起飛',
+    detail: '從地面自行加油門離地，飛向第一段亮起的直線目標；建議高度約 3 m，不需要先懸停。',
+  }
+  if (phase >= 10) return {
+    title: '10／10 方形航線已完成',
+    detail: '已依序完成四段方形航線並回到起點上方；不必降落或停留，現在可以 Disarm。',
+  }
+  const index = Number.isInteger(metrics.squareTargetIndex) && metrics.squareTargetIndex >= 0 && metrics.squareTargetIndex < 8
+    ? metrics.squareTargetIndex : phase - 2
+  const title = `${index + 3}／10 ${squareRouteTargetLabel(index)}`
+  if (metrics.groundTouching > 0.5 || (Number.isFinite(metrics.groundClearanceM) && metrics.groundClearanceM < 0.15)) return {
+    title,
+    detail: '目前尚未在空中；在目前位置再次自行起飛，再前往亮起的目標。已完成的步驟會保留，不需要回原起飛點。',
+  }
+  const location = directionTargetLocation(metrics)
+  const leg = Math.min(4, Math.floor(index / 2) + 1)
+  const heading = metrics.headingErrorDegrees
+  const action = Number.isFinite(heading) && heading > 70
+    ? `機頭偏離本步箭頭方向 ${heading.toFixed(0)}°，需在 70° 內；先小量偏航讓機頭跟隨航線，再接近目前目標。`
+    : index === 7
+      ? '沿第 4 段飛入起點上方的綠色終點；仍需在空中，不必降落或停穩。'
+      : index % 2 === 1
+        ? '邊靠近轉角邊小量 Roll 右傾，配合 Yaw 與 Pitch 帶入下一段，並以油門維持高度。'
+        : `沿第 ${leg} 段保持大致朝向箭頭，小量 Pitch 前進，油門修正高度；固定 XYZ 不會跟著機頭轉向。`
+  return {
+    title,
+    detail: `${location}${action}依序飛入目前目標即可，不要求精準速度或停留；漏點可補飛，已完成的步驟會保留。`,
+  }
+}
+
 function coordinatedTurnObjective(metrics: Readonly<Record<string, number>>): TrainingObjective {
   const phase = Number.isInteger(metrics.turnPhase) ? metrics.turnPhase : 0
   if (phase <= 1) return {
@@ -313,6 +360,7 @@ export function trainingObjective(
   const metrics = evaluation?.metrics ?? {}
   if (lessonId === 'direction-control') return directionObjective(metrics)
   if (lessonId === 'coordinated-turn') return coordinatedTurnObjective(metrics)
+  if (lessonId === 'square-route') return squareRouteObjective(metrics)
   if (lessonId === 'straight-line') {
     const phase = metrics.routePhase ?? 0
     if (phase === 0) return {
@@ -353,6 +401,7 @@ export function trainingObjective(
 
 /** Short route instructions remain visible before a lesson starts. */
 export function trainingRouteGuide(lessonId: string | null): string | null {
+  if (lessonId === 'square-route') return '地面起飛 → 第 1 段前進 → 右轉 → 第 2 段 → 右轉 → 第 3 段 → 右轉 → 第 4 段返回起點上方。沿淡色方形路線，依序飛入亮起的直線、轉角與綠色終點；目標半徑 1.8 m，不要求精準速度、停留或降落。漏點及未墜毀接地保留進度，方位提示依目前機頭，XYZ 維持固定場地方向。'
   if (lessonId === 'coordinated-turn') return '地面起飛 → 右轉入口、轉彎點、出口 → 左轉入口、轉彎點、出口。沿地面航線與目前亮起的目標依序飛行；用傾斜、偏航及前進配合轉彎，只原地轉頭不算。目標半徑 1.8 m，不要求精準速度或停留；漏點及未墜毀接地保留進度，固定 XYZ 不會隨機頭轉向。'
   if (lessonId === 'direction-control') return '地面起飛 → 左右側移 → 前後移動 → 向右偏航換向 → 以新朝向前進及右移。依序飛入目前亮起的目標區即可，無須停穩；方位提示以目前機頭為準，XYZ 則是固定場地座標。'
   if (lessonId === 'straight-line') {
@@ -369,6 +418,11 @@ export function trainingHint(
 ): string {
   const hint = evaluation?.hint?.trim()
   const message = evaluation?.message?.trim()
+  if (lessonId === 'square-route' && evaluation?.status === 'failure' && message) {
+    if (/墜毀|撞擊|crash|impact/iu.test(message)) return '本次發生墜毀，方形航線練習已停止；先按 Reset 重設，再從地面自行起飛。'
+    if (/解除解鎖|失焦|斷線|disarm|focus|disconnect/iu.test(message)) return '本次因解除解鎖、失去焦點或連線中斷而停止；確認網頁與控制器就緒，重試課程後再明確 Arm。'
+    if (/無效|資料中斷|時間倒退|位置跳躍|缺少有效|支撐高度不一致|invalid|non-finite|telemetry.*gap|impossible.*jump/iu.test(message)) return '本次飛行資料無效或中斷，方形航線練習已停止；請重設課程，保持網頁在前景後重試。'
+  }
   if (lessonId === 'coordinated-turn' && evaluation?.status === 'failure' && message) {
     if (/墜毀|撞擊|crash|impact/iu.test(message)) return '本次發生墜毀，轉彎練習已停止；先按 Reset 重設，再從地面自行起飛。'
     if (/解除解鎖|失焦|斷線|disarm|focus|disconnect/iu.test(message)) return '本次因解除解鎖、失去焦點或連線中斷而停止；確認網頁與控制器就緒，重試課程後再明確 Arm。'

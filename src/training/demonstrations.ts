@@ -9,8 +9,9 @@ import { CURRENT_TRAINING_RULES_VERSION, fingerprintTrainingSettings, trainingRu
 import { createTrainingFieldAnchors, LANDING_TARGET_DISTANCE_M } from './field'
 import { recordDirectionDemonstration } from './directionDemonstration'
 import { recordTurnDemonstration } from './turnDemonstration'
+import { recordSquareDemonstration } from './squareDemonstration'
 
-export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'roll' | 'pitch' | 'yaw'
+export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'roll' | 'pitch' | 'yaw'
 
 export interface TeachingCue {
   readonly timeSeconds: number
@@ -21,7 +22,7 @@ export interface TeachingCue {
 export interface TeachingDemonstration {
   readonly schemaVersion: 1
   readonly kind: TeachingDemonstrationKind
-  readonly lessonId: 'intro' | 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn'
+  readonly lessonId: 'intro' | 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route'
   readonly rulesVersion: TrainingAttemptContext['rulesVersion']
   readonly physicsVersion: 1
   readonly presetId: TuningPresetSelection
@@ -165,13 +166,24 @@ export function createTeachingDemonstration(
   kind: TeachingDemonstrationKind,
 ): TeachingDemonstration {
   if (!validateTuningSettings(settings).valid) throw new RangeError('示範設定未通過驗證，請先還原有效設定。')
-  if (!['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'roll', 'pitch', 'yaw'].includes(kind)) {
+  if (!['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'roll', 'pitch', 'yaw'].includes(kind)) {
     throw new RangeError('不支援此示範種類。')
   }
   const simulation = new FlightSimulation(flightSimulationConfigFromTuning(settings))
   const maximumThrust = settings.drone.motors.reduce((sum, motor) => sum + motor.maxThrustN, 0)
   if (settings.drone.massKg * settings.drone.gravityMps2 / maximumThrust >= 0.8) {
     throw new RangeError('目前推力不足以完成穩定示範，請檢查機體設定。')
+  }
+  if (kind === 'square-route') {
+    const { recording, cues } = recordSquareDemonstration(simulation, settings, stickForRate, collectiveThrottle)
+    return Object.freeze({
+      schemaVersion: 1, kind, lessonId: 'square-route',
+      rulesVersion: trainingRulesVersionForLesson(kind), physicsVersion: 1,
+      presetId: identifyTuningPreset(settings), settingsFingerprint: fingerprintTrainingSettings(settings),
+      title: 'L07 方形航線：四段直線、轉彎與回到起點',
+      description: '模擬示範，尚待真人飛手驗證。畫面、搖桿、字幕與目標共用同一時間軸；示範不會計入通關。',
+      source: 'simulated', recording, cues,
+    })
   }
   if (kind === 'coordinated-turn') {
     const { recording, cues } = recordTurnDemonstration(simulation, settings, stickForRate, collectiveThrottle)

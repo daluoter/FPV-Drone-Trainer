@@ -212,3 +212,30 @@
 瀏覽器產物：`/tmp/fpv-browser-smoke/run-dnpmte1n/`，含 report、console、preview log 及逐流程截圖。已檢視 `l06-demonstration-fpv.png`、`l06-demonstration-chase.png`、`coordinated-turn-ground-start.png`：藍色出口目標、3.0 m 回放高度與固定 XYZ 正常；地面等待顯示 0.0 m、前方金色入口、Arm 及正確版本。另有手機與矮桌面 HUD／原生全螢幕／真實鍵盤爬升後墜毀回歸。本紀錄為軟體畫面核對，不代表使用者已飛完 L06。
 
 獨立 TypeScript 檢查先發現歷史 fixture 缺少必要 `metricLabels`，補齊後完整測試、lint 與嚴格建置通過。使用者人工試飛清單見 [L06_COORDINATED_TURN.md](L06_COORDINATED_TURN.md)。L06 人工驗收待使用者回報；L05 課程與方向示範、L03／L04 已有的人工核准維持通過。此次不包含 L07 實作、UAT／正式 Pages 發布、硬體或飛手校準。
+
+## L06 使用者確認與 L07 方形航線（2026-10-23）
+
+使用者確認「L06 人工驗證通過」，並指示繼續開發。記錄為對應版本 `2026.10.23.1`／`151a6da` 交付脈絡的課程功能驗收；未另提供其本機 SHA、瀏覽器或輸入設備，共通硬體／飛手校準仍獨立追蹤。
+
+本批基準 `151a6da`，顯示版本 **2026.10.23.2**，交付 L07（`square-route`）：
+
+- 實際地面準備、自行起飛，再依序完成四段中點及轉角／終點，共 10 步。以邊長 12 m 的順時針方形串接直線與轉彎，最後回到起點上方；終點不能在最初起飛時提前取得。
+- 目標中心為地面上方 3 m，球形半徑 1.8 m、邊緣容差 0.1 m、朝向容差 70°；快速連續線段穿越也計入。不要求精準速度、停留、額外轉角數值或降落；漏點及非墜毀接地保留進度。練習不限時、挑戰 240 秒。保留墜毀、解鎖、真實接觸及物理時間／位置完整性檢查，未變更物理。
+- 場景、判定與示範共用八個目標位置及朝向。淡色地面方形線指引整圈，只亮目前目標；藍色直線點、金色轉角、綠色終點搭配光柱／箭頭。FPV 提示最多列兩個機身相對方位，固定 XYZ 不旋轉。
+- 真實 RC／物理示範在新手、一般及高地面／高空自由飛行 spawn 三種設定均通過完整 10 步。錄影約 49.32 秒、2,960 筆、10 段字幕、零淘汰，上限 95 秒／6,000 筆。字幕與目標對齊實際保留影格，結尾距起點水平約 0.393 m、高度約 3.000 m，沒有覆寫物理姿態。
+- L07 使用規則 5 的新 lesson ID；L06 維持規則 5、L03～L05 維持規則 4。既有進度不重新計算；測試確認新增 L07 前進度為空，保存／重載後不改變已完成 L06 與較早課程。L06 的下一個可用課程為 L07。
+- App 整合測試用物理錄影 pose 通過 mock runtime 與真實 session／store，確認一次保存、其他課不增加、canvas 保留、選課與次數重載。FreeFlight 使用真實 runtime／scene 及 GPU stub 驗證 live／示範目前目標、字幕與 ghost 同步，不把回放餵回真人課程。
+
+| 最終檢查 | 結果 |
+| --- | --- |
+| `npm test -- --maxWorkers=2` | PASS：51 檔、425 項，26.41 秒。 |
+| `npm run typecheck` | PASS。 |
+| `npm run lint` | PASS，零警告規則。 |
+| `npm run build -- --base=/FPV-Drone-Trainer/` | PASS，含嚴格 TypeScript；entry 1,078.28 kB／gzip 300.55 kB，既知 >500 kB 建議仍存在。 |
+| 正式產物 Chromium smoke | PASS：22 項，Chromium 154.0.8037.57；頁面版本 2026.10.23.2，無 page／console error／資源錯誤。包含 L07 原生 Home／End、暫停位置固定、空中回到起點、選課重載與進度隔離；L03～L07 地面起點均正常。 |
+
+複查修正 L07 終止結果誤用續練文案：挑戰逾時後明說「再練一次」會清空本次步驟並從地面重新開始；ACTIVE 中碰地仍可保留進度就地再起飛，兩者分開。更新後結果 focused 33 項通過。嚴格型別檢查另外抓到三處測試 optional metrics 存取，補上 optional chain 後 evaluator focused 13 項、typecheck、lint 與建置通過。
+
+瀏覽器產物：`/tmp/fpv-browser-smoke/run-5fgk0vcr/`，含 report、console、preview log 及逐流程截圖。已檢視 `l07-demonstration-fpv.png`、`l07-demonstration-chase.png`、`l07-demonstration-free.png` 與 `square-route-ground-start.png`：終點為綠色、回放高度 3.0 m／相對起點 X 約 +0.4 m／Z 約 0.0 m 正常；地面等待顯示 0.0 m、藍色第一邊目標、Arm 與正確版本。瀏覽器測試亦涵蓋三種視窗 HUD、全螢幕及鍵盤實際爬升後墜毀。這些是軟體畫面核對，不取代使用者操控驗收。
+
+使用者試飛清單見 [L07_SQUARE_ROUTE.md](L07_SQUARE_ROUTE.md)。L07 待使用者人工驗收；L03～L06 原有人工核准保留。本次不包含 L08 實作、UAT／正式 Pages 發布、硬體或飛手校準。

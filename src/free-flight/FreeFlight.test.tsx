@@ -64,6 +64,9 @@ describe('Free Flight native navigation confirmation', () => {
     { lessonId: 'coordinated-turn', code: 'L06', prefix: 'turn', total: 8,
       targets: ['turn-right-entry', 'turn-right-apex', 'turn-right-exit', 'turn-left-entry', 'turn-left-apex', 'turn-left-exit'],
       button: 'L06 轉彎示範', group: 'coordinated-turn-targets', completion: '已完成右轉與左轉協調航線' },
+    { lessonId: 'square-route', code: 'L07', prefix: 'square', total: 10,
+      targets: ['square-leg-1', 'square-corner-1', 'square-leg-2', 'square-corner-2', 'square-leg-3', 'square-corner-3', 'square-leg-4', 'square-finish'],
+      button: 'L07 方形示範', group: 'square-route-targets', completion: '已完成四段方形航線並回到起點上方' },
   ] as const
 
   it.each(routeLessons)('switches the active $code scene goal with actual progress while preserving the canvas', ({ lessonId, prefix, total, targets }) => {
@@ -96,9 +99,12 @@ describe('Free Flight native navigation confirmation', () => {
     expect(scene.getReference(targets[0])!.object.visible).toBe(false)
     expect(screen.getByText(new RegExp(completion))).toBeInTheDocument()
     if (lessonId === 'direction-control') expect(parseFloat(screen.getByTestId('flight-position-z').textContent!)).toBeGreaterThan(3)
-    else {
+    else if (lessonId === 'coordinated-turn') {
       expect(parseFloat(screen.getByTestId('flight-position-right').textContent!)).toBeGreaterThan(14)
       expect(parseFloat(screen.getByTestId('flight-position-z').textContent!)).toBeLessThan(-16)
+    } else {
+      expect(Math.abs(parseFloat(screen.getByTestId('flight-position-right').textContent!))).toBeLessThan(0.6)
+      expect(Math.abs(parseFloat(screen.getByTestId('flight-position-z').textContent!))).toBeLessThan(0.6)
     }
     frame(200)
     frame(400)

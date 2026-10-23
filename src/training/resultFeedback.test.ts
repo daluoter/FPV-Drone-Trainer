@@ -232,4 +232,100 @@ describe('observed result coaching', () => {
     expect(feedback.observedGap).not.toContain('尚未完成從地面')
     expect(feedback.observedStrength).toBeNull()
   })
+
+  it('reports L07 four-leg completion without adding a landing, speed or dwell goal', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'square-route',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, outcome: 'SUCCESS',
+      completedCheckpoints: 10, totalCheckpoints: 10,
+      metrics: { squarePhase: 10, squareTargetsCompleted: 8, squareLegsCompleted: 4,
+        horizontalSpeedMps: 12, contiguousDwellSeconds: 0 } })
+    expect(feedback.observedStrength).toContain('四段方形航線')
+    expect(feedback.observedStrength).toContain('回到起點上方')
+    expect(feedback.observedGap).toBeNull()
+    expect(feedback.nextPractice).toContain('不需降落或停穩')
+    expect(feedback.scopeNote).toContain('不代表已熟練')
+  })
+
+  it('names the next L07 leg from measured progress without applying unrelated route precision goals', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'square-route',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, completedCheckpoints: 6, totalCheckpoints: 10,
+      metrics: { squarePhase: 6, squareTargetIndex: 4, squareTargetsCompleted: 4, squareLegsCompleted: 2,
+        targetDistanceM: 6, targetRightM: 0, targetForwardM: 6, targetUpM: 0,
+        headingErrorDegrees: 10, horizontalSpeedMps: 15, routeCorridorErrorM: 20, contiguousDwellSeconds: 0 } })
+    expect(feedback.observedStrength).toContain('4 / 8 個方形目標')
+    expect(feedback.observedStrength).toContain('2 / 4 段航線')
+    expect(feedback.observedGap).toContain('第 3 段直線')
+    expect(feedback.observedGap).toContain('尚餘 4 個方形目標')
+    expect(feedback.observedGap).toContain('6.0 m')
+    expect(feedback.nextPractice).toContain('從地面重新開始')
+    expect(feedback.nextPractice).toContain('直線目標')
+    expect(feedback.observedGap).not.toMatch(/速度|航廊|停留/)
+  })
+
+  it('explains an L07 heading blocker using its current leg and observed angle', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'square-route',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, completedCheckpoints: 4, totalCheckpoints: 10,
+      metrics: { squarePhase: 4, squareTargetIndex: 2, squareTargetsCompleted: 2,
+        headingErrorDegrees: 110, targetDistanceM: 0.1 } })
+    expect(feedback.observedStrength).toContain('1 / 4 段航線')
+    expect(feedback.observedGap).toContain('第 2 段直線')
+    expect(feedback.observedGap).toContain('110°')
+    expect(feedback.observedGap).toContain('70° 內')
+    expect(feedback.nextPractice).toContain('偏航')
+  })
+
+  it('distinguishes an L07 timeout result from continuing a grounded active attempt', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'square-route',
+      message: '方形航線挑戰逾時：尚未完成四邊與返回起點上方。',
+      attemptContext: { ...currentContext, rulesVersion: 5, mode: 'challenge' }, completedCheckpoints: 8, totalCheckpoints: 10,
+      metrics: { squarePhase: 8, squareTargetIndex: 6, squareTargetsCompleted: 6, squareLegsCompleted: 3,
+        groundTouching: 1, groundClearanceM: 0, headingErrorDegrees: 130 } })
+    expect(feedback.observedStrength).toContain('3 / 4 段航線')
+    expect(feedback.observedGap).toContain('第 4 段直線')
+    expect(feedback.observedGap).toContain('結束時尚未在空中')
+    expect(feedback.observedGap).toContain('挑戰逾時')
+    expect(feedback.observedGap).not.toContain('130°')
+    expect(feedback.nextPractice).toContain('再練一次')
+    expect(feedback.nextPractice).toContain('清空本次步驟')
+    expect(feedback.nextPractice).not.toContain('保留')
+    expect(feedback.nextPractice).not.toContain('目前位置')
+  })
+
+  it.each([
+    ['Ground impact latched a crash; reset required.', '發生墜毀'],
+    ['Attempt disarmed because focus was lost.', '解除解鎖、失去焦點'],
+    ['方形練習停止：缺少有效的地面接觸資料。', '飛行資料無效或中斷'],
+    ['方形練習停止：資料中斷、時間倒退或模擬被重設。', '飛行資料無效或中斷'],
+  ])('preserves the explicit L07 terminal cause with zero samples: %s', (message, expected) => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'square-route',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, sampleCount: 0, metrics: {}, message })
+    expect(feedback.observedGap).toContain(expected)
+    expect(feedback.observedGap).not.toContain('沒有有效的已解鎖飛行樣本')
+    expect(feedback.observedStrength).toBeNull()
+  })
+
+  it('distinguishes missing L07 stage evidence from an observed failure to take off', () => {
+    const missing = summarizeTrainingResult({ ...result, lessonId: 'square-route',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, metrics: {} })
+    expect(missing.observedStrength).toBeNull()
+    expect(missing.observedGap).toContain('分段資料不足')
+    expect(missing.observedGap).not.toContain('尚未完成從地面')
+    const initial = summarizeTrainingResult({ ...result, lessonId: 'square-route',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, metrics: { squarePhase: 1, squareTargetsCompleted: 0 } })
+    expect(initial.observedGap).toContain('尚未完成從地面自行起飛')
+    expect(initial.nextPractice).toContain('不需要先懸停')
+    const aborted = summarizeTrainingResult({ ...result, lessonId: 'square-route', sampleCount: 0, metrics: {} })
+    expect(aborted.observedGap).toContain('沒有有效的已解鎖飛行樣本')
+  })
+
+  it('identifies the final L07 target as airborne return rather than a landing', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'square-route',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, completedCheckpoints: 9, totalCheckpoints: 10,
+      metrics: { squarePhase: 9, squareTargetIndex: 7, squareTargetsCompleted: 7,
+        squareLegsCompleted: 3, headingErrorDegrees: 0, targetDistanceM: 2 } })
+    expect(feedback.observedGap).toContain('返回起點上方')
+    expect(feedback.observedGap).toContain('尚餘 1 個方形目標')
+    expect(feedback.nextPractice).toMatch(/不必|不需要|不需/)
+    expect(feedback.nextPractice).toContain('降落')
+  })
 })

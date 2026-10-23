@@ -16,6 +16,7 @@ import { createTrainingFieldAnchors } from './field'
 import { GROUND_CONTACT_SLOP_M } from '../simulation/dynamics'
 import { DIRECTION_CONTROL_LESSON } from './directionControl'
 import { COORDINATED_TURN_LESSON } from './coordinatedTurn'
+import { SQUARE_ROUTE_LESSON } from './squareRoute'
 import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample, TrainingSceneReference } from './types'
 
 function at(samples: readonly ReplaySample[], timeSeconds: number): ReplaySample {
@@ -60,6 +61,105 @@ function referencesFor(settings: TuningSettings): readonly TrainingSceneReferenc
 }
 
 describe('bounded simulation teaching recordings', () => {
+  it.each(['beginner', 'standard', 'raised-field'] as const)('flies all four L07 physical route legs with %s settings', (preset) => {
+    const defaults = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
+    const settings = preset === 'raised-field' ? {
+      ...defaults, drone: { ...defaults.drone, ground: { ...defaults.drone.ground, heightM: 10 }, spawnPositionM: { x: 6, y: 25, z: -3 } },
+    } : defaults
+    const before = JSON.stringify(settings)
+    const demo = createTeachingDemonstration(settings, 'square-route')
+    const { launch } = createTrainingFieldAnchors(settings.drone)
+    expect(demo).toMatchObject({ lessonId: 'square-route', source: 'simulated', rulesVersion: 5, physicsVersion: 1 })
+    expect(demo.recording.samples[0]!.positionM).toEqual(launch)
+    expect(demo.recording.durationSeconds).toBeGreaterThan(35)
+    expect(demo.recording.durationSeconds).toBeLessThanOrEqual(95)
+    expect(demo.recording.samples.length).toBeLessThanOrEqual(6_000)
+    expect(demo.recording.droppedSamples).toBe(0)
+    expect(Object.isFrozen(demo)).toBe(true)
+    expect(Object.isFrozen(demo.cues)).toBe(true)
+    expect(demo.cues.every(Object.isFrozen)).toBe(true)
+    const retainedTimes = new Set(demo.recording.samples.map((pose) => pose.timestampSeconds))
+    expect(demo.cues.every((cue) => retainedTimes.has(cue.timeSeconds))).toBe(true)
+    expect(demo.cues.at(-1)!.timeSeconds).toBe(demo.recording.durationSeconds)
+    expect(teachingCueAt(demo, demo.recording.durationSeconds)).toContain('已完成四段方形航線並回到起點上方')
+    const session = new TrainingSession({
+      lessons: [SQUARE_ROUTE_LESSON], initialLessonId: 'square-route', countdownDurationSeconds: 0,
+      sceneReferences: referencesFor(settings),
+    })
+    session.start(0)
+    session.tick(0)
+    for (let index = 0; index < demo.recording.samples.length; index += 1) {
+      const pose = demo.recording.samples[index]
+      expect(Object.values(pose.normalizedInput!).every(Number.isFinite)).toBe(true)
+      expect(quaternionNorm(pose.orientation)).toBeCloseTo(1, 8)
+      if (index > 0) {
+        const previous = demo.recording.samples[index - 1]
+        const dt = pose.timestampSeconds - previous.timestampSeconds
+        expect(dt).toBeGreaterThan(0)
+        expect(dt).toBeLessThan(0.02)
+        expect(Math.hypot(
+          pose.positionM.x - previous.positionM.x - (pose.velocityMps.x + previous.velocityMps.x) * 0.5 * dt,
+          pose.positionM.y - previous.positionM.y - (pose.velocityMps.y + previous.velocityMps.y) * 0.5 * dt,
+          pose.positionM.z - previous.positionM.z - (pose.velocityMps.z + previous.velocityMps.z) * 0.5 * dt,
+        )).toBeLessThan(0.003)
+      }
+      if (session.getState().phase !== 'SUCCESS') {
+        const state = session.consumeSample(geometricSample(settings, pose))
+        expect(state.phase, JSON.stringify({ time: pose.timestampSeconds, result: state.result, evaluation: state.lastEvaluation })).not.toBe('FAILED')
+      }
+    }
+    expect(session.getState().phase, JSON.stringify(session.getState().lastEvaluation)).toBe('SUCCESS')
+    expect(session.getState().result?.completedCheckpoints).toBe(10)
+    expect(Object.values(session.getState().checkpoints).every((checkpoint) => checkpoint.completed)).toBe(true)
+    const nearEndOfLeg = (nextTarget: string): ReplaySample => at(demo.recording.samples, demo.cues.find((cue) => cue.targetReferenceId === nextTarget)!.timeSeconds)
+    const leg1 = nearEndOfLeg('square-corner-1')
+    const leg2 = nearEndOfLeg('square-corner-2')
+    const leg3 = nearEndOfLeg('square-corner-3')
+    const leg4 = nearEndOfLeg('square-finish')
+    expect(leg1.velocityMps.z).toBeLessThan(-0.1)
+    expect(leg2.velocityMps.x).toBeGreaterThan(0.1)
+    expect(leg3.velocityMps.z).toBeGreaterThan(0.1)
+    expect(leg4.velocityMps.x).toBeLessThan(-0.1)
+    expect(rotateVectorByQuaternion(leg1.orientation, { x: 0, y: 0, z: -1 }).z).toBeLessThan(-0.95)
+    expect(rotateVectorByQuaternion(leg2.orientation, { x: 0, y: 0, z: -1 }).x).toBeGreaterThan(0.95)
+    expect(rotateVectorByQuaternion(leg3.orientation, { x: 0, y: 0, z: -1 }).z).toBeGreaterThan(0.95)
+    expect(rotateVectorByQuaternion(leg4.orientation, { x: 0, y: 0, z: -1 }).x).toBeLessThan(-0.95)
+    expect(Math.max(...demo.recording.samples.map((pose) => pose.positionM.x)) - launch.x).toBeGreaterThan(11.5)
+    expect(Math.min(...demo.recording.samples.map((pose) => pose.positionM.z)) - launch.z).toBeLessThan(-11.5)
+    const finish = demo.recording.samples.at(-1)!
+    expect(Math.hypot(finish.positionM.x - launch.x, finish.positionM.z - launch.z)).toBeLessThan(0.4)
+    expect(finish.positionM.y - settings.drone.ground.heightM).toBeCloseTo(3, 1)
+    expect(JSON.stringify(settings)).toBe(before)
+  })
+
+  it('keeps L07 leg goals and captions synchronized through paused seeking and return to start', () => {
+    const demo = createTeachingDemonstration(createTuningPreset('beginner'), 'square-route')
+    const player = new ReplayPlayback(demo.recording)
+    expect(teachingTargetAt(demo, 0)).toBe('square-leg-1')
+    expect(teachingCueAt(demo, 0)).toContain('從地面自行起飛')
+    const thirdLegCue = demo.cues.find((cue) => cue.targetReferenceId === 'square-leg-3')!
+    player.seek(thirdLegCue.timeSeconds + 0.1)
+    expect(teachingTargetAt(demo, player.currentTime)).toBe('square-leg-3')
+    expect(teachingCueAt(demo, player.currentTime)).toContain('第三段')
+    const frozen = player.getGhostState()
+    player.pause()
+    player.advance(20)
+    expect(player.getGhostState()).toEqual(frozen)
+    expect(teachingTargetAt(demo, player.currentTime)).toBe('square-leg-3')
+    player.setSpeed(0.5)
+    player.play()
+    player.advance(0.4)
+    expect(player.currentTime).toBeCloseTo(thirdLegCue.timeSeconds + 0.3)
+    expect(teachingTargetAt(demo, player.currentTime)).toBe('square-leg-3')
+    player.seek(demo.recording.durationSeconds)
+    expect(teachingTargetAt(demo, player.currentTime)).toBe('square-finish')
+    expect(teachingCueAt(demo, player.currentTime - 5e-10)).toContain('已完成四段方形航線並回到起點上方')
+    expect(teachingCueAt(demo, player.currentTime - 0.001)).not.toContain('已完成四段方形航線並回到起點上方')
+    player.seek(0)
+    expect(player.getGhostState()?.positionM).toEqual(demo.recording.samples[0]!.positionM)
+    expect(teachingTargetAt(demo, player.currentTime)).toBe('square-leg-1')
+  })
+
   it.each(['beginner', 'standard', 'raised-field'] as const)('flies both complete L06 physical turns with %s settings', (preset) => {
     const defaults = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
     const settings = preset === 'raised-field' ? {
