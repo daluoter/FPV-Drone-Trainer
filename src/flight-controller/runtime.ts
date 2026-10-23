@@ -5,6 +5,7 @@ import {
 } from '../drone'
 import { IDENTITY_QUATERNION, type Quaternion } from '../math/quaternion'
 import type { Vector3 } from '../math/vector'
+import { validateStaticObstacles, type StaticBoxCollider } from '../simulation/obstacles'
 import {
   DEFAULT_FIXED_STEP_SECONDS,
   DroneSimulation,
@@ -23,6 +24,8 @@ import type {
   MotorTelemetry,
   NormalizedRcInput,
 } from './types'
+
+const INVALID_TRAINING_ENVIRONMENT_REASON = 'Training environment contains invalid obstacles; reset is required before arming.'
 
 function safeRuntimeInput(value: unknown): value is NormalizedRcInput {
   return isFiniteNormalizedRcInput(value)
@@ -63,6 +66,7 @@ export class FlightSimulation {
   private telemetry: FlightTelemetry
   private armed: boolean
   private trainingPreparationHeld = false
+  private trainingEnvironmentValid = true
 
   public constructor(config: FlightSimulationConfig = {}) {
     const runtimeConfig = typeof config === 'object' && config !== null ? config : {}
@@ -103,6 +107,17 @@ export class FlightSimulation {
     return this.armed
   }
 
+  /** Replace the physical environment only while the live simulation is safe. */
+  public setStaticObstacles(boxes: readonly StaticBoxCollider[]): boolean {
+    if (this.armed || !validateStaticObstacles(boxes)) return false
+    this.simulation.setStaticObstacles(boxes)
+    return true
+  }
+
+  public getStaticObstacles(): readonly StaticBoxCollider[] {
+    return this.simulation.getStaticObstacles()
+  }
+
   /** Explicit handoff for a later application arm gate. */
   public arm(): void {
     if (this.state.crashed) {
@@ -110,6 +125,10 @@ export class FlightSimulation {
       this.armed = false
       this.controller.disarm()
       this.telemetry = this.makeTelemetry(this.controller.safeOutput([reason]), this.state, [reason])
+      return
+    }
+    if (!this.trainingEnvironmentValid) {
+      this.disarm(INVALID_TRAINING_ENVIRONMENT_REASON)
       return
     }
     if (this.configurationWarnings.length > 0) {
@@ -145,6 +164,7 @@ export class FlightSimulation {
     this.controller.reset()
     this.accumulator.reset()
     this.trainingPreparationHeld = false
+    this.trainingEnvironmentValid = true
     this.state = this.simulation.resetAt(positionM, orientation)
     this.armed = false
     this.telemetry = this.makeTelemetry(
@@ -162,9 +182,12 @@ export class FlightSimulation {
   public resetForTraining(
     positionM: Vector3 = this.droneConfig.spawnPositionM,
     orientation: Quaternion = IDENTITY_QUATERNION,
+    staticObstacles: readonly StaticBoxCollider[] = [],
   ): DroneState {
     this.resetAt(positionM, orientation, 'Training setup is held while awaiting explicit arm.')
     this.trainingPreparationHeld = true
+    this.trainingEnvironmentValid = this.setStaticObstacles(staticObstacles)
+    if (!this.trainingEnvironmentValid) this.disarm(INVALID_TRAINING_ENVIRONMENT_REASON)
     return this.state
   }
 
@@ -252,7 +275,10 @@ export class FlightSimulation {
     let output: FlightControllerOutput
     if (!this.armed) {
       this.controller.reset()
-      output = this.controller.safeOutput(preWarnings)
+      output = this.controller.safeOutput([
+        ...preWarnings,
+        ...(!this.trainingEnvironmentValid ? [INVALID_TRAINING_ENVIRONMENT_REASON] : []),
+      ])
     } else {
       output = this.controller.calculate(input, this.state.angularVelocityBodyRadPerSec, deltaSeconds)
       if (!output.valid) {
@@ -315,7 +341,7 @@ export class FlightSimulation {
       mixer: output.mixer,
       mixerSaturated: output.mixer.saturated,
       motors,
-      warnings: [...warnings],
+      warnings: [...new Set([...warnings, ...state.warnings])],
     }
   }
 }

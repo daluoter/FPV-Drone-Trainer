@@ -62,6 +62,7 @@ export class FlightRenderer {
   private turnTarget: string | null = null
   private squareTarget: string | null = null
   private figureEightTarget: string | null = null
+  private wideGateTarget: string | null = null
   public get flightScene(): FlightScene { return this.currentFlightScene }
   public readonly cameraRig: FlightCameraRig
   public readonly renderer: THREE.WebGLRenderer
@@ -153,6 +154,13 @@ export class FlightRenderer {
     this.flightScene.setFigureEightTarget(targetId)
   }
 
+  /** Advance L09 guidance while preserving every physical gate frame. */
+  public setWideGateTarget(targetId: string | null): void {
+    if (this.disposed) return
+    this.wideGateTarget = targetId
+    this.flightScene.setWideGateTarget(targetId)
+  }
+
   /** Rebuild anchors only after the owner has explicitly reset and disarmed. */
   public reconfigureScene(config: DroneConfig): void {
     if (this.disposed) return
@@ -163,6 +171,7 @@ export class FlightRenderer {
     this.currentFlightScene.setTurnTarget(this.turnTarget)
     this.currentFlightScene.setSquareTarget(this.squareTarget)
     this.currentFlightScene.setFigureEightTarget(this.figureEightTarget)
+    this.currentFlightScene.setWideGateTarget(this.wideGateTarget)
     previous.dispose()
   }
 

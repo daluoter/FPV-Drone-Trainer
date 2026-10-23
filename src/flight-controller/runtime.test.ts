@@ -3,6 +3,7 @@ import { DEFAULT_DRONE_CONFIG, hoverThrottle } from '../drone'
 import { processControllerSnapshot } from '../controller'
 import type { ControllerProfile, RawGamepadSnapshot } from '../controller'
 import { quaternionNearlyEqual } from '../math'
+import type { StaticBoxCollider } from '../simulation/obstacles'
 import { createDefaultFlightControllerConfig } from './config'
 import { FlightSimulation, processedControllerStateToNormalizedRc } from './runtime'
 
@@ -48,6 +49,111 @@ function mixerSaturationControllerConfig() {
 }
 
 describe('flight simulation integration', () => {
+  const neutralInput = { roll: 0, pitch: 0, yaw: 0, throttle: 0 }
+  const frameBottom: StaticBoxCollider = {
+    id: 'test-frame-bottom',
+    centerM: { x: 0, y: 1, z: 0 },
+    halfExtentsM: { x: 2, y: 0.12, z: 0.15 },
+  }
+
+  it('installs a copied disarmed environment without moving or restarting the drone', () => {
+    const runtime = new FlightSimulation()
+    expect(runtime.getStaticObstacles()).toEqual([])
+    runtime.resetForTraining({ x: 0, y: 3, z: 0 })
+    runtime.advance(1 / 60, neutralInput)
+    const before = runtime.getState()
+    const box = { ...frameBottom, centerM: { ...frameBottom.centerM } }
+    expect(runtime.setStaticObstacles([box])).toBe(true)
+    expect(runtime.getState()).toBe(before)
+    expect(runtime.getState().timeSeconds).toBeCloseTo(1 / 60, 10)
+    box.centerM.x = 100
+    expect(runtime.getStaticObstacles()).toEqual([frameBottom])
+    expect(runtime.setStaticObstacles([{ ...frameBottom, halfExtentsM: { x: Number.NaN, y: 1, z: 1 } }])).toBe(false)
+    expect(runtime.getStaticObstacles()).toEqual([frameBottom])
+    expect(runtime.getState()).toBe(before)
+    runtime.arm()
+    expect(runtime.setStaticObstacles([])).toBe(false)
+    expect(runtime.getStaticObstacles()).toEqual([frameBottom])
+  })
+
+  it('collides through the real controller and solver, disarms, and retains the cause until reset', () => {
+    const runtime = new FlightSimulation()
+    runtime.resetForTraining({ x: 0, y: 3, z: 0 }, undefined, [frameBottom])
+    runtime.arm()
+    for (let step = 0; step < 240 && !runtime.getState().crashed; step += 1) runtime.step(neutralInput)
+    const collision = runtime.getState()
+    expect(collision.crashed).toBe(true)
+    expect(collision.positionM.y).toBeGreaterThan(1)
+    expect(collision.warnings).toContain('Obstacle collision: test-frame-bottom; reset required.')
+    expect(runtime.isArmed()).toBe(false)
+    expect(collision.motors.every((motor) => motor.command === 0 && motor.actualThrustN === 0)).toBe(true)
+    expect(runtime.getTelemetry().warnings).toContain('Obstacle collision: test-frame-bottom; reset required.')
+    runtime.arm()
+    expect(runtime.isArmed()).toBe(false)
+    expect(runtime.getTelemetry().warnings).toContain('Obstacle collision: test-frame-bottom; reset required.')
+    runtime.disarm()
+    runtime.setStaticObstacles([])
+    runtime.step(neutralInput)
+    expect(runtime.getState().positionM).toEqual(collision.positionM)
+    expect(runtime.getState().crashed).toBe(true)
+    expect(runtime.getTelemetry().warnings).toContain('Obstacle collision: test-frame-bottom; reset required.')
+    runtime.reset()
+    expect(runtime.getStaticObstacles()).toEqual([])
+    expect(runtime.getState().crashed).toBe(false)
+    runtime.arm()
+    expect(runtime.isArmed()).toBe(true)
+  })
+
+  it('passes through an open physical frame using ordinary hover RC input', () => {
+    const runtime = new FlightSimulation()
+    const frame: StaticBoxCollider[] = [
+      { id: 'left', centerM: { x: -2.2, y: 3, z: 0 }, halfExtentsM: { x: 0.12, y: 2.2, z: 0.15 } },
+      { id: 'right', centerM: { x: 2.2, y: 3, z: 0 }, halfExtentsM: { x: 0.12, y: 2.2, z: 0.15 } },
+      { id: 'top', centerM: { x: 0, y: 5.2, z: 0 }, halfExtentsM: { x: 2.32, y: 0.12, z: 0.15 } },
+      { id: 'bottom', centerM: { x: 0, y: 0.8, z: 0 }, halfExtentsM: { x: 2.32, y: 0.12, z: 0.15 } },
+    ]
+    const pitch = -0.12
+    runtime.resetForTraining({ x: 0, y: 3, z: 1.5 }, { x: Math.sin(pitch / 2), y: 0, z: 0, w: Math.cos(pitch / 2) }, frame)
+    runtime.arm()
+    for (let step = 0; step < 720 && runtime.getState().positionM.z > -0.7 && !runtime.getState().crashed; step += 1) {
+      runtime.step({ ...neutralInput, throttle: hoverThrottle() / Math.cos(pitch) })
+    }
+    expect(runtime.getState().positionM.z).toBeLessThan(-0.7)
+    expect(runtime.getState().positionM.y).toBeGreaterThan(1.5)
+    expect(runtime.getState().crashed).toBe(false)
+    expect(runtime.isArmed()).toBe(true)
+  })
+
+  it('clears old frame geometry on ordinary reset and on training setup without obstacles', () => {
+    const runtime = new FlightSimulation()
+    runtime.resetForTraining({ x: 0, y: 3, z: 0 }, undefined, [frameBottom])
+    runtime.resetAt({ x: 0, y: 3, z: 0 })
+    expect(runtime.getStaticObstacles()).toEqual([])
+    runtime.arm()
+    for (let step = 0; step < 240 && runtime.getState().positionM.y > 0.5; step += 1) runtime.step(neutralInput)
+    expect(runtime.getState().positionM.y).toBeLessThan(0.5)
+    expect(runtime.getState().crashed).toBe(false)
+    runtime.resetForTraining({ x: 0, y: 3, z: 0 }, undefined, [frameBottom])
+    runtime.resetForTraining({ x: 0, y: 3, z: 0 })
+    expect(runtime.getStaticObstacles()).toEqual([])
+  })
+
+  it('holds and refuses to arm an invalid training environment until a valid explicit reset', () => {
+    const runtime = new FlightSimulation()
+    runtime.resetForTraining({ x: 0, y: 3, z: 0 }, undefined, [{ ...frameBottom, halfExtentsM: { x: 1, y: -1, z: 1 } }])
+    runtime.arm()
+    expect(runtime.isArmed()).toBe(false)
+    runtime.advance(0.1, neutralInput)
+    expect(runtime.getState().positionM).toEqual({ x: 0, y: 3, z: 0 })
+    expect(runtime.getTelemetry().warnings).toContain('Training environment contains invalid obstacles; reset is required before arming.')
+    runtime.setStaticObstacles([frameBottom])
+    runtime.arm()
+    expect(runtime.isArmed()).toBe(false)
+    runtime.resetForTraining({ x: 0, y: 3, z: 0 }, undefined, [frameBottom])
+    runtime.arm()
+    expect(runtime.isArmed()).toBe(true)
+  })
+
   it('holds a disarmed lesson spawn through countdown and releases physics only after explicit arm', () => {
     const runtime = new FlightSimulation()
     const prepared = runtime.resetForTraining({ x: 1, y: 3, z: 2 })

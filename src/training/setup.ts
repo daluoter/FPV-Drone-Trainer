@@ -1,3 +1,4 @@
+import { createWideGates } from '../world/wideGates'
 import type { TrainingSceneReference, TrainingSetupRequest } from './types'
 
 /** Resolve teaching heights from the same configured anchors used by scoring. */
@@ -6,6 +7,13 @@ export function prepareTrainingSetup(
   references: readonly TrainingSceneReference[],
 ): TrainingSetupRequest | null {
   if (!request) return null
+  if (request.lessonId === 'wide-gate') {
+    const launch = references.find((reference) => reference.id === 'training-launch')
+    const surface = references.find((reference) => reference.id === 'landing-surface')
+    if (!launch || !surface) return request
+    return { ...request, setup: { ...request.setup, spawnPositionM: { ...launch.positionM },
+      staticObstacles: createWideGates(launch.positionM, surface.positionM.y).flatMap((gate) => gate.colliders) } }
+  }
   if (request.lessonId === 'landing' || request.lessonId === 'straight-line' || request.lessonId === 'direction-control' || request.lessonId === 'coordinated-turn' || request.lessonId === 'square-route' || request.lessonId === 'figure-eight') {
     const launch = references.find((reference) => reference.id === 'training-launch')
     if (!launch) return request

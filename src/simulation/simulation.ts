@@ -2,7 +2,8 @@ import { DEFAULT_DRONE_CONFIG, isFiniteDroneState, validateDroneConfig } from '.
 import { IDENTITY_QUATERNION, isFiniteQuaternion, quaternionNorm, type Quaternion } from '../math/quaternion'
 import { isFiniteVector3, type Vector3 } from '../math/vector'
 import { createInitialDroneState, type DroneConfig, type DroneState, type DroneStepResult } from '../drone'
-import { createSafeInitialState, MAX_INTEGRATION_DT_SECONDS, stepDroneState } from './dynamics'
+import { createSafeInitialState, GROUND_CRASH_WARNING, MAX_INTEGRATION_DT_SECONDS, stepDroneState } from './dynamics'
+import { copyStaticObstacles, OBSTACLE_CRASH_WARNING_PREFIX, type StaticBoxCollider } from './obstacles'
 import {
   DEFAULT_FIXED_STEP_SECONDS,
   FixedTimestepAccumulator,
@@ -21,6 +22,7 @@ export class DroneSimulation {
   private readonly accumulator: FixedTimestepAccumulator
   private readonly configWarnings: readonly string[]
   private state: DroneState
+  private staticObstacles: readonly StaticBoxCollider[] = Object.freeze([])
 
   public constructor(
     config: DroneConfig = DEFAULT_DRONE_CONFIG,
@@ -46,6 +48,15 @@ export class DroneSimulation {
     return this.accumulator.stepSeconds
   }
 
+  /** Environment owners apply fields only at their disarmed setup boundary. */
+  public setStaticObstacles(boxes: readonly StaticBoxCollider[]): void {
+    this.staticObstacles = copyStaticObstacles(boxes)
+  }
+
+  public getStaticObstacles(): readonly StaticBoxCollider[] {
+    return this.staticObstacles
+  }
+
   public reset(): DroneState {
     return this.resetAt(this.config.spawnPositionM, IDENTITY_QUATERNION)
   }
@@ -56,6 +67,7 @@ export class DroneSimulation {
    */
   public resetAt(positionM: Vector3 = this.config.spawnPositionM, orientation: Quaternion = IDENTITY_QUATERNION): DroneState {
     this.accumulator.reset()
+    this.staticObstacles = Object.freeze([])
     const safePosition = isFiniteVector3(positionM) ? { ...positionM } : { ...this.config.spawnPositionM }
     const safeOrientation = isFiniteQuaternion(orientation) && quaternionNorm(orientation) > Number.EPSILON
       ? { ...orientation }
@@ -78,7 +90,7 @@ export class DroneSimulation {
   }
 
   public step(motorCommands: readonly number[], deltaSeconds = DEFAULT_FIXED_STEP_SECONDS): DroneStepResult {
-    const result = stepDroneState(this.state, motorCommands, this.config, deltaSeconds)
+    const result = stepDroneState(this.state, motorCommands, this.config, deltaSeconds, this.staticObstacles)
     this.state = result.state
     return result
   }
@@ -116,7 +128,11 @@ export class DroneSimulation {
     })
     warnings.push(...fixed.warnings)
     if (lastStepWarnings.length > 0) this.state = { ...this.state, warnings: lastStepWarnings }
-    else if (fixed.warnings.length > 0) this.state = { ...this.state, warnings: fixed.warnings }
+    else if (this.state.crashed) {
+      const cause = this.state.warnings.find((warning) => warning.startsWith(OBSTACLE_CRASH_WARNING_PREFIX)) ?? GROUND_CRASH_WARNING
+      this.state = { ...this.state, warnings: [cause, ...fixed.warnings] }
+      if (!warnings.includes(cause)) warnings.unshift(cause)
+    } else if (fixed.warnings.length > 0) this.state = { ...this.state, warnings: fixed.warnings }
     else this.state = { ...this.state, warnings: [] }
     return { ...fixed, state: this.state, warnings }
   }

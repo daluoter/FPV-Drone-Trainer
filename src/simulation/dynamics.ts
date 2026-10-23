@@ -28,6 +28,7 @@ import {
   type DroneState,
   type DroneStepResult,
 } from '../drone'
+import { findSweptObstacleHit, OBSTACLE_CRASH_WARNING_PREFIX, validateStaticObstacles, type StaticBoxCollider, type SweptObstacleHit } from './obstacles'
 
 export const MAX_INTEGRATION_DT_SECONDS = 0.1
 export const GROUND_CONTACT_SLOP_M = 0.002
@@ -122,6 +123,35 @@ function validateCommands(commands: readonly number[]): boolean {
   return commands.length === 4 && commands.every((command) => Number.isFinite(command))
 }
 
+/** Follow the airborne segment to ground contact, then the supported slide. */
+function findGroundConstrainedObstacleHit(
+  start: Vector3,
+  unconstrainedEnd: Vector3,
+  supportedEnd: Vector3,
+  groundCrashed: boolean,
+  radiusM: number,
+  boxes: readonly StaticBoxCollider[],
+): SweptObstacleHit | null {
+  if (supportedEnd.y <= unconstrainedEnd.y) return findSweptObstacleHit(start, unconstrainedEnd, radiusM, boxes)
+  const deltaY = unconstrainedEnd.y - start.y
+  const groundFraction = deltaY < 0
+    ? Math.max(0, Math.min(1, (supportedEnd.y - start.y) / deltaY))
+    : 0
+  const groundContact = {
+    x: start.x + (unconstrainedEnd.x - start.x) * groundFraction,
+    y: supportedEnd.y,
+    z: start.z + (unconstrainedEnd.z - start.z) * groundFraction,
+  }
+  const airborneHit = findSweptObstacleHit(start, groundContact, radiusM, boxes)
+  if (airborneHit) return { ...airborneHit, fraction: airborneHit.fraction * groundFraction }
+  // A hard ground impact latches before any later supported motion can occur.
+  if (groundCrashed) return null
+  const slideHit = findSweptObstacleHit(groundContact, supportedEnd, radiusM, boxes)
+  return slideHit
+    ? { ...slideHit, fraction: groundFraction + slideHit.fraction * (1 - groundFraction) }
+    : null
+}
+
 /**
  * Advance one deterministic fixed simulation step. The state orientation is
  * body-to-world and angular velocity is body-frame; all forces and torques are
@@ -132,12 +162,14 @@ export function stepDroneState(
   motorCommands: readonly number[],
   config: DroneConfig = DEFAULT_DRONE_CONFIG,
   deltaSeconds = 1 / 240,
+  staticObstacles: readonly StaticBoxCollider[] = [],
 ): DroneStepResult {
   if (state.crashed && isFiniteDroneState(state)) {
+    const crashWarning = state.warnings.find((warning) => warning.startsWith(OBSTACLE_CRASH_WARNING_PREFIX)) ?? GROUND_CRASH_WARNING
     if (!Number.isFinite(deltaSeconds) || deltaSeconds <= 0 || deltaSeconds > MAX_INTEGRATION_DT_SECONDS) {
       const warning = `Invalid integration timestep ${String(deltaSeconds)} seconds; crashed state remains latched.`
-      const latchedState = { ...state, warnings: [GROUND_CRASH_WARNING, warning] }
-      return { state: latchedState, warnings: [GROUND_CRASH_WARNING, warning], reset: false }
+      const latchedState = { ...state, warnings: [crashWarning, warning] }
+      return { state: latchedState, warnings: [crashWarning, warning], reset: false }
     }
     const crashedState: DroneState = {
       ...state,
@@ -146,9 +178,9 @@ export function stepDroneState(
       motors: stoppedMotors(),
       timeSeconds: state.timeSeconds + deltaSeconds,
       stepIndex: state.stepIndex + 1,
-      warnings: [GROUND_CRASH_WARNING],
+      warnings: [crashWarning],
     }
-    return { state: crashedState, warnings: [GROUND_CRASH_WARNING], reset: false }
+    return { state: crashedState, warnings: [crashWarning], reset: false }
   }
   const configValidation = validateDroneConfig(config)
   if (!configValidation.valid) {
@@ -159,6 +191,7 @@ export function stepDroneState(
   }
   if (!isFiniteDroneState(state)) return safeStepFailure(state, config, 'Drone state was invalid before integration.')
   if (!validateCommands(motorCommands)) return safeStepFailure(state, config, 'Motor commands were invalid before integration.')
+  if (!validateStaticObstacles(staticObstacles)) return safeStepFailure(state, config, 'Static obstacle geometry was invalid before integration.')
 
   const orientation = normalizeQuaternion(state.orientation)
   const motors = state.motors.map((motorState, index) => (
@@ -208,6 +241,37 @@ export function stepDroneState(
     config,
     deltaSeconds,
   )
+  // A conservative drone envelope reaches below its actual supported body.
+  // Geometry wholly under the ground cannot be contacted through that surface.
+  const aboveGroundObstacles = staticObstacles.filter((box) => box.centerM.y + box.halfExtentsM.y > config.ground.heightM)
+  const obstacleHit = aboveGroundObstacles.length > 0
+    ? findGroundConstrainedObstacleHit(
+      state.positionM, unconstrainedPositionM, groundResolved.positionM, groundResolved.crashed,
+      droneGroundContactRadius(config), aboveGroundObstacles,
+    )
+    : null
+  const obstacleOrientation = obstacleHit
+    ? integrateBodyAngularVelocity(orientation, angularVelocityBodyRadPerSec, deltaSeconds * obstacleHit.fraction)
+    : nextOrientation
+  if (obstacleHit) {
+    const warning = `${OBSTACLE_CRASH_WARNING_PREFIX}${obstacleHit.colliderId}; reset required.`
+    const collidedState: DroneState = {
+      positionM: obstacleHit.positionM,
+      velocityMps: vector3(),
+      orientation: obstacleOrientation,
+      angularVelocityBodyRadPerSec: vector3(),
+      motors: stoppedMotors(),
+      timeSeconds: state.timeSeconds + deltaSeconds,
+      stepIndex: state.stepIndex + 1,
+      crashed: true,
+      warnings: [warning],
+    }
+    if (!isFiniteDroneState(collidedState)) return safeStepFailure(state, config, 'Drone state became invalid during obstacle contact.')
+    if (Math.hypot(collidedState.positionM.x, collidedState.positionM.y, collidedState.positionM.z) > config.safety.maxDistanceFromOriginM) {
+      return safeStepFailure(state, config, 'Drone obstacle contact exceeded a configured distance safety limit and was reset.')
+    }
+    return { state: collidedState, warnings: [warning], reset: false }
+  }
   const crashWarnings = groundResolved.crashed ? [GROUND_CRASH_WARNING] : []
 
   const nextState: DroneState = {

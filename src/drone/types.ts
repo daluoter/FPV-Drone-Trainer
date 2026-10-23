@@ -100,9 +100,9 @@ export interface DroneState {
   readonly motors: QuadMotorState
   readonly timeSeconds: number
   readonly stepIndex: number
-  /** Latched ground-contact crash; only an explicit reset clears it. */
+  /** Latched ground or obstacle collision crash; only an explicit reset clears it. */
   readonly crashed: boolean
-  /** Warnings describe the most recent safe reset or numerical issue. */
+  /** Warnings describe the most recent reset, collision cause or numerical issue. */
   readonly warnings: readonly string[]
 }
 

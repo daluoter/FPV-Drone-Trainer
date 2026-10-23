@@ -458,4 +458,133 @@ describe('observed result coaching', () => {
     expect(feedback.nextPractice).toContain('清空本次步驟')
   })
 
+  it('reports an L09 pass as three actual forward crossings, without speed or mastery goals', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'wide-gate', outcome: 'SUCCESS',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, completedCheckpoints: 5, totalCheckpoints: 5,
+      metrics: { gatePhase: 5, gateTargetIndex: 3, gatesPassed: 3, horizontalSpeedMps: 40,
+        headingErrorDegrees: 179, contiguousDwellSeconds: 0 } })
+    expect(feedback.observedStrength).toContain('從地面自行起飛')
+    expect(feedback.observedStrength).toContain('依序向前穿過三道寬門')
+    expect(feedback.observedGap).toBeNull()
+    expect(feedback.nextPractice).toContain('為機身、槳葉保留間距')
+    expect(feedback.nextPractice).toContain('不需降落或停穩')
+    expect(feedback.scopeNote).toContain('不代表已熟練')
+    expect(feedback.observedStrength).not.toMatch(/速度|179|熟練/)
+  })
+
+  it('records completed L09 gates while identifying the missed current gate from signed observations', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'wide-gate',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, completedCheckpoints: 3, totalCheckpoints: 5,
+      metrics: { gatePhase: 3, gateTargetIndex: 1, gatesPassed: 1, nextGateDistanceM: -4,
+        nextGateHorizontalErrorM: -3.2, nextGateVerticalErrorM: 2.8,
+        horizontalSpeedMps: 30, headingErrorDegrees: 175, contiguousDwellSeconds: 0 } })
+    expect(feedback.observedStrength).toContain('1 / 3 道寬門')
+    expect(feedback.observedGap).toContain('尚未穿過第 2 道寬門')
+    expect(feedback.observedGap).toContain('尚餘 2 道門')
+    expect(feedback.observedGap).toContain('已在該門後方 4.0 m')
+    expect(feedback.observedGap).toContain('未記錄有效的正向門洞穿越')
+    expect(feedback.observedGap).toContain('門洞左側外，偏離中心 3.2 m')
+    expect(feedback.observedGap).toContain('門洞上方外，偏離中心 2.8 m')
+    expect(feedback.observedGap).not.toMatch(/速度|175|停留|碰到第/)
+    expect(feedback.nextPractice).toContain('清空本次步驟')
+    expect(feedback.nextPractice).toContain('下次先在門前對準門洞中心')
+    expect(feedback.nextPractice).toContain('反向穿越不算')
+    expect(feedback.nextPractice).not.toContain('保留')
+  })
+
+  it('keeps an L09 target still ahead distinct from a missed gate behind and ignores absolute errors', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'wide-gate',
+      metrics: { gatePhase: 2, gateTargetIndex: 0, gatesPassed: 0, nextGateDistanceM: 5,
+        nextGateErrorM: 40, targetDistanceM: 10, nextGateHorizontalErrorM: Number.NaN,
+        nextGateVerticalErrorM: Infinity } })
+    expect(feedback.observedStrength).toContain('從地面自行起飛')
+    expect(feedback.observedGap).toContain('仍在該門前 5.0 m')
+    expect(feedback.observedGap).not.toMatch(/門後方|左側外|右側外|上方外|下方外|NaN|Infinity|40/)
+  })
+
+  it('does not label a grounded L09 timeout as a crash or promise retained progress on retry', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'wide-gate',
+      attemptContext: { ...currentContext, rulesVersion: 5, mode: 'challenge' },
+      message: '寬門穿越挑戰逾時：尚未完成三道寬門。', elapsedSeconds: 241,
+      completedCheckpoints: 4, totalCheckpoints: 5,
+      metrics: { gatePhase: 4, gateTargetIndex: 2, gatesPassed: 2, groundTouching: 1,
+        groundClearanceM: 0, nextGateDistanceM: -2, nextGateHorizontalErrorM: 8 } })
+    expect(feedback.observedStrength).toContain('2 / 3 道寬門')
+    expect(feedback.observedGap).toContain('挑戰逾時')
+    expect(feedback.observedGap).toContain('尚未穿過第 3 道寬門')
+    expect(feedback.observedGap).toContain('結束時尚未在空中')
+    expect(feedback.observedGap).not.toMatch(/墜毀|門後方|右側外/)
+    expect(feedback.nextPractice).toContain('再練一次')
+    expect(feedback.nextPractice).toContain('清空本次步驟')
+    expect(feedback.nextPractice).toContain('從地面重新開始')
+    expect(feedback.nextPractice).not.toMatch(/保留|目前位置/)
+  })
+
+  it.each([1, 2, 3].flatMap((gate) => [
+    ['left-post', '左柱'], ['right-post', '右柱'], ['top-bar', '上橫樑'], ['bottom-bar', '下橫樑'],
+  ].map(([part, label]) => [gate, part, label] as const)))('prioritizes actual gate %s %s collision even with no samples', (gate, part, label) => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'wide-gate',
+      sampleCount: 0, metrics: {}, message: `Obstacle collision: wide-gate-${gate}-${part}; reset required.` })
+    expect(feedback.observedGap).toContain(`碰到第 ${gate} 道門的${label}`)
+    expect(feedback.observedGap).toContain('墜毀')
+    expect(feedback.observedGap).not.toContain('沒有有效的已解鎖飛行樣本')
+    expect(feedback.observedStrength).toBeNull()
+    expect(feedback.nextPractice).toContain('Reset')
+    expect(feedback.nextPractice).toContain('清空本次步驟')
+    expect(feedback.nextPractice).not.toContain('保留')
+  })
+
+  it('reports a hit on an earlier L09 gate rather than inventing a hit on the current target', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'wide-gate', sampleCount: 0,
+      metrics: { gatePhase: 4, gateTargetIndex: 2, gatesPassed: 2 },
+      message: 'Obstacle collision: wide-gate-1-bottom-bar; reset required.' })
+    expect(feedback.observedGap).toContain('碰到第 1 道門的下橫樑')
+    expect(feedback.observedGap).not.toContain('第 3 道門')
+    expect(feedback.observedStrength).toBeNull()
+  })
+
+  it.each([
+    'Obstacle collision: wide-gate-4-left-post; reset required.',
+    'Obstacle collision: wide-gate-1-left-post-extra; reset required.',
+    'Obstacle collision: wide-gate-2-unknown; reset required.',
+    'Obstacle collision: another-box; reset required.',
+  ])('does not invent a specific L09 frame part from an unknown collision: %s', (message) => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'wide-gate', sampleCount: 0,
+      metrics: { gatePhase: 3, gateTargetIndex: 1 }, message })
+    expect(feedback.observedGap).toContain('撞到障礙物並墜毀')
+    expect(feedback.observedGap).toContain('無法判定碰到哪一道門')
+    expect(feedback.observedGap).not.toMatch(/碰到第 [123] 道門/)
+  })
+
+  it.each([
+    ['Ground impact latched a crash; reset required.', '地面撞擊造成墜毀'],
+    ['Attempt disarmed because focus was lost.', '解除解鎖、失去焦點'],
+    ['寬門穿越停止：缺少有效的地面接觸資料。', '飛行資料無效或中斷'],
+    ['寬門穿越停止：資料中斷、時間倒退或模擬被重設。', '飛行資料無效或中斷'],
+  ])('preserves the explicit L09 stop cause before missing samples or stage facts: %s', (message, cause) => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'wide-gate', sampleCount: 0,
+      metrics: {}, message })
+    expect(feedback.observedGap).toContain(cause)
+    expect(feedback.observedGap).not.toMatch(/碰到第|沒有有效的已解鎖飛行樣本/)
+    expect(feedback.observedStrength).toBeNull()
+    expect(feedback.nextPractice).toContain('清空本次步驟')
+  })
+
+  it('distinguishes absent L09 phase evidence from an observed failure to take off', () => {
+    const missing = summarizeTrainingResult({ ...result, lessonId: 'wide-gate', metrics: {} })
+    expect(missing.observedGap).toContain('分段資料不足')
+    expect(missing.observedGap).not.toContain('尚未完成從地面')
+    expect(missing.observedStrength).toBeNull()
+    expect(missing.nextPractice).toContain('從地面重新開始')
+    const initial = summarizeTrainingResult({ ...result, lessonId: 'wide-gate',
+      metrics: { gatePhase: 1, gatesPassed: 0 } })
+    expect(initial.observedGap).toContain('尚未完成從地面自行起飛')
+    expect(initial.nextPractice).toContain('不需要先懸停')
+    const noSamples = summarizeTrainingResult({ ...result, lessonId: 'wide-gate', sampleCount: 0,
+      metrics: {}, message: '寬門穿越挑戰逾時。' })
+    expect(noSamples.observedGap).toContain('挑戰逾時')
+    expect(noSamples.observedGap).toContain('沒有有效的已解鎖飛行樣本')
+    expect(noSamples.nextPractice).toContain('清空本次步驟')
+  })
+
 })

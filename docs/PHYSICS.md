@@ -50,6 +50,16 @@ This is a deliberately small ground-contact model, not a general-purpose rigid-b
 
 Invalid configuration, timestep, command, non-finite state, negative simulation time, excessive speed or distance causes a safe reset to the validated spawn state and returns a warning. The fixed-step accumulator also reports invalid frame deltas and dropped catch-up steps. Warnings are surfaced to callers for developer HUDs; numerical failure is never silently propagated.
 
+## L09 static gate collision
+
+L09 adds a bounded static-box field in addition to the shared ground model. `src/world/wideGates.ts` defines both the renderer boxes and physical colliders: three gates 8 / 16 / 24 m ahead of the supported launch X/Z, with 4 × 4 m clear openings centered at configured ground + 3 m. The opening spans ground + 1 m through ground + 5 m. Left and right posts extend to ground; top and bottom bars are physical as well. Each frame member is 0.22 m thick and 0.35 m deep. The empty opening is never represented by a filled collision plane.
+
+`src/simulation/obstacles.ts` validates at most 64 uniquely named finite boxes with positive half-extents, then copies and freezes them. Each fixed step sweeps the COM segment against the boxes expanded on every axis by the maximum radius of the drone's shared contact features. This all-orientation bound covers body, arms, motor/propeller extent and the FPV mount envelope even during rotation; it does not sample only the center or only the step endpoint. A fast segment crossing a thin frame therefore remains detectable. The expanded-box corners are deliberately conservative, so a near-corner pass can collide before the rendered airframe appears to touch the frame. This is a trainer clearance approximation, not an exact oriented-body contact manifold.
+
+The earliest valid frame hit stops the body at the contact fraction, latches `crashed`, zeros velocity, angular rates and motor state, and includes the collider ID in an `Obstacle collision: ...` warning. When a step reaches the ground, collision checks follow the airborne segment and then the supported slide, so gravity cannot hide a post collision beneath the surface. A hard ground impact takes precedence over any later slide hit. Boxes wholly below or flush with the ground surface are excluded from obstacle sweeps; their expanded envelope cannot mask an above-ground frame. Runtime disarm and training failure follow the physics crash; no automatic reset or re-arm occurs. The visible frames remain present after a gate is passed.
+
+Static frames are enabled only for the L09 environment. Switching to Free Flight or another lesson clears this field at the disarmed boundary; pads, legacy gates, orbit tower and other scene guides retain their previous visual-only behavior. The existing ground landing/crash thresholds are unchanged. L09's swept bounds, like the other physics assumptions, still need human pilot and hardware calibration.
+
 ## Configuration assumptions
 
 The default config uses a 0.65 kg quad, 0.17 m motor radius, diagonal inertia `(0.0025, 0.0045, 0.0025) kg m²`, 5 N maximum thrust per motor, 30 ms motor response, configurable linear/angular drag and a 9.80665 m/s² gravity constant. These are transparent starting assumptions for tuning, not universal defaults.

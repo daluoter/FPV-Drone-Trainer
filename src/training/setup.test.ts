@@ -21,6 +21,22 @@ describe('reference-relative training setup', () => {
     }
   })
 
+  it('installs the visible L09 frames relative to a raised ground and shifted launch without mutating the request', () => {
+    const request = requestFor('wide-gate')
+    const original = JSON.stringify(request)
+    const references = [
+      { id: 'training-launch', kind: 'pad', positionM: { x: 6, y: 5.05, z: -3 } },
+      { id: 'landing-surface', kind: 'zone', positionM: { x: 0, y: 5, z: 0 } },
+    ]
+    const prepared = prepareTrainingSetup(request, references)!
+    expect(prepared.setup.spawnPositionM).toEqual(references[0].positionM)
+    expect(prepared.setup.staticObstacles).toHaveLength(12)
+    expect(prepared.setup.staticObstacles?.[0]).toMatchObject({ id: 'wide-gate-1-left-post', centerM: { x: expect.closeTo(3.89), y: expect.closeTo(7.61), z: -11 } })
+    expect(JSON.stringify(request)).toBe(original)
+    expect(prepareTrainingSetup(request, references.slice(0, 1))).toBe(request)
+    expect(prepareTrainingSetup(request, references.slice(1))).toBe(request)
+  })
+
   it('preserves Split-S recovery clearance above a raised configured ground', () => {
     expect(prepareTrainingSetup(requestFor('split-s'), [
       { id: 'landing-surface', kind: 'zone', positionM: { x: 0, y: 30, z: 0 } },

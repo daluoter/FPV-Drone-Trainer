@@ -70,6 +70,9 @@ describe('Free Flight native navigation confirmation', () => {
     { lessonId: 'figure-eight', code: 'L08', prefix: 'eight', total: 11,
       targets: ['eight-entry', 'eight-left-top', 'eight-left-outer', 'eight-left-bottom', 'eight-crossing', 'eight-right-top', 'eight-right-outer', 'eight-right-bottom', 'eight-finish'],
       button: 'L08 八字示範', group: 'figure-eight-targets', completion: '已完成左右八字航線並回到中央終點' },
+    { lessonId: 'wide-gate', code: 'L09', prefix: 'gate', total: 5,
+      targets: ['wide-gate-1', 'wide-gate-2', 'wide-gate-3'],
+      button: 'L09 穿門示範', group: 'wide-gate-field', completion: '已依序穿過三道寬門且未碰撞門框' },
   ] as const
 
   it.each(routeLessons)('switches the active $code scene goal with actual progress while preserving the canvas', ({ lessonId, prefix, total, targets }) => {
@@ -77,7 +80,9 @@ describe('Free Flight native navigation confirmation', () => {
     const props = { poller: createBrowserGamepadPoller(), profile: null, settings: createDefaultTuningSettings() }
     const { rerender, container } = render(<FreeFlight {...props} trainingState={base} />)
     const canvas = screen.getByLabelText('Free Flight 3D scene')
-    const visible = () => targets.filter((id) => frames.renderer!.flightScene.getReference(id)!.object.visible)
+    const visible = () => targets.filter((id) => lessonId === 'wide-gate'
+      ? frames.renderer!.flightScene.scene.getObjectByName(`${id}-guidance`)!.visible
+      : frames.renderer!.flightScene.getReference(id)!.object.visible)
     expect(visible()).toEqual([targets[0]])
     const active: TrainingMachineState = { ...base, phase: 'ACTIVE', lastEvaluation: { status: 'continue',
       metrics: { [`${prefix}Phase`]: 3, [`${prefix}TargetIndex`]: 1, [`${prefix}TargetsCompleted`]: 1,
@@ -96,10 +101,11 @@ describe('Free Flight native navigation confirmation', () => {
     fireEvent.click(screen.getByRole('button', { name: button }))
     fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
     const scene = frames.renderer!.flightScene
-    expect(scene.getReference(targets[0])!.object.visible).toBe(true)
+    const goal = (id: string) => lessonId === 'wide-gate' ? scene.scene.getObjectByName(`${id}-guidance`)! : scene.getReference(id)!.object
+    expect(goal(targets[0]).visible).toBe(true)
     fireEvent.change(screen.getByRole('slider'), { target: { value: frames.runtime!.getReplayPlayback()!.getState().durationSeconds } })
-    expect(scene.getReference(targets.at(-1)!)!.object.visible).toBe(true)
-    expect(scene.getReference(targets[0])!.object.visible).toBe(false)
+    expect(goal(targets.at(-1)!).visible).toBe(true)
+    expect(goal(targets[0]).visible).toBe(false)
     expect(screen.getByText(new RegExp(completion))).toBeInTheDocument()
     if (lessonId === 'direction-control') expect(parseFloat(screen.getByTestId('flight-position-z').textContent!)).toBeGreaterThan(3)
     else if (lessonId === 'coordinated-turn') {
@@ -108,6 +114,9 @@ describe('Free Flight native navigation confirmation', () => {
     } else if (lessonId === 'square-route') {
       expect(Math.abs(parseFloat(screen.getByTestId('flight-position-right').textContent!))).toBeLessThan(0.6)
       expect(Math.abs(parseFloat(screen.getByTestId('flight-position-z').textContent!))).toBeLessThan(0.6)
+    } else if (lessonId === 'wide-gate') {
+      expect(Math.abs(parseFloat(screen.getByTestId('flight-position-right').textContent!))).toBeLessThan(0.6)
+      expect(parseFloat(screen.getByTestId('flight-position-z').textContent!)).toBeLessThan(-24)
     } else {
       expect(Math.abs(parseFloat(screen.getByTestId('flight-position-right').textContent!))).toBeLessThan(0.6)
       expect(Math.abs(parseFloat(screen.getByTestId('flight-position-z').textContent!) + 6)).toBeLessThan(0.6)
@@ -116,11 +125,80 @@ describe('Free Flight native navigation confirmation', () => {
     frame(400)
     expect(onFixedStep).not.toHaveBeenCalled()
     fireEvent.change(screen.getByRole('slider'), { target: { value: 0 } })
-    expect(scene.getReference(targets[0])!.object.visible).toBe(true)
-    expect(scene.getReference(targets.at(-1)!)!.object.visible).toBe(false)
+    expect(goal(targets[0]).visible).toBe(true)
+    expect(goal(targets.at(-1)!).visible).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
     expect(screen.getByRole('button', { name: /^Disarm$/ })).toBeDisabled()
     expect(scene.scene.getObjectByName(group)!.visible).toBe(false)
+  })
+
+  it('keeps visible L09 frames aligned with live colliders through Reset, Arm, replay and course changes', () => {
+    const settings = createDefaultTuningSettings()
+    const props = { poller: createBrowserGamepadPoller(), profile: null, settings }
+    const selected = createTrainingMachineState({ initialLessonId: 'wide-gate' })
+    const { rerender } = render(<FreeFlight {...props} trainingState={selected} />)
+    const canvas = screen.getByLabelText('Free Flight 3D scene')
+    const colliders = () => frames.runtime!.simulation.getStaticObstacles()
+    const field = () => frames.renderer!.flightScene.scene.getObjectByName('wide-gate-field')!
+    expect(colliders()).toHaveLength(12)
+    expect(field().visible).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: /^Reset$/ }))
+    expect(colliders()).toHaveLength(0)
+    fireEvent.change(screen.getByLabelText('控制方式'), { target: { value: 'keyboard' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Arm$/ }))
+    expect(frames.runtime!.getTelemetry().armed).toBe(true)
+    expect(colliders()).toHaveLength(12)
+    // Next-lesson navigation can update selection and request disarm together.
+    rerender(<FreeFlight {...props} trainingDisarmKey={1} trainingState={createTrainingMachineState({ initialLessonId: 'figure-eight' })} />)
+    expect(frames.runtime!.getTelemetry().armed).toBe(false)
+    expect(colliders()).toHaveLength(0)
+    expect(field().visible).toBe(false)
+    rerender(<FreeFlight {...props} trainingDisarmKey={1} trainingState={selected} />)
+    expect(colliders()).toHaveLength(12)
+    const before = frames.runtime!.getTelemetry().state
+    const savedEnvironment = colliders()
+    fireEvent.click(screen.getByRole('button', { name: 'L09 穿門示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    fireEvent.change(screen.getByRole('slider'), { target: { value: 20 } })
+    expect(colliders()).toEqual(savedEnvironment)
+    expect(frames.runtime!.getTelemetry().state.positionM).toEqual(before.positionM)
+    expect(selected.checkpoints).toEqual({})
+    expect(selected.result).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
+    expect(colliders()).toHaveLength(12)
+    expect(field().visible).toBe(true)
+    rerender(<FreeFlight {...props} trainingState={createTrainingMachineState({ initialLessonId: 'figure-eight' })} />)
+    expect(colliders()).toHaveLength(0)
+    expect(field().visible).toBe(false)
+    rerender(<FreeFlight {...props} trainingState={selected} />)
+    expect(colliders()).toHaveLength(12)
+    rerender(<FreeFlight {...props} trainingState={null} />)
+    expect(colliders()).toHaveLength(0)
+    expect(field().visible).toBe(false)
+    expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
+  })
+
+  it('shows the actual frame part after a real solver collision and requires Reset', () => {
+    const settings = createDefaultTuningSettings()
+    render(<FreeFlight poller={createBrowserGamepadPoller()} profile={null} settings={settings}
+      trainingState={createTrainingMachineState({ initialLessonId: 'wide-gate' })} />)
+    const post = frames.runtime!.simulation.getStaticObstacles()[0]
+    act(() => {
+      frames.runtime!.resetForTraining({ requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: [],
+        spawnPositionM: { ...post.centerM }, spawnOrientation: { x: 0, y: 0, z: 0, w: 1 },
+        staticObstacles: frames.runtime!.simulation.getStaticObstacles() })
+    })
+    fireEvent.change(screen.getByLabelText('控制方式'), { target: { value: 'keyboard' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Arm$/ }))
+    frame(0)
+    frame(120)
+    expect(frames.runtime!.getTelemetry().state.crashed).toBe(true)
+    expect(screen.getByText(/碰到第 1 道門的左柱/)).toHaveTextContent('請按 Reset 重設後重試')
+    expect(screen.getByRole('button', { name: /^Arm$/ })).toBeDisabled()
+    expect(screen.getByTestId('flight-altitude')).not.toHaveTextContent('—')
+    fireEvent.click(screen.getByRole('button', { name: 'Reset crashed drone' }))
+    expect(frames.runtime!.getTelemetry().state.crashed).toBe(false)
+    expect(screen.getByRole('button', { name: /^Arm$/ })).toBeEnabled()
   })
 
   it('requests confirmation while armed and removes it after an explicit disarm', () => {

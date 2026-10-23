@@ -11,7 +11,8 @@ import {
   type RawGamepadSnapshot,
 } from '../controller'
 import { createDefaultFlightControllerConfig, FlightSimulation } from '../flight-controller'
-import { DEFAULT_DRONE_CONFIG, droneGroundSupport, DRONE_GROUND_CLEARANCE_M } from '../drone'
+import { DEFAULT_DRONE_CONFIG, droneGroundSupport, DRONE_GROUND_CLEARANCE_M, hoverThrottle } from '../drone'
+import type { StaticBoxCollider } from '../simulation/obstacles'
 import { DEFAULT_LESSONS, TRAINING_SCENE_REFERENCES, TrainingSession } from '../training'
 import type { LessonSetup } from '../training/types'
 import { FlightRuntime, type FlightRuntimeFixedStepSample } from './flightRuntime'
@@ -96,6 +97,180 @@ function nextFrameRunner() {
 }
 
 describe('Free Flight runtime safety transitions', () => {
+  const frameBottom: StaticBoxCollider = {
+    id: 'runtime-frame-bottom',
+    centerM: { x: 0, y: 1, z: 0 },
+    halfExtentsM: { x: 2, y: 0.12, z: 0.15 },
+  }
+  const obstacleSetup: LessonSetup = {
+    requiresDisarmed: true,
+    resetSimulation: true,
+    sceneReferenceIds: [],
+    spawnPositionM: { x: 0, y: 3, z: 0 },
+    staticObstacles: [frameBottom],
+  }
+
+  it('replaces a SAFE preview environment without moving state or adding a frame loop', () => {
+    const frames = nextFrameRunner()
+    const schedule = vi.fn(frames.schedule)
+    const runtime = new FlightRuntime({ scheduleFrame: schedule, cancelFrame: frames.cancel })
+    runtime.setInputSource('keyboard')
+    runtime.start()
+    frames.run(0)
+    expect(runtime.simulation.getStaticObstacles()).toEqual([])
+    const before = runtime.simulation.getState()
+    const scheduledFrames = schedule.mock.calls.length
+    expect(runtime.setStaticObstacles([frameBottom])).toBe(true)
+    expect(runtime.simulation.getState()).toBe(before)
+    expect(runtime.setStaticObstacles([{ ...frameBottom, halfExtentsM: { x: 0, y: 1, z: 1 } }])).toBe(false)
+    expect(runtime.simulation.getStaticObstacles()).toEqual([frameBottom])
+    expect(runtime.simulation.getState()).toBe(before)
+    expect(runtime.setStaticObstacles([])).toBe(true)
+    expect(schedule).toHaveBeenCalledTimes(scheduledFrames)
+    expect(frames.cancel).not.toHaveBeenCalled()
+
+    runtime.resetForTraining(obstacleSetup)
+    runtime.setTrainingArmBlocked(true)
+    const held = runtime.simulation.getState()
+    expect(runtime.setStaticObstacles([])).toBe(true)
+    expect(runtime.simulation.getState()).toBe(held)
+    expect(runtime.setStaticObstacles([frameBottom])).toBe(true)
+    runtime.setTrainingArmBlocked(false)
+    expect(runtime.arm()).toBe(true)
+    expect(runtime.setStaticObstacles([])).toBe(false)
+    expect(runtime.simulation.getStaticObstacles()).toEqual([frameBottom])
+    runtime.dispose()
+  })
+
+  it('reports real obstacle collisions in authoritative samples and telemetry, latches, and refuses replay mutation', () => {
+    const frames = nextFrameRunner()
+    let currentTime = 0
+    const samples: FlightRuntimeFixedStepSample[] = []
+    const runtime = new FlightRuntime({ scheduleFrame: frames.schedule, cancelFrame: frames.cancel, now: () => currentTime, onFixedStep: (sample) => samples.push(sample) })
+    runtime.setInputSource('keyboard')
+    runtime.start()
+    frames.run(0)
+    runtime.resetForTraining(obstacleSetup)
+    expect(runtime.arm()).toBe(true)
+    expect(runtime.setStaticObstacles([])).toBe(false)
+    for (let frame = 1; frame <= 60; frame += 1) {
+      currentTime = frame * 1_000 / 60
+      frames.run(currentTime)
+    }
+    const collision = samples.find((sample) => sample.state.crashed)
+    expect(collision).toBeDefined()
+    expect(collision?.state.positionM.y).toBeGreaterThan(1)
+    expect(collision?.armed).toBe(false)
+    expect(collision?.state.warnings).toContain('Obstacle collision: runtime-frame-bottom; reset required.')
+    expect(collision?.telemetry.warnings).toContain('Obstacle collision: runtime-frame-bottom; reset required.')
+    expect(collision?.state.motors.every((motor) => motor.command === 0 && motor.actualThrustN === 0)).toBe(true)
+    expect(runtime.getTelemetry().warnings).toContain('Obstacle collision: runtime-frame-bottom; reset required.')
+    expect(runtime.getTelemetry().safetyReasons).toContain('Obstacle collision: runtime-frame-bottom; reset required.')
+    expect(runtime.arm()).toBe(false)
+    expect(runtime.getTelemetry().state.warnings).toContain('Obstacle collision: runtime-frame-bottom; reset required.')
+    const position = runtime.simulation.getState().positionM
+    expect(runtime.setStaticObstacles([])).toBe(true)
+    currentTime = 1_000 + 1_000 / 60
+    frames.run(currentTime)
+    expect(runtime.simulation.getState().positionM).toEqual(position)
+    expect(runtime.simulation.getState().crashed).toBe(true)
+    expect(runtime.arm()).toBe(false)
+
+    const recording = runtime.getReplayRecording()
+    expect(recording?.samples.length).toBeGreaterThan(1)
+    expect(runtime.setStaticObstacles([frameBottom])).toBe(true)
+    expect(runtime.enterReplay(recording)).toBe(true)
+    const replayLiveState = runtime.simulation.getState()
+    const liveSampleCount = samples.length
+    expect(runtime.setStaticObstacles([])).toBe(false)
+    runtime.resetForTraining(obstacleSetup)
+    expect(runtime.seekReplay(recording?.durationSeconds ?? 0)).toBe(true)
+    expect(runtime.seekReplay(0)).toBe(true)
+    expect(runtime.playReplay()).toBe(true)
+    frames.run(2_000)
+    frames.run(2_000 + 1_000 / 60)
+    expect(runtime.simulation.getState()).toBe(replayLiveState)
+    expect(samples).toHaveLength(liveSampleCount)
+    expect(runtime.simulation.getStaticObstacles()).toEqual([frameBottom])
+    expect(runtime.exitReplay()).toBe(true)
+    expect(runtime.simulation.getStaticObstacles()).toEqual([])
+    expect(runtime.simulation.getState().crashed).toBe(false)
+    expect(runtime.arm()).toBe(true)
+    runtime.dispose()
+  })
+
+  it('flies through an open physical frame using normal calibrated controller input', () => {
+    const handoff = createHandoff()
+    const poller = new FakePoller(handoff.device, handoff.snapshot)
+    const frames = nextFrameRunner()
+    const runtime = new FlightRuntime({ poller, profile: handoff.profile, scheduleFrame: frames.schedule, cancelFrame: frames.cancel })
+    runtime.start()
+    frames.run(0)
+    const pitch = -0.12
+    const boxes: readonly StaticBoxCollider[] = [
+      { id: 'left', centerM: { x: -2.2, y: 3, z: 0 }, halfExtentsM: { x: 0.12, y: 2.2, z: 0.15 } },
+      { id: 'right', centerM: { x: 2.2, y: 3, z: 0 }, halfExtentsM: { x: 0.12, y: 2.2, z: 0.15 } },
+      { id: 'top', centerM: { x: 0, y: 5.2, z: 0 }, halfExtentsM: { x: 2.32, y: 0.12, z: 0.15 } },
+      { id: 'bottom', centerM: { x: 0, y: 0.8, z: 0 }, halfExtentsM: { x: 2.32, y: 0.12, z: 0.15 } },
+    ]
+    runtime.resetForTraining({
+      ...obstacleSetup,
+      spawnPositionM: { x: 0, y: 3, z: 1.5 },
+      spawnOrientation: { x: Math.sin(pitch / 2), y: 0, z: 0, w: Math.cos(pitch / 2) },
+      staticObstacles: boxes,
+    })
+    expect(runtime.arm()).toBe(true)
+    poller.snapshot = { ...handoff.snapshot, axes: [0, 0, 0, 2 * hoverThrottle() / Math.cos(pitch) - 1] }
+    for (let frame = 1; frame <= 180 && runtime.simulation.getState().positionM.z > -0.7; frame += 1) frames.run(frame * 1_000 / 60)
+    expect(runtime.simulation.getState().positionM.z).toBeLessThan(-0.7)
+    expect(runtime.simulation.getState().positionM.y).toBeGreaterThan(1.5)
+    expect(runtime.simulation.getState().crashed).toBe(false)
+    expect(runtime.simulation.isArmed()).toBe(true)
+    runtime.dispose()
+  })
+
+  it('clears obstacle environments on normal reset, lesson replacement, and simulation reconfiguration', () => {
+    const frames = nextFrameRunner()
+    const drone = { ...DEFAULT_DRONE_CONFIG, spawnPositionM: { x: 0, y: 3, z: 0 } }
+    const runtime = new FlightRuntime({ simulation: { drone }, scheduleFrame: frames.schedule, cancelFrame: frames.cancel })
+    runtime.setInputSource('keyboard')
+    runtime.start()
+    frames.run(0)
+    runtime.resetForTraining(obstacleSetup)
+    expect(runtime.simulation.getStaticObstacles()).toEqual([frameBottom])
+    runtime.reset()
+    expect(runtime.simulation.getStaticObstacles()).toEqual([])
+    expect(runtime.arm()).toBe(true)
+    for (let frame = 1; frame <= 45 && runtime.simulation.getState().positionM.y > 0.5; frame += 1) frames.run(frame * 1_000 / 60)
+    expect(runtime.simulation.getState().positionM.y).toBeLessThan(0.5)
+    expect(runtime.simulation.getState().crashed).toBe(false)
+    runtime.resetForTraining(obstacleSetup)
+    runtime.resetForTraining({ ...obstacleSetup, staticObstacles: undefined })
+    expect(runtime.simulation.getStaticObstacles()).toEqual([])
+    runtime.resetForTraining(obstacleSetup)
+    expect(runtime.reconfigure({ drone })).toBe(true)
+    expect(runtime.simulation.getStaticObstacles()).toEqual([])
+    expect(runtime.simulation.getState().stepIndex).toBe(0)
+    expect(runtime.simulation.isArmed()).toBe(false)
+    runtime.dispose()
+  })
+
+  it('refuses malformed training obstacles and retains a safe held preparation', () => {
+    const frames = nextFrameRunner()
+    const runtime = new FlightRuntime({ scheduleFrame: frames.schedule, cancelFrame: frames.cancel })
+    runtime.setInputSource('keyboard')
+    runtime.start()
+    frames.run(0)
+    runtime.resetForTraining({ ...obstacleSetup, staticObstacles: [{ ...frameBottom, halfExtentsM: { x: 1, y: Number.NaN, z: 1 } }] })
+    expect(runtime.arm()).toBe(false)
+    for (let frame = 1; frame <= 30; frame += 1) frames.run(frame * 1_000 / 60)
+    expect(runtime.simulation.getState().positionM).toEqual(obstacleSetup.spawnPositionM)
+    expect(runtime.getTelemetry().warnings).toContain('Training environment contains invalid obstacles; reset is required before arming.')
+    runtime.resetForTraining(obstacleSetup)
+    expect(runtime.arm()).toBe(true)
+    runtime.dispose()
+  })
+
   it('holds an airborne lesson pose for ten seconds without inventing armed samples, then releases on arm', () => {
     const frames = nextFrameRunner()
     const samples: FlightRuntimeFixedStepSample[] = []

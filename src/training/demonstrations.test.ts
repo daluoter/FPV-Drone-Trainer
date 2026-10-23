@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { createInitialDroneState, droneGroundSupport } from '../drone'
+import { createInitialDroneState, droneGroundContactRadius, droneGroundSupport } from '../drone'
+import { FlightSimulation } from '../flight-controller'
 import { quaternionNorm, rotateVectorByQuaternion } from '../math/quaternion'
 import { ReplayPlayback, type ReplaySample } from '../replay'
 import { createDefaultTuningSettings, type TuningSettings } from '../tuning/config'
@@ -18,6 +19,9 @@ import { DIRECTION_CONTROL_LESSON } from './directionControl'
 import { COORDINATED_TURN_LESSON } from './coordinatedTurn'
 import { SQUARE_ROUTE_LESSON } from './squareRoute'
 import { FIGURE_EIGHT_LESSON } from './figureEight'
+import { WIDE_GATE_LESSON } from './wideGate'
+import { createWideGates } from '../world/wideGates'
+import { findSweptObstacleHit, OBSTACLE_CRASH_WARNING_PREFIX } from '../simulation/obstacles'
 import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample, TrainingSceneReference } from './types'
 
 function at(samples: readonly ReplaySample[], timeSeconds: number): ReplaySample {
@@ -62,6 +66,144 @@ function referencesFor(settings: TuningSettings): readonly TrainingSceneReferenc
 }
 
 describe('bounded simulation teaching recordings', () => {
+  it.each(['beginner', 'standard', 'raised-field'] as const)('flies through all three solid L09 openings with %s settings', (preset) => {
+    const defaults = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
+    const settings = preset === 'raised-field' ? {
+      ...defaults, drone: { ...defaults.drone, ground: { ...defaults.drone.ground, heightM: 10 }, spawnPositionM: { x: 6, y: 25, z: -3 } },
+    } : defaults
+    const before = JSON.stringify(settings)
+    const demo = createTeachingDemonstration(settings, 'wide-gate')
+    const { launch } = createTrainingFieldAnchors(settings.drone)
+    const gates = createWideGates(launch, settings.drone.ground.heightM)
+    const boxes = gates.flatMap((gate) => gate.colliders)
+    const radiusM = droneGroundContactRadius(settings.drone)
+    expect(demo).toMatchObject({ lessonId: 'wide-gate', source: 'simulated', rulesVersion: 5, physicsVersion: 1 })
+    expect(demo.recording.samples[0]!.positionM).toEqual(launch)
+    expect(demo.recording.durationSeconds).toBeGreaterThan(20)
+    expect(demo.recording.durationSeconds).toBeLessThanOrEqual(95)
+    expect(demo.recording).toMatchObject({ capacity: 6_000, decimation: 4, droppedSamples: 0 })
+    expect(demo.recording.samples.length).toBeLessThanOrEqual(6_000)
+    expect(Object.isFrozen(demo)).toBe(true)
+    expect(Object.isFrozen(demo.cues)).toBe(true)
+    expect(demo.cues.every(Object.isFrozen)).toBe(true)
+    const retainedTimes = new Set(demo.recording.samples.map((pose) => pose.timestampSeconds))
+    expect(demo.cues.every((cue) => retainedTimes.has(cue.timeSeconds))).toBe(true)
+    expect(demo.cues.at(-1)!.timeSeconds).toBe(demo.recording.durationSeconds)
+    expect(teachingCueAt(demo, demo.recording.durationSeconds)).toContain('已依序穿過三道寬門且未碰撞門框')
+    const session = new TrainingSession({
+      lessons: [WIDE_GATE_LESSON], initialLessonId: 'wide-gate', countdownDurationSeconds: 0,
+      sceneReferences: referencesFor(settings),
+    })
+    session.start(0)
+    session.tick(0)
+    for (let index = 0; index < demo.recording.samples.length; index += 1) {
+      const pose = demo.recording.samples[index]
+      expect(Object.values(pose.normalizedInput!).every(Number.isFinite)).toBe(true)
+      expect(Object.values(pose.positionM).every(Number.isFinite)).toBe(true)
+      expect(Object.values(pose.velocityMps).every(Number.isFinite)).toBe(true)
+      expect(pose.controllerOutput.motorCommands.every(Number.isFinite)).toBe(true)
+      expect(quaternionNorm(pose.orientation)).toBeCloseTo(1, 8)
+      if (index > 0) {
+        const previous = demo.recording.samples[index - 1]
+        const dt = pose.timestampSeconds - previous.timestampSeconds
+        expect(dt).toBeGreaterThan(0)
+        expect(dt).toBeLessThan(0.02)
+        expect(Math.hypot(
+          pose.positionM.x - previous.positionM.x - (pose.velocityMps.x + previous.velocityMps.x) * 0.5 * dt,
+          pose.positionM.y - previous.positionM.y - (pose.velocityMps.y + previous.velocityMps.y) * 0.5 * dt,
+          pose.positionM.z - previous.positionM.z - (pose.velocityMps.z + previous.velocityMps.z) * 0.5 * dt,
+        )).toBeLessThan(0.003)
+        // Check every retained segment against the complete conservative drone
+        // envelope; endpoint clearance alone could miss tunnelling through a bar.
+        expect(findSweptObstacleHit(previous.positionM, pose.positionM, radiusM, boxes)).toBeNull()
+      }
+      if (session.getState().phase !== 'SUCCESS') {
+        const state = session.consumeSample(geometricSample(settings, pose))
+        expect(state.phase, JSON.stringify({ time: pose.timestampSeconds, result: state.result, evaluation: state.lastEvaluation })).not.toBe('FAILED')
+      }
+    }
+    expect(session.getState().phase, JSON.stringify(session.getState().lastEvaluation)).toBe('SUCCESS')
+    expect(session.getState().result?.completedCheckpoints).toBe(5)
+    expect(Object.values(session.getState().checkpoints).every((checkpoint) => checkpoint.completed)).toBe(true)
+    for (let gateIndex = 0; gateIndex < gates.length; gateIndex += 1) {
+      const gate = gates[gateIndex]
+      const crossingIndex = demo.recording.samples.findIndex((pose, index, samples) => index > 0
+        && samples[index - 1].positionM.z >= gate.positionM.z && pose.positionM.z < gate.positionM.z)
+      expect(crossingIndex).toBeGreaterThan(0)
+      const previous = demo.recording.samples[crossingIndex - 1]
+      const crossed = demo.recording.samples[crossingIndex]
+      const fraction = (gate.positionM.z - previous.positionM.z) / (crossed.positionM.z - previous.positionM.z)
+      const crossingX = previous.positionM.x + (crossed.positionM.x - previous.positionM.x) * fraction
+      const crossingY = previous.positionM.y + (crossed.positionM.y - previous.positionM.y) * fraction
+      expect(Math.abs(crossingX - gate.positionM.x) + radiusM).toBeLessThan(gate.openingWidthM / 2)
+      expect(Math.abs(crossingY - gate.positionM.y) + radiusM).toBeLessThan(gate.openingHeightM / 2)
+      // A cue may advance only on the retained actual frame crossing its gate.
+      expect(teachingTargetAt(demo, previous.timestampSeconds)).toBe(gate.id)
+      expect(teachingTargetAt(demo, crossed.timestampSeconds)).toBe(gates[Math.min(gateIndex + 1, gates.length - 1)].id)
+    }
+    const finish = demo.recording.samples.at(-1)!
+    expect(finish.positionM.z).toBeLessThanOrEqual(gates.at(-1)!.positionM.z - 1)
+    expect(finish.positionM.y - settings.drone.ground.heightM).toBeCloseTo(3, 1)
+    expect(JSON.stringify(settings)).toBe(before)
+  })
+
+  it('installs all twelve L09 frame colliders and rejects an actual blocked opening', () => {
+    const settings = createTuningPreset('beginner')
+    const { launch } = createTrainingFieldAnchors(settings.drone)
+    const gates = createWideGates(launch, settings.drone.ground.heightM)
+    const original = FlightSimulation.prototype.resetForTraining
+    const setup = vi.spyOn(FlightSimulation.prototype, 'resetForTraining')
+    const steps = vi.spyOn(FlightSimulation.prototype, 'step')
+    try {
+      createTeachingDemonstration(settings, 'wide-gate')
+      expect(setup).toHaveBeenCalledExactlyOnceWith(launch, { x: 0, y: 0, z: 0, w: 1 }, gates.flatMap((gate) => gate.colliders))
+      expect(steps.mock.results.every((result) => result.type === 'return' && !result.value.state.crashed
+        && !result.value.warnings.some((warning: string) => warning.startsWith(OBSTACLE_CRASH_WARNING_PREFIX)))).toBe(true)
+      setup.mockRestore()
+      // Add a real bar across the opening without changing recorded poses or
+      // collision flags: the same RC controller must now physically hit it.
+      const blocked = vi.spyOn(FlightSimulation.prototype, 'resetForTraining').mockImplementation(function (this: FlightSimulation, position, orientation, colliders = []) {
+        return original.call(this, position, orientation, [...colliders, {
+          id: 'test-blocked-opening', centerM: gates[0].positionM, halfExtentsM: { x: 2, y: 2, z: 0.2 },
+        }])
+      })
+      try {
+        expect(() => createTeachingDemonstration(settings, 'wide-gate')).toThrow(/Obstacle collision: test-blocked-opening/)
+      } finally {
+        blocked.mockRestore()
+      }
+    } finally {
+      setup.mockRestore()
+      steps.mockRestore()
+    }
+  })
+
+  it('keeps L09 cues on the paused or seeked retained playback timeline', () => {
+    const demo = createTeachingDemonstration(createTuningPreset('beginner'), 'wide-gate')
+    const player = new ReplayPlayback(demo.recording)
+    expect(teachingTargetAt(demo, 0)).toBe('wide-gate-1')
+    expect(teachingCueAt(demo, 0)).toContain('從地面自行起飛')
+    const secondGate = demo.cues.find((cue) => cue.targetReferenceId === 'wide-gate-2')!
+    player.seek(secondGate.timeSeconds)
+    expect(teachingTargetAt(demo, player.currentTime)).toBe('wide-gate-2')
+    expect(teachingCueAt(demo, player.currentTime)).toContain('已穿過第 1 道門')
+    const frozen = player.getGhostState()
+    player.pause()
+    player.advance(20)
+    expect(player.getGhostState()).toEqual(frozen)
+    player.setSpeed(0.5)
+    player.play()
+    player.advance(0.4)
+    expect(player.currentTime).toBeCloseTo(secondGate.timeSeconds + 0.2)
+    player.seek(demo.recording.durationSeconds)
+    expect(teachingTargetAt(demo, player.currentTime)).toBe('wide-gate-3')
+    expect(teachingCueAt(demo, player.currentTime - 5e-10)).toContain('已依序穿過三道寬門且未碰撞門框')
+    expect(teachingCueAt(demo, player.currentTime - 0.001)).not.toContain('已依序穿過三道寬門且未碰撞門框')
+    player.seek(0)
+    expect(player.getGhostState()?.positionM).toEqual(demo.recording.samples[0]!.positionM)
+    expect(teachingTargetAt(demo, player.currentTime)).toBe('wide-gate-1')
+  })
+
   it.each(['beginner', 'standard', 'raised-field'] as const)('flies both opposite L08 loops with %s settings', (preset) => {
     const defaults = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
     const settings = preset === 'raised-field' ? {

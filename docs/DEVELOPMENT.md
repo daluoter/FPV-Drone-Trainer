@@ -13,7 +13,9 @@ Open the Vite URL shown in the terminal. Phase 8 exposes the Controller Lab hand
 
 ### Confirm the updated local screen
 
-The current classroom shows **版本 2026.10.23.3** near the page heading and offers **L08 八字航線** after L07 方形航線. The simulation always shows altitude plus **X 左右／Y 上下／Z 前後**, including after a crash. Negative Z means forward from the supported launch origin. L05/L06/L07/L08 target-direction guidance instead follows the current drone heading. Developer HUD is optional.
+The current classroom shows **版本 2026.10.23.4** near the page heading and offers **L09 寬門穿越** after L08 八字航線. L09 adds three persistent physical gate frames; only the current gate's guidance is highlighted. The simulation always shows altitude plus **X 左右／Y 上下／Z 前後**, including after a crash. Negative Z means forward from the supported launch origin. L05–L09 target-direction guidance instead follows the current drone heading. Developer HUD is optional. Follow [the L09 tryout guide](L09_WIDE_GATE.md) for the five-step route and collision checks.
+
+The latest user message accepted L08 from the preceding `2026.10.23.3` / `bc19ae2` delivery. Its exact local build, browser and input hardware were not supplied. L09 still needs manual acceptance; do not infer that a passing simulation-generated demo establishes pilot approval or mastery.
 
 If these are absent, stop the old terminal process with Ctrl+C, enter the intended repository, then update the feature branch and start the source server:
 
@@ -48,8 +50,8 @@ A Python Playwright smoke check opens that production build in Chromium and
 checks project-path assets, an initialized WebGL2 canvas, explicit keyboard
 arm/disarm, countdown and waiting for explicit arm, keyboard reset, training stop,
 practice/challenge progress isolation, L00 knowledge completion and reload,
-synchronized L01/L03/L04/L05/L06/L07/L08 demo controls without progress writes, L05/L06/L07/L08 seek/pause
-and lesson reload, L03/L04/L05/L06/L07/L08 ground starts, an inline L00 playback exit,
+synchronized L01/L03/L04/L05/L06/L07/L08/L09 demo controls without progress writes, L05/L06/L07/L08/L09 seek/pause
+and lesson reload, L03/L04/L05/L06/L07/L08/L09 ground starts, an inline L00 playback exit,
 session-bound result marker seek with progress isolation, fullscreen recovery,
 camera controls, and logo navigation. This workflow does
 not deploy the site; production publishing remains a separate manual workflow.
@@ -84,7 +86,7 @@ ability to complete a lesson; those remain separate owner checks.
 - **Browser:** a developer opens the Vite app, checks the Three.js scene/camera modes/HUD and browser console, and can exercise the explicit keyboard fallback.
 - **Hardware:** a physical RC transmitter is connected and tested through the browser Gamepad API. Hardware evidence must never be inferred from unit tests or a browser shell check.
 
-Phase 4/5/6/7/8 have automated controller/runtime/camera, tuning, training state/persistence, fixed-step hook, scene-reference, positive/negative maneuver-fixture, replay, and UI integration coverage. The UI integration test uses mocked runtime/renderer seams and is not browser evidence. No physical transmitter was available during implementation, so endpoint, direction, neutral and no-spontaneous-rotation hardware evidence remains outstanding. Browser/WebGL owner smoke is also required; deterministic fixtures and jsdom tests are not human-pilot, GPU-cleanup, or real-flight validation. Only ground collision is implemented; scene obstacles are visual references, not colliders.
+Phase 4/5/6/7/8 have automated controller/runtime/camera, tuning, training state/persistence, fixed-step hook, scene-reference, positive/negative maneuver-fixture, replay, and UI integration coverage. The UI integration test uses mocked runtime/renderer seams and is not browser evidence. No physical transmitter was available during implementation, so endpoint, direction, neutral and no-spontaneous-rotation hardware evidence remains outstanding. Browser/WebGL owner smoke is also required; deterministic fixtures and jsdom tests are not human-pilot, GPU-cleanup, or real-flight validation. L09 adds conservative full-drone swept collisions against all four sides of each shared gate frame. Ground contact remains global; Free Flight and other lessons clear the L09 static obstacle field, and their scene references remain visual guides. Release-specific executed checks and counts belong in [the learning validation log](LEARNING_VALIDATION.md).
 
 ## Source boundaries
 

@@ -40,6 +40,8 @@ const METRICS: Readonly<Record<string, MetricDefinition>> = {
   gatesPassed: { label: '已通過圓環', unit: '/ 3', digits: 0 },
   nextGateDistanceM: { label: '距下一個圓環', unit: 'm', digits: 2 },
   nextGateErrorM: { label: '對準圓環偏差', unit: 'm', digits: 2 },
+  nextGateHorizontalErrorM: { label: '相對門中心左右偏差（右＋）', unit: 'm', digits: 2 },
+  nextGateVerticalErrorM: { label: '相對門中心高度偏差（上＋）', unit: 'm', digits: 2 },
   touchdownDescentSpeedMps: { label: '接地下降速度', unit: 'm/s', digits: 2 },
   alongTrackM: { label: '前進距離', unit: 'm', digits: 2 },
   crossTrackErrorM: { label: '偏離直線', unit: 'm', digits: 2 },
@@ -90,6 +92,15 @@ const LESSON_METRICS: Readonly<Record<string, readonly string[]>> = {
 }
 
 function metricPriorities(metrics: Readonly<Record<string, number>>, lessonId: string | null): readonly string[] {
+  if (lessonId === 'wide-gate') {
+    if (metrics.gatePhase <= 1 || metrics.groundTouching > 0.5) return ['groundClearanceM', 'altitudeM', 'gatesPassed']
+    const horizontal = metrics.nextGateHorizontalErrorM
+    const vertical = metrics.nextGateVerticalErrorM
+    const alignment = Number.isFinite(horizontal) && Math.abs(horizontal) > 2
+      ? 'nextGateHorizontalErrorM' : Number.isFinite(vertical) && Math.abs(vertical) > 2
+        ? 'nextGateVerticalErrorM' : 'targetDistanceM'
+    return ['gatesPassed', 'nextGateDistanceM', alignment]
+  }
   if (lessonId === 'figure-eight') {
     if (metrics.eightPhase <= 1) return ['groundClearanceM', 'altitudeM', 'eightTargetsCompleted']
     if (metrics.headingErrorDegrees > 70) return ['headingErrorDegrees', 'targetDistanceM', 'eightLoopsCompleted']
@@ -140,7 +151,8 @@ export function formatTrainingMetrics(
     const displayed = definition.transform?.(value) ?? value
     return [{
       key,
-      label: definition.label,
+      label: lessonId === 'wide-gate' && key === 'gatesPassed' ? '已通過寬門'
+        : lessonId === 'wide-gate' && key === 'nextGateDistanceM' ? '距目前門平面（前＋／後−）' : definition.label,
       value: key === 'groundTouching' ? value > 0.5 ? '已接地' : '尚未接地'
         : `${displayed.toFixed(definition.digits)}${definition.unit ? ` ${definition.unit}` : ''}`,
     }]
@@ -188,6 +200,7 @@ const LESSON_HINTS: Readonly<Record<string, string>> = {
   'coordinated-turn': '從地面自行起飛，依序飛過右轉與左轉的入口、轉彎點和出口；小量傾斜並配合轉頭，讓實際航線一起轉彎。',
   'square-route': '從地面自行起飛，依序沿四段直線與右轉角飛行，再回到起點上方；漏點可補飛，不需精準速度、停留或降落。',
   'figure-eight': '從地面自行起飛，進中央入口後先飛左圈，經中央換向點接右圈，再回到中央空中終點；依目前亮起的目標前進，漏點可補飛。',
+  'wide-gate': '從地面自行起飛，依序向前穿過三道寬門的門洞；對準約 3 m 高的中心並留出槳葉空間，碰到實體門框會墜毀。',
   'split-s': '先確認進入高度，再依序完成倒置、下降半圈與恢復正向。',
   orbit: '沿目標周圍保持同一繞行方向，先穩住半徑與高度。',
 }
@@ -226,6 +239,58 @@ export function squareRouteTargetLabel(index: number): string {
 export function figureEightTargetLabel(index: number): string {
   return Number.isInteger(index) && index >= 0 && index < EIGHT_TARGET_LABELS.length
     ? EIGHT_TARGET_LABELS[index] : '目前八字航線目標'
+}
+
+/** Only a reported physics contact identifies a particular gate and frame part. */
+export function wideGateCollisionCause(message: string): string | null {
+  const reported = /\bObstacle collision:\s*([^;\s]+)\s*(?:;|$)/iu.exec(message)?.[1]
+  const collider = reported ? /^wide-gate-([123])-(left-post|right-post|top-bar|bottom-bar)$/u.exec(reported) : null
+  if (!collider) return null
+  const parts: Readonly<Record<string, string>> = {
+    'left-post': '左柱', 'right-post': '右柱', 'top-bar': '上橫樑', 'bottom-bar': '下橫樑',
+  }
+  return `碰到第 ${collider[1]} 道門的${parts[collider[2]]}`
+}
+
+/** Signed opening coordinates describe an observed offset, never an inferred hit. */
+function wideGateAlignment(metrics: Readonly<Record<string, number>>): string {
+  const horizontal = metrics.nextGateHorizontalErrorM
+  const vertical = metrics.nextGateVerticalErrorM
+  const outside = [
+    Number.isFinite(horizontal) && Math.abs(horizontal) > 2
+      ? `目前在門洞${horizontal > 0 ? '右' : '左'}側外，偏離中心 ${Math.abs(horizontal).toFixed(1)} m` : null,
+    Number.isFinite(vertical) && Math.abs(vertical) > 2
+      ? `目前在門洞${vertical > 0 ? '上' : '下'}方外，偏離中心 ${Math.abs(vertical).toFixed(1)} m` : null,
+  ].filter((value): value is string => value !== null)
+  return outside.length ? `${outside.join('；')}。` : ''
+}
+
+function wideGateObjective(metrics: Readonly<Record<string, number>>): TrainingObjective {
+  const phase = Number.isInteger(metrics.gatePhase) ? metrics.gatePhase : 0
+  if (phase <= 1) return {
+    title: phase === 0 ? '1／5 起飛區地面準備' : '2／5 自行起飛',
+    detail: '從地面自行加油門離地，再向前方第一道門前進；門洞中心約高 3 m，不需要先懸停。',
+  }
+  if (phase >= 5) return {
+    title: '5／5 三道寬門已完成',
+    detail: '已依序向前穿過三道門洞，完成寬門穿越；不必降落或停留，現在可以 Disarm。',
+  }
+  const index = Number.isInteger(metrics.gateTargetIndex) && metrics.gateTargetIndex >= 0 && metrics.gateTargetIndex < 3
+    ? metrics.gateTargetIndex : phase - 2
+  const title = `${index + 3}／5 穿過第 ${index + 1} 道寬門`
+  if (metrics.groundTouching > 0.5 || (Number.isFinite(metrics.groundClearanceM) && metrics.groundClearanceM < 0.15)) return {
+    title,
+    detail: '目前尚未在空中；未墜毀接地可在目前位置再次自行起飛，再對準目前這道門。已通過的門會保留，不需要回原起飛點。',
+  }
+  const distance = metrics.nextGateDistanceM
+  const side = Number.isFinite(distance) && distance < 0
+    ? `目前已在這道門後方 ${Math.abs(distance).toFixed(1)} m，但尚未有效通過；先回到這道門前，再從門洞向前穿過，反向穿越不算。`
+    : Number.isFinite(distance) ? `目前仍在門前 ${distance.toFixed(1)} m；先對準門洞，再向前穿過門平面。`
+      : '先在門前對準門洞，再向前穿過門平面。'
+  return {
+    title,
+    detail: `${side}${wideGateAlignment(metrics)}${directionTargetLocation(metrics)}門洞寬、高各 4 m；以中心附近為目標，為整架飛機與槳葉留出門框間距。依序穿過即可，不要求精準速度、朝向、停留或降落；已通過的門會保留。`,
+  }
 }
 
 /** At most two useful body-relative directions, never inferred from fixed XYZ. */
@@ -406,6 +471,7 @@ export function trainingObjective(
   evaluation: Pick<TrainingEvaluation, 'metrics'> | null | undefined,
 ): TrainingObjective | null {
   const metrics = evaluation?.metrics ?? {}
+  if (lessonId === 'wide-gate') return wideGateObjective(metrics)
   if (lessonId === 'direction-control') return directionObjective(metrics)
   if (lessonId === 'coordinated-turn') return coordinatedTurnObjective(metrics)
   if (lessonId === 'square-route') return squareRouteObjective(metrics)
@@ -450,6 +516,7 @@ export function trainingObjective(
 
 /** Short route instructions remain visible before a lesson starts. */
 export function trainingRouteGuide(lessonId: string | null): string | null {
+  if (lessonId === 'wide-gate') return '地面起飛 → 前方 8 m 第一道門 → 16 m 第二道門 → 24 m 第三道門。三道門洞寬、高各 4 m，中心離地 3 m；依序從門前向前穿過，反向穿越不算。門框是實體障礙，碰到柱子或橫樑會墜毀；對準中心並為機身、槳葉留出空間。漏門可回該門前補飛，已通過的門及未墜毀接地的進度會保留；不要求精準速度、朝向、停留或降落。引導練習不限時，挑戰 240 秒。'
   if (lessonId === 'figure-eight') return '地面起飛 → 中央入口 → 左圈 → 中央換向點 → 右圈 → 中央空中終點。中央區位於起飛點前方 6 m；相同位置要依順序經過，不能提早當作終點。沿淡色八字路線依序飛入亮起目標，先左轉再右轉；目標半徑 1.8 m，不要求精準速度、停留或降落。漏點及未墜毀接地保留進度，方位提示依目前機頭，XYZ 維持固定場地方向。引導練習不限時，挑戰 300 秒。'
   if (lessonId === 'square-route') return '地面起飛 → 第 1 段前進 → 右轉 → 第 2 段 → 右轉 → 第 3 段 → 右轉 → 第 4 段返回起點上方。沿淡色方形路線，依序飛入亮起的直線、轉角與綠色終點；目標半徑 1.8 m，不要求精準速度、停留或降落。漏點及未墜毀接地保留進度，方位提示依目前機頭，XYZ 維持固定場地方向。'
   if (lessonId === 'coordinated-turn') return '地面起飛 → 右轉入口、轉彎點、出口 → 左轉入口、轉彎點、出口。沿地面航線與目前亮起的目標依序飛行；用傾斜、偏航及前進配合轉彎，只原地轉頭不算。目標半徑 1.8 m，不要求精準速度或停留；漏點及未墜毀接地保留進度，固定 XYZ 不會隨機頭轉向。'
@@ -468,6 +535,21 @@ export function trainingHint(
 ): string {
   const hint = evaluation?.hint?.trim()
   const message = evaluation?.message?.trim()
+  if (lessonId === 'wide-gate' && evaluation?.status === 'failure') {
+    const collision = wideGateCollisionCause(message ?? '')
+    const restart = '本次練習已結束；按「再練一次」會清空本次步驟，從地面重新開始。'
+    if (collision) return `${collision}，造成墜毀；先按 Reset 重設。${restart}下次對準門洞中心，為機身與槳葉留出門框間距。`
+    if (/Obstacle collision:/iu.test(message ?? '')) return `本次撞到障礙物並墜毀；碰撞資料未指出可辨識的門框部位，先按 Reset 重設。${restart}`
+    if (/墜毀|撞擊|crash|impact/iu.test(message ?? '')) return `${/ground|地面/iu.test(message ?? '') ? '本次地面撞擊造成墜毀' : '本次發生墜毀'}，寬門穿越練習已停止；先按 Reset 重設。${restart}`
+    if (/解除解鎖|失焦|斷線|disarm|focus|disconnect/iu.test(message ?? '')) return `本次因解除解鎖、失去焦點或連線中斷而停止；確認網頁與控制器就緒，倒數結束後再明確 Arm。${restart}`
+    if (/無效|資料中斷|時間倒退|位置跳躍|缺少有效|支撐高度不一致|模擬被重設|invalid|non-finite|telemetry.*gap|impossible.*jump/iu.test(message ?? '')) return `本次飛行資料無效或中斷，無法判定寬門穿越表現；保持網頁在前景後重試。${restart}`
+    if (/逾時|timed out|timeout/iu.test(message ?? '')) return `本次寬門穿越挑戰逾時。${restart}`
+    return `本次寬門穿越尚未完成。${restart}`
+  }
+  if (lessonId === 'wide-gate' && evaluation?.status === 'continue' && evaluation.metrics && evaluation.recovery !== 'restart') {
+    const objective = wideGateObjective(evaluation.metrics)
+    return `${objective.title}：${objective.detail}`
+  }
   if (lessonId === 'figure-eight' && evaluation?.status === 'failure' && message) {
     if (/墜毀|撞擊|crash|impact/iu.test(message)) return '本次發生墜毀，八字航線練習已停止；先按 Reset 重設，再從地面自行起飛。'
     if (/解除解鎖|失焦|斷線|disarm|focus|disconnect/iu.test(message)) return '本次因解除解鎖、失去焦點或連線中斷而停止；確認網頁與控制器就緒，重試課程後再明確 Arm。'

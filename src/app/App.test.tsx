@@ -9,7 +9,7 @@ describe('beginner flight school', () => {
     render(<App />)
     expect(screen.getByRole('heading', { level: 1, name: '小幅操作，一步步學會飛。' })).toBeInTheDocument()
     expect(screen.getByLabelText('選擇課程')).toHaveValue('takeoff')
-    expect(within(screen.getByLabelText('選擇課程')).getAllByRole('option')).toHaveLength(10)
+    expect(within(screen.getByLabelText('選擇課程')).getAllByRole('option')).toHaveLength(11)
     expect(screen.getByText(/機體不會自動回平或煞停/)).toBeInTheDocument()
     expect(screen.getByLabelText('操控設定')).toHaveValue('beginner')
   })

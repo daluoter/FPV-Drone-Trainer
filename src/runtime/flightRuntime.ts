@@ -18,6 +18,7 @@ import {
 } from '../flight-controller'
 import { droneGroundContactRadius, droneGroundSupport, type DroneState } from '../drone'
 import { GROUND_CONTACT_SLOP_M } from '../simulation/dynamics'
+import type { StaticBoxCollider } from '../simulation/obstacles'
 import type { LessonSetup } from '../training/types'
 import { FlightRenderer } from '../rendering'
 import {
@@ -488,12 +489,19 @@ export class FlightRuntime {
     this.resetAt(this.simulation.droneConfig.spawnPositionM, undefined, 'Flight runtime was reset and disarmed.')
   }
 
+  /** SAFE previews may replace geometry without moving the drone or restarting its clock. */
+  public setStaticObstacles(boxes: readonly StaticBoxCollider[]): boolean {
+    if (this.replayPlayback || this.simulation.isArmed()) return false
+    return this.simulation.setStaticObstacles(boxes)
+  }
+
   /**
    * Honor a lesson's spawn/orientation only through an explicit disarmed reset.
    * App/runtime callers invoke this during COUNTDOWN; fixed-step ACTIVE samples
    * never call it, so an evaluator cannot move the player as a side effect.
    */
   public resetForTraining(setup: LessonSetup): DroneState {
+    if (this.replayPlayback) return this.simulation.getState()
     if (setup.requiresDisarmed !== true || setup.resetSimulation !== true) {
       return this.resetAt(
         this.simulation.droneConfig.spawnPositionM,
@@ -506,6 +514,7 @@ export class FlightRuntime {
       setup.spawnOrientation,
       'Training setup applied through an explicit disarmed reset.',
       true,
+      setup.staticObstacles,
     )
   }
 
@@ -514,6 +523,7 @@ export class FlightRuntime {
     orientation: { readonly x: number; readonly y: number; readonly z: number; readonly w: number } | undefined,
     reason: string,
     holdTrainingPreparation = false,
+    staticObstacles: readonly StaticBoxCollider[] = [],
   ): DroneState {
     this.keyboard.releaseKeys()
     this.signalHistory.reset()
@@ -527,7 +537,7 @@ export class FlightRuntime {
     this.lastSafetyReasons = [reason]
     this.replayRecorder.endFlight()
     this.simulation.disarm(reason)
-    if (holdTrainingPreparation) this.simulation.resetForTraining(positionM, orientation)
+    if (holdTrainingPreparation) this.simulation.resetForTraining(positionM, orientation, staticObstacles)
     else this.simulation.resetAt(positionM, orientation)
     this.refreshTelemetry(0, 0, 0)
     this.emitTelemetry(true)

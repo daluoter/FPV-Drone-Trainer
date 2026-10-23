@@ -6,6 +6,7 @@ import { rotateVectorByQuaternion } from '../math/quaternion'
 import { createCoordinatedTurnTargets, COORDINATED_TURN_TARGET_RADIUS_M } from '../training/coordinatedTurn'
 import { createSquareRouteTargets, SQUARE_ROUTE_TARGET_RADIUS_M } from '../training/squareRoute'
 import { createFigureEightTargets, FIGURE_EIGHT_TARGET_RADIUS_M } from '../training/figureEight'
+import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
 
 import { createFlightScene } from './scene'
 
@@ -199,6 +200,9 @@ describe('flight scene reference contract', () => {
         'eight-right-outer',
         'eight-right-bottom',
         'eight-finish',
+        'wide-gate-1',
+        'wide-gate-2',
+        'wide-gate-3',
       ])
       expect(scene.getReference('hover-zone')?.kind).toBe('zone')
       expect(scene.getReference('hover-zone')?.positionM).toEqual({ x: 0, y: 3, z: 0 })
@@ -598,6 +602,114 @@ describe('flight scene reference contract', () => {
     const left = scene.scene.getObjectByName('figure-eight-left-guide') as THREE.Line<THREE.BufferGeometry, THREE.LineDashedMaterial>
     const right = scene.scene.getObjectByName('figure-eight-right-guide') as THREE.Line<THREE.BufferGeometry, THREE.LineDashedMaterial>
     const dispose = [ring.geometry, ring.material, left.geometry, left.material, right.geometry, right.material].map((value) => vi.spyOn(value, 'dispose'))
+    scene.dispose()
+    for (const spy of dispose) expect(spy).toHaveBeenCalledOnce()
+  })
+
+  it('keeps every L09 physical frame visible while selecting only the current guidance', () => {
+    const scene = createFlightScene()
+    const field = scene.scene.getObjectByName('wide-gate-field')!
+    const anchors = scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM: { ...positionM }, sizeM }))
+    const dronePosition = scene.drone.position.toArray()
+    const visibleGuides = () => field.children.flatMap((frame) => frame.children.filter((child) => child.name.endsWith('-guidance') && child.visible).map((child) => child.name))
+    const assertFramesRemain = () => {
+      expect(field.children).toHaveLength(3)
+      for (const frame of field.children) {
+        expect(frame.visible).toBe(true)
+        const boxes = frame.children.filter((child) => !child.name.endsWith('-guidance'))
+        expect(boxes).toHaveLength(4)
+        expect(boxes.every((box) => box.visible)).toBe(true)
+      }
+    }
+    try {
+      expect(field.visible).toBe(false)
+      scene.setLessonTarget('wide-gate')
+      expect(field.visible).toBe(true)
+      assertFramesRemain()
+      expect(visibleGuides()).toEqual(['wide-gate-1-guidance'])
+      for (const id of ['hover-zone', 'turn-entry', 'turn-apex', 'turn-exit', 'orbit-poi', 'split-s-reference']) {
+        expect(scene.getReference(id)?.object.visible).toBe(false)
+      }
+      for (const name of ['figure-eight-targets', 'figure-eight-path', 'square-route-targets', 'square-route-path', 'direction-control-targets', 'coordinated-turn-targets', 'coordinated-turn-route', 'landing-target', 'straight-line-targets', 'takeoff-height-target']) {
+        expect(scene.scene.getObjectByName(name)?.visible).toBe(false)
+      }
+      for (const id of ['wide-gate-2', 'wide-gate-3']) {
+        scene.setWideGateTarget(id)
+        expect(visibleGuides()).toEqual([`${id}-guidance`])
+        assertFramesRemain()
+      }
+      for (const id of [null, 'unknown']) {
+        scene.setWideGateTarget(id)
+        expect(visibleGuides()).toEqual([])
+        assertFramesRemain()
+      }
+      scene.setLessonTarget('figure-eight')
+      expect(field.visible).toBe(false)
+      expect(scene.scene.getObjectByName('figure-eight-targets')?.visible).toBe(true)
+      scene.setLessonTarget(null)
+      expect(field.visible).toBe(false)
+      expect(scene.getReference('turn-entry')?.object.visible).toBe(true)
+      expect(scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM, sizeM }))).toEqual(anchors)
+      expect(scene.drone.position.toArray()).toEqual(dronePosition)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('draws the exact shared L09 collision boxes and leaves each four-meter opening clear on raised ground', () => {
+    const defaults = createDefaultDroneConfig()
+    const config = { ...defaults, ground: { ...defaults.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 20, z: -3 } }
+    const before = JSON.stringify(config)
+    const scene = createFlightScene(config)
+    try {
+      const launch = scene.getReference('training-launch')!.positionM
+      for (const [index, gate] of createWideGates(launch, config.ground.heightM).entries()) {
+        const reference = scene.getReference(gate.id)!
+        expect(reference.kind).toBe('gate')
+        expect(reference.positionM).toEqual(gate.positionM)
+        expect(reference.object.position.toArray()).toEqual([gate.positionM.x, gate.positionM.y, gate.positionM.z])
+        expect(reference.sizeM).toEqual({ x: 4, y: 4, z: WIDE_GATE_FRAME_DEPTH_M })
+        for (const collider of gate.colliders) {
+          const box = scene.scene.getObjectByName(collider.id) as THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>
+          const center = box.getWorldPosition(box.position.clone())
+          expect(center.x).toBeCloseTo(collider.centerM.x)
+          expect(center.y).toBeCloseTo(collider.centerM.y)
+          expect(center.z).toBeCloseTo(collider.centerM.z)
+          const { width, height, depth } = box.geometry.parameters
+          expect(width).toBe(collider.halfExtentsM.x * 2)
+          expect(height).toBe(collider.halfExtentsM.y * 2)
+          expect(depth).toBe(collider.halfExtentsM.z * 2)
+          expect(box.material.color.getHex()).toBe([0x45d7f7, 0xffc978, 0xb8f36b][index])
+          expect(box.material.transparent).toBe(false)
+          const overlapX = Math.min(center.x + width / 2, gate.positionM.x + 2) - Math.max(center.x - width / 2, gate.positionM.x - 2)
+          const overlapY = Math.min(center.y + height / 2, gate.positionM.y + 2) - Math.max(center.y - height / 2, gate.positionM.y - 2)
+          expect(Math.min(overlapX, overlapY)).toBeLessThanOrEqual(1e-10)
+          if (collider.id.endsWith('-post')) expect(center.y - height / 2).toBeCloseTo(config.ground.heightM)
+        }
+        const opening = scene.scene.getObjectByName(`${gate.id}-opening-guide`) as THREE.LineLoop<THREE.BufferGeometry, THREE.LineBasicMaterial>
+        const points = opening.geometry.getAttribute('position')
+        expect(points.count).toBe(4)
+        expect(Array.from({ length: points.count }, (_, index) => [points.getX(index), points.getY(index)])).toEqual([[-2, -2], [2, -2], [2, 2], [-2, 2]])
+        expect(opening.material.color.getHex()).toBe(0xffffff)
+        const arrow = scene.scene.getObjectByName(`${gate.id}-heading`)!
+        const heading = rotateVectorByQuaternion(arrow.quaternion, { x: 0, y: 1, z: 0 })
+        expect(heading.x).toBeCloseTo(0)
+        expect(heading.y).toBeCloseTo(0)
+        expect(heading.z).toBeCloseTo(-1)
+      }
+      expect(scene.getReference('wide-gate-1')?.positionM).toEqual({ x: 6, y: 8, z: -11 })
+      expect(scene.getReference('wide-gate-3')?.positionM).toEqual({ x: 6, y: 8, z: -27 })
+      expect(JSON.stringify(config)).toBe(before)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('disposes physical L09 boxes and hidden guidance with the scene', () => {
+    const scene = createFlightScene()
+    const frame = scene.scene.getObjectByName('wide-gate-1-left-post') as THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>
+    const guidance = scene.scene.getObjectByName('wide-gate-3-opening-guide') as THREE.LineLoop<THREE.BufferGeometry, THREE.LineBasicMaterial>
+    const dispose = [frame.geometry, frame.material, guidance.geometry, guidance.material].map((value) => vi.spyOn(value, 'dispose'))
     scene.dispose()
     for (const spy of dispose) expect(spy).toHaveBeenCalledOnce()
   })

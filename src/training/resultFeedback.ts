@@ -1,4 +1,4 @@
-import { coordinatedTurnTargetLabel, directionControlTargetLabel, figureEightTargetLabel, squareRouteTargetLabel, trainingHint, trainingObjective } from './feedback'
+import { coordinatedTurnTargetLabel, directionControlTargetLabel, figureEightTargetLabel, squareRouteTargetLabel, trainingHint, trainingObjective, wideGateCollisionCause } from './feedback'
 import { LANDING_LIFTOFF_HEIGHT_M, LANDING_ZONE_RADIUS_M } from './landing'
 import { TAKEOFF_SETTLED_DWELL_SECONDS } from './takeoff'
 import type { TrainingResult } from './types'
@@ -60,6 +60,105 @@ function isLegacyRouteResult(result: TrainingResult): boolean {
   const version = result.attemptContext?.rulesVersion
   return version !== undefined && (['straight-line', 'landing'].includes(result.lessonId) && version < 4
     || result.lessonId === 'coordinated-turn' && version < 5)
+}
+
+function wideGateResultFeedback(result: TrainingResult, scope: string): TrainingResultFeedback | null {
+  if (result.lessonId !== 'wide-gate') return null
+  const restart = '本次練習已結束；按「再練一次」會清空本次步驟，從地面重新開始。'
+  const message = result.message ?? ''
+  const timedOut = /逾時|timed out|timeout/iu.test(message)
+  if (result.outcome !== 'SUCCESS') {
+    const collision = wideGateCollisionCause(message)
+    if (collision) return {
+      observedStrength: null,
+      observedGap: `本次${collision}，造成墜毀，寬門穿越尚未完成。`,
+      nextPractice: `先按 Reset 重設。${restart}下次對準門洞中心，為整架飛機與槳葉留出門框間距。`,
+      scopeNote: scope,
+    }
+    if (/Obstacle collision:/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: '本次撞到障礙物並墜毀；碰撞資料未指出可辨識的門框部位，無法判定碰到哪一道門。',
+      nextPractice: `先按 Reset 重設。${restart}對準門洞中心並留出機身與槳葉空間。`,
+      scopeNote: scope,
+    }
+    if (/墜毀|撞擊|crash|impact/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: `${/ground|地面/iu.test(message) ? '本次地面撞擊造成墜毀' : '本次發生墜毀'}，寬門穿越尚未完成。`,
+      nextPractice: `先按 Reset 重設。${restart}先維持足夠離地高度，再向門洞前進。`,
+      scopeNote: scope,
+    }
+    if (/解除解鎖|失焦|斷線|disarm|focus|disconnect/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: '本次因解除解鎖、失去焦點或連線中斷而停止，不能據此判定寬門穿越的操控表現。',
+      nextPractice: `${restart}確認網頁與控制器就緒，倒數結束後再明確 Arm。`,
+      scopeNote: scope,
+    }
+    if (/無效|資料中斷|時間倒退|位置跳躍|模擬被重設|缺少有效|支撐高度不一致|invalid|non-finite|telemetry.*gap|impossible.*jump/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: '本次飛行資料無效或中斷，無法以這段資料判定寬門穿越表現。',
+      nextPractice: `${restart}保持網頁在前景，從地面自行起飛後依序向前穿過三道門洞。`,
+      scopeNote: scope,
+    }
+  }
+  if (!Number.isFinite(result.sampleCount) || result.sampleCount <= 0) return {
+    observedStrength: null,
+    observedGap: `${timedOut ? '本次挑戰逾時；' : ''}本次沒有有效的已解鎖飛行樣本，無法判定操控表現。`,
+    nextPractice: `${restart}確認畫面與控制器就緒，倒數完成後明確 Arm。`,
+    scopeNote: scope,
+  }
+  if (result.outcome === 'SUCCESS') return {
+    observedStrength: '本次已從地面自行起飛，依序向前穿過三道寬門的門洞，且未碰到實體門框。',
+    observedGap: null,
+    nextPractice: '以相同條件再練一次，練習連貫地對準門洞並為機身、槳葉保留間距；穿過第三道門即可，不需降落或停穩。',
+    scopeNote: scope,
+  }
+  const metrics = result.metrics
+  const phase = Number.isInteger(metrics.gatePhase) && metrics.gatePhase >= 0 && metrics.gatePhase <= 5
+    ? metrics.gatePhase : null
+  const passed = Number.isInteger(metrics.gatesPassed) && metrics.gatesPassed >= 0 && metrics.gatesPassed <= 3
+    ? metrics.gatesPassed : null
+  const index = Number.isInteger(metrics.gateTargetIndex) && metrics.gateTargetIndex >= 0 && metrics.gateTargetIndex < 3
+    ? metrics.gateTargetIndex : phase !== null && phase >= 2 && phase <= 4 ? phase - 2 : null
+  const strength = passed !== null && passed > 0 ? `本次已依序向前穿過 ${passed} / 3 道寬門。`
+    : phase !== null && phase >= 2 ? '本次已觀察到從地面自行起飛。' : null
+  const ended = timedOut ? '本次挑戰逾時，' : '本次'
+  if (phase !== null && phase <= 1) return {
+    observedStrength: strength,
+    observedGap: `${ended}尚未完成從地面自行起飛。`,
+    nextPractice: `${restart}自行加油門離地，再對準約高 3 m 的第一道門洞中心；不需要先懸停。`,
+    scopeNote: scope,
+  }
+  if (index !== null) {
+    let cause = ''
+    if (metrics.groundTouching > 0.5 || (Number.isFinite(metrics.groundClearanceM) && metrics.groundClearanceM < 0.15)) {
+      cause = '結束時尚未在空中，剩餘寬門尚未通過。'
+    } else {
+      const distance = metrics.nextGateDistanceM
+      if (Number.isFinite(distance)) cause = distance < 0
+        ? `結束時已在該門後方 ${Math.abs(distance).toFixed(1)} m，但尚未記錄有效的正向門洞穿越。`
+        : `結束時仍在該門前 ${distance.toFixed(1)} m，尚未完成正向穿越。`
+      const horizontal = metrics.nextGateHorizontalErrorM
+      const vertical = metrics.nextGateVerticalErrorM
+      if (Number.isFinite(horizontal) && Math.abs(horizontal) > 2) {
+        cause += `結束時在門洞${horizontal > 0 ? '右' : '左'}側外，偏離中心 ${Math.abs(horizontal).toFixed(1)} m。`
+      }
+      if (Number.isFinite(vertical) && Math.abs(vertical) > 2) {
+        cause += `結束時在門洞${vertical > 0 ? '上' : '下'}方外，偏離中心 ${Math.abs(vertical).toFixed(1)} m。`
+      }
+    }
+    return {
+      observedStrength: strength,
+      observedGap: `${ended}尚未穿過第 ${index + 1} 道寬門${passed !== null ? `，尚餘 ${3 - passed} 道門` : ''}。${cause}`,
+      nextPractice: `${restart}下次先在門前對準門洞中心，再向前穿過；漏門時回到該門前補飛，反向穿越不算。門洞寬、高各 4 m，仍需為機身與槳葉留出門框間距；不要求精準速度、朝向、停留或降落。`,
+      scopeNote: scope,
+    }
+  }
+  return {
+    observedStrength: strength,
+    observedGap: `${ended}寬門穿越尚未完成；分段資料不足，無法判定卡在哪一道門。`,
+    nextPractice: `${restart}依亮起目標，從門洞中心附近依序向前穿過三道門。`,
+    scopeNote: scope,
+  }
 }
 
 function figureEightResultFeedback(result: TrainingResult, scope: string): TrainingResultFeedback | null {
@@ -465,6 +564,8 @@ function phaseProgress(result: TrainingResult): { observedGap: string; nextPract
 /** Final-sample observations and checkpoint facts, never inferred causes or a claim about the whole flight. */
 export function summarizeTrainingResult(result: TrainingResult): TrainingResultFeedback {
   const scope = scopeNote(result)
+  const gate = wideGateResultFeedback(result, scope)
+  if (gate) return gate
   const eight = figureEightResultFeedback(result, scope)
   if (eight) return eight
   const square = squareRouteResultFeedback(result, scope)

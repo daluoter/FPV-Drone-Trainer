@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { figureEightTargetLabel, formatTrainingMetrics, squareRouteTargetLabel, trainingHint, trainingObjective, trainingRouteGuide } from './feedback'
+import { figureEightTargetLabel, formatTrainingMetrics, squareRouteTargetLabel, trainingHint, trainingObjective, trainingRouteGuide, wideGateCollisionCause } from './feedback'
 
 describe('beginner-facing training feedback', () => {
   it('prioritizes lesson facts with Chinese names and units, without guessing error direction', () => {
@@ -478,6 +478,154 @@ describe('beginner-facing training feedback', () => {
     expect(stopped).toContain('再練一次')
     expect(stopped).toContain('清空本次步驟')
     expect(stopped).not.toContain('保留')
+  })
+
+  it('introduces three real wide frames after a ground start, without extra precision goals', () => {
+    const guide = trainingRouteGuide('wide-gate')
+    expect(guide).toMatch(/地面起飛.*8 m.*16 m.*24 m/)
+    expect(guide).toContain('寬、高各 4 m')
+    expect(guide).toContain('中心離地 3 m')
+    expect(guide).toContain('碰到柱子或橫樑會墜毀')
+    expect(guide).toContain('反向穿越不算')
+    expect(guide).toContain('引導練習不限時，挑戰 240 秒')
+    expect(guide).toContain('不要求精準速度、朝向、停留或降落')
+    expect(trainingObjective('wide-gate', null)?.title).toBe('1／5 起飛區地面準備')
+    const liftoff = trainingObjective('wide-gate', { metrics: { gatePhase: 1 } })
+    expect(liftoff?.title).toBe('2／5 自行起飛')
+    expect(liftoff?.detail).toContain('不需要先懸停')
+    expect(trainingHint('wide-gate', null)).toContain('實體門框')
+  })
+
+  it('explains signed missed-gate position separately from body-relative guidance', () => {
+    const metrics = { gatePhase: 3, gateTargetIndex: 1, gatesPassed: 1,
+      nextGateDistanceM: -3, nextGateHorizontalErrorM: 2.8, nextGateVerticalErrorM: -2.4,
+      targetRightM: -4, targetForwardM: 2, targetUpM: 0.5 }
+    const goal = trainingObjective('wide-gate', { metrics })
+    expect(goal?.title).toBe('4／5 穿過第 2 道寬門')
+    expect(goal?.detail).toContain('已在這道門後方 3.0 m，但尚未有效通過')
+    expect(goal?.detail).toContain('先回到這道門前')
+    expect(goal?.detail).toContain('反向穿越不算')
+    expect(goal?.detail).toContain('門洞右側外，偏離中心 2.8 m')
+    expect(goal?.detail).toContain('門洞下方外，偏離中心 2.4 m')
+    expect(goal?.detail).toContain('以目前機頭為準：目標在左方 4.0 m、前方 2.0 m')
+    expect(goal?.detail).not.toContain('上方 0.5 m')
+    expect(goal?.detail).toContain('已通過的門會保留')
+    expect(goal?.detail).toContain('為整架飛機與槳葉留出門框間距')
+    expect(goal?.detail).not.toContain('碰到第')
+    const before = trainingObjective('wide-gate', { metrics: { ...metrics, nextGateDistanceM: 3,
+      nextGateHorizontalErrorM: -2.8, nextGateVerticalErrorM: 2.4 } })
+    expect(before?.detail).toContain('仍在門前 3.0 m')
+    expect(before?.detail).toContain('門洞左側外')
+    expect(before?.detail).toContain('門洞上方外')
+    expect(before?.detail).not.toContain('先回到這道門前')
+  })
+
+  it('does not infer a signed opening cause from absolute or missing observations', () => {
+    const goal = trainingObjective('wide-gate', { metrics: { gatePhase: 2,
+      nextGateErrorM: 20, horizontalSpeedMps: 100, headingErrorDegrees: 179,
+      nextGateDistanceM: Number.NaN, nextGateHorizontalErrorM: Number.NaN,
+      nextGateVerticalErrorM: Infinity, targetRightM: Number.NaN, targetForwardM: Infinity } })
+    expect(goal?.detail).not.toMatch(/NaN|Infinity|左側外|右側外|上方外|下方外|179|100|20/)
+    expect(goal?.detail).toContain('方向以目前機頭為準')
+    expect(goal?.detail).toContain('不要求精準速度、朝向、停留或降落')
+    expect(goal?.detail).not.toContain('需在 70°')
+  })
+
+  it('preserves gates during active non-crash ground recovery and overrides stale generic hints', () => {
+    const metrics = { gatePhase: 4, gateTargetIndex: 2, gatesPassed: 2, groundTouching: 1,
+      groundClearanceM: 0, nextGateDistanceM: -2, nextGateHorizontalErrorM: 4 }
+    const active = trainingHint('wide-gate', { status: 'continue', metrics, hint: '依序穿越目標。' })
+    expect(active).toContain('5／5 穿過第 3 道寬門')
+    expect(active).toContain('在目前位置再次自行起飛')
+    expect(active).toContain('已通過的門會保留')
+    expect(active).toContain('不需要回原起飛點')
+    expect(active).not.toContain('門後方')
+    expect(active).not.toContain('清空本次步驟')
+    const stopped = trainingHint('wide-gate', { status: 'failure', metrics,
+      message: '寬門穿越挑戰逾時：尚未完成三道寬門。' })
+    expect(stopped).toContain('挑戰逾時')
+    expect(stopped).toContain('再練一次')
+    expect(stopped).toContain('清空本次步驟')
+    expect(stopped).not.toContain('保留')
+    expect(stopped).not.toContain('目前位置')
+  })
+
+  it('formats at most three signed gate facts without changing L03 circle labels', () => {
+    const metrics = { gatePhase: 3, gatesPassed: 1, nextGateDistanceM: -2,
+      nextGateHorizontalErrorM: 2.5, nextGateVerticalErrorM: 1, targetDistanceM: 4,
+      horizontalSpeedMps: 20, contiguousDwellSeconds: 0 }
+    expect(formatTrainingMetrics(metrics, 'wide-gate', 10)).toEqual([
+      { key: 'gatesPassed', label: '已通過寬門', value: '1 / 3' },
+      { key: 'nextGateDistanceM', label: '距目前門平面（前＋／後−）', value: '-2.00 m' },
+      { key: 'nextGateHorizontalErrorM', label: '相對門中心左右偏差（右＋）', value: '2.50 m' },
+    ])
+    expect(formatTrainingMetrics({ ...metrics, nextGateHorizontalErrorM: 1, nextGateVerticalErrorM: -3 }, 'wide-gate')[2])
+      .toEqual({ key: 'nextGateVerticalErrorM', label: '相對門中心高度偏差（上＋）', value: '-3.00 m' })
+    expect(formatTrainingMetrics({ gatePhase: 1, groundClearanceM: 0.1, altitudeM: 0.2, gatesPassed: 0 }, 'wide-gate').map(({ key }) => key))
+      .toEqual(['groundClearanceM', 'altitudeM', 'gatesPassed'])
+    expect(formatTrainingMetrics({ routePhase: 2, gatesPassed: 1, nextGateDistanceM: 3 }, 'straight-line')[0].label)
+      .toBe('已通過圓環')
+    expect(formatTrainingMetrics(metrics, 'wide-gate').map(({ key }) => key))
+      .not.toContain('horizontalSpeedMps')
+  })
+
+  it('keeps the final gate distinct from completion and accepts a fast completed route', () => {
+    const final = trainingObjective('wide-gate', { metrics: { gatePhase: 4, gateTargetIndex: 2 } })
+    expect(final?.title).toBe('5／5 穿過第 3 道寬門')
+    expect(final?.detail).not.toContain('現在可以 Disarm')
+    const done = trainingObjective('wide-gate', { metrics: { gatePhase: 5, gatesPassed: 3,
+      horizontalSpeedMps: 30, contiguousDwellSeconds: 0, headingErrorDegrees: 170 } })
+    expect(done?.title).toBe('5／5 三道寬門已完成')
+    expect(done?.detail).toContain('不必降落或停留，現在可以 Disarm')
+    expect(done?.detail).not.toMatch(/熟練|速度|170/)
+  })
+
+  it.each([1, 2, 3].flatMap((gate) => [
+    ['left-post', '左柱'], ['right-post', '右柱'], ['top-bar', '上橫樑'], ['bottom-bar', '下橫樑'],
+  ].map(([part, label]) => [gate, part, label] as const)))('identifies only the reported gate %s %s contact', (gate, part, label) => {
+    const message = `Obstacle collision: wide-gate-${gate}-${part}; reset required.`
+    const cause = `碰到第 ${gate} 道門的${label}`
+    expect(wideGateCollisionCause(message)).toBe(cause)
+    const hint = trainingHint('wide-gate', { status: 'failure', message, metrics: {} })
+    expect(hint).toContain(cause)
+    expect(hint).toContain('墜毀')
+    expect(hint).toContain('Reset')
+    expect(hint).toContain('清空本次步驟')
+  })
+
+  it.each([
+    'Obstacle collision: wide-gate-4-left-post; reset required.',
+    'Obstacle collision: wide-gate-1-left-post-extra; reset required.',
+    'Obstacle collision: wide-gate-2-unknown; reset required.',
+    'Obstacle collision: another-box; reset required.',
+    'Ground impact latched a crash; reset required.',
+    'Target wide-gate-1-left-post is ahead.',
+    'wide-gate-1-left-post',
+    '',
+  ])('does not invent a specific contact from an unrecognized warning: %s', (message) => {
+    expect(wideGateCollisionCause(message)).toBeNull()
+    expect(trainingHint('wide-gate', { status: 'failure', message, metrics: {} })).not.toMatch(/碰到第 [123] 道門/)
+  })
+
+  it('uses the first reported collider rather than inferring the current target was hit', () => {
+    const message = 'Obstacle collision: wide-gate-1-right-post; reset required. Obstacle collision: wide-gate-3-top-bar; reset required.'
+    expect(wideGateCollisionCause(message)).toBe('碰到第 1 道門的右柱')
+    const hint = trainingHint('wide-gate', { status: 'failure', message,
+      metrics: { gatePhase: 4, gateTargetIndex: 2, gatesPassed: 2 } })
+    expect(hint).toContain('碰到第 1 道門的右柱')
+    expect(hint).not.toContain('碰到第 3')
+  })
+
+  it.each([
+    ['Ground impact latched a crash; reset required.', '地面撞擊造成墜毀'],
+    ['Flight disarmed after focus was lost.', '解除解鎖、失去焦點'],
+    ['寬門穿越停止：缺少有效的地面接觸資料。', '飛行資料無效或中斷'],
+    ['寬門穿越停止：資料中斷、時間倒退或模擬被重設。', '飛行資料無效或中斷'],
+  ])('prioritizes an explicit L09 terminal cause without stage facts: %s', (message, cause) => {
+    const hint = trainingHint('wide-gate', { status: 'failure', message, metrics: {} })
+    expect(hint).toContain(cause)
+    expect(hint).toContain('清空本次步驟')
+    expect(hint).not.toMatch(/碰到第|門洞右側外|已通過的門會保留/)
   })
 
 })

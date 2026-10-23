@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { createInitialDroneState, DEFAULT_DRONE_CONFIG, droneGroundSupport, hoverThrottle, isFiniteDroneState } from '../drone'
+import { createInitialDroneState, DEFAULT_DRONE_CONFIG, droneGroundContactRadius, droneGroundSupport, hoverThrottle, isFiniteDroneState, type DroneConfig } from '../drone'
 import { quaternionFromRotationVector, quaternionNorm, rotateVectorByQuaternion, type Quaternion } from '../math'
 import { calculateFpvCameraTransform, DEFAULT_FPV_MOUNT_POSITION_M } from '../rendering/camera'
 import {
   GROUND_CRASH_WARNING,
   stepDroneState,
 } from './dynamics'
+import { findSweptObstacleHit, OBSTACLE_CRASH_WARNING_PREFIX, type StaticBoxCollider } from './obstacles'
 
 const DT = 1 / 240
 
@@ -280,5 +281,190 @@ describe('rigid-body dynamics', () => {
     const negativeTime = stepDroneState(negativeTimeState, [0, 0, 0, 0], DEFAULT_DRONE_CONFIG, DT)
     expect(negativeTime.reset).toBe(true)
     expect(negativeTime.state.timeSeconds).toBe(0)
+  })
+})
+
+describe('static obstacle rigid-body contact', () => {
+  const config: DroneConfig = {
+    ...DEFAULT_DRONE_CONFIG,
+    linearDragCoefficientNPerMps: { x: 0, y: 0, z: 0 },
+  }
+  const gate: readonly StaticBoxCollider[] = [
+    { id: 'left', centerM: { x: -2.11, y: 3, z: -8 }, halfExtentsM: { x: 0.11, y: 2.22, z: 0.175 } },
+    { id: 'right', centerM: { x: 2.11, y: 3, z: -8 }, halfExtentsM: { x: 0.11, y: 2.22, z: 0.175 } },
+    { id: 'top', centerM: { x: 0, y: 5.11, z: -8 }, halfExtentsM: { x: 2, y: 0.11, z: 0.175 } },
+    { id: 'bottom', centerM: { x: 0, y: 0.89, z: -8 }, halfExtentsM: { x: 2, y: 0.11, z: 0.175 } },
+  ]
+
+  it('crosses the clear opening without a collision at the largest allowed timestep', () => {
+    const initial = createInitialDroneState(config, { x: 0, y: 3, z: 0 })
+    const state = { ...initial, velocityMps: { x: 0, y: 0, z: -160 } }
+    const result = stepDroneState(state, [0, 0, 0, 0], config, 0.1, gate)
+    expect(result.reset).toBe(false)
+    expect(result.state.crashed).toBe(false)
+    expect(result.state.positionM.z).toBe(-16)
+    expect(result.warnings).toEqual([])
+  })
+
+  it.each(gate)('stops at the first $id contact without tunneling through a complete frame in one step', (box) => {
+    const initial = createInitialDroneState(config, { ...box.centerM, z: 0 })
+    const state = { ...initial, velocityMps: { x: 0, y: 0, z: -160 } }
+    const result = stepDroneState(state, [0.4, 0.4, 0.4, 0.4], config, 0.1, gate)
+    const radius = droneGroundContactRadius(config)
+    expect(result.reset).toBe(false)
+    expect(result.state.crashed).toBe(true)
+    expect(result.state.positionM.z).toBeCloseTo(-8 + 0.175 + radius, 12)
+    expect(result.state.positionM.z).toBeGreaterThan(-8)
+    expect(result.state.velocityMps).toEqual({ x: 0, y: 0, z: 0 })
+    expect(result.state.angularVelocityBodyRadPerSec).toEqual({ x: 0, y: 0, z: 0 })
+    expect(result.state.motors.every((motor) => motor.command === 0 && motor.targetThrustN === 0 && motor.actualThrustN === 0)).toBe(true)
+    expect(result.state.timeSeconds).toBe(0.1)
+    expect(result.state.stepIndex).toBe(1)
+    expect(result.state.warnings).toEqual([`${OBSTACLE_CRASH_WARNING_PREFIX}${box.id}; reset required.`])
+    expect(result.warnings).toEqual(result.state.warnings)
+    expect(isFiniteDroneState(result.state)).toBe(true)
+  })
+
+  it('uses first contact in reverse motion rather than the final penetrated pose', () => {
+    const initial = createInitialDroneState(config, { ...gate[0].centerM, z: -16 })
+    const result = stepDroneState({ ...initial, velocityMps: { x: 0, y: 0, z: 160 } }, [0, 0, 0, 0], config, 0.1, gate)
+    expect(result.state.crashed).toBe(true)
+    expect(result.state.positionM.z).toBeCloseTo(-8 - 0.175 - droneGroundContactRadius(config), 12)
+    expect(result.warnings[0]).toContain('left')
+  })
+
+  it('contains propeller, camera, and configured motor geometry in every orientation', () => {
+    const wideConfig: DroneConfig = {
+      ...config,
+      motors: config.motors.map((motor) => ({ ...motor, positionM: { x: motor.positionM.x * 4, y: 0, z: motor.positionM.z * 4 } })) as unknown as DroneConfig['motors'],
+    }
+    const start = { x: 1.5, y: 3, z: 0 }
+    const end = { ...start, z: -16 }
+    expect(findSweptObstacleHit(start, end, 0, gate)).toBeNull()
+    expect(findSweptObstacleHit(start, end, droneGroundContactRadius(config), gate)).toBeNull()
+    expect(droneGroundContactRadius(wideConfig)).toBeGreaterThan(0.5)
+    for (const orientation of [
+      { x: 0, y: 0, z: 0, w: 1 },
+      quaternionFromRotationVector({ x: 0, y: Math.PI / 2, z: 0 }),
+      quaternionFromRotationVector({ x: Math.PI / 3, y: 0, z: Math.PI / 4 }),
+    ]) {
+      const initial = createInitialDroneState(wideConfig, start, orientation)
+      const result = stepDroneState({ ...initial, velocityMps: { x: 0, y: 0, z: -160 } }, [0, 0, 0, 0], wideConfig, 0.1, gate)
+      expect(result.state.crashed).toBe(true)
+      expect(result.warnings).toEqual([`${OBSTACLE_CRASH_WARNING_PREFIX}right; reset required.`])
+    }
+    const nearProp = { x: 1.8, y: 3, z: 0 }
+    expect(findSweptObstacleHit(nearProp, { ...nearProp, z: -16 }, 0, gate)).toBeNull()
+    expect(findSweptObstacleHit(nearProp, { ...nearProp, z: -16 }, droneGroundContactRadius(config), gate)?.colliderId).toBe('right')
+  })
+
+  it('latches an initial overlap and retains its cause through motor commands and invalid timesteps', () => {
+    const initial = createInitialDroneState(config, gate[0].centerM)
+    const spinning = { ...initial, angularVelocityBodyRadPerSec: { x: 0, y: 5, z: 0 } }
+    const collision = stepDroneState(spinning, [0, 0, 0, 0], config, DT, gate)
+    expect(collision.state.crashed).toBe(true)
+    expect(collision.state.positionM).toEqual(initial.positionM)
+    expect(collision.state.orientation).toEqual(initial.orientation)
+    const invalidStep = stepDroneState(collision.state, [NaN, 1, 1, 1], config, NaN, [])
+    expect(invalidStep.reset).toBe(false)
+    expect(invalidStep.warnings[0]).toBe(`${OBSTACLE_CRASH_WARNING_PREFIX}left; reset required.`)
+    let latched = invalidStep.state
+    for (let index = 0; index < 24; index += 1) latched = stepDroneState(latched, [1, 1, 1, 1], config, DT, []).state
+    expect(latched.positionM).toEqual(collision.state.positionM)
+    expect(latched.orientation).toEqual(collision.state.orientation)
+    expect(latched.crashed).toBe(true)
+    expect(latched.timeSeconds).toBeCloseTo(collision.state.timeSeconds + 24 * DT)
+    expect(latched.warnings).toEqual(collision.warnings)
+    expect(latched.motors.every((motor) => motor.actualThrustN === 0)).toBe(true)
+  })
+
+  it('lets the ground stop a fall before an obstacle buried below the ground', () => {
+    const initial = createInitialDroneState(config, { x: 0, y: 0.5, z: 0 })
+    const buried: StaticBoxCollider = { id: 'buried', centerM: { x: 0, y: -2, z: 0 }, halfExtentsM: { x: 1, y: 0.1, z: 1 } }
+    const result = stepDroneState({ ...initial, velocityMps: { x: 0, y: -100, z: 0 } }, [0, 0, 0, 0], config, 0.1, [buried])
+    expect(result.reset).toBe(false)
+    expect(result.state.crashed).toBe(true)
+    expect(result.warnings).toEqual([GROUND_CRASH_WARNING])
+    expect(result.state.positionM.y).toBeGreaterThan(config.ground.heightM)
+  })
+
+  it.each([0, 3.25])('cannot slide a grounded quad through a post at the largest timestep, ground height %s', (groundHeightM) => {
+    const groundConfig = { ...config, ground: { ...config.ground, heightM: groundHeightM } }
+    const initial = createInitialDroneState(groundConfig, { x: 0, y: groundHeightM, z: 0 })
+    const post: StaticBoxCollider = { id: 'grounded-post', centerM: { x: 1.5, y: groundHeightM + 1, z: 0 }, halfExtentsM: { x: 0.1, y: 1, z: 0.1 } }
+    const result = stepDroneState({ ...initial, velocityMps: { x: 30, y: 0, z: 0 } }, [0, 0, 0, 0], groundConfig, 0.1, [post])
+    expect(result.reset).toBe(false)
+    expect(result.state.crashed).toBe(true)
+    expect(result.warnings).toEqual([`${OBSTACLE_CRASH_WARNING_PREFIX}${post.id}; reset required.`])
+    expect(result.state.positionM.x).toBeCloseTo(post.centerM.x - post.halfExtentsM.x - droneGroundContactRadius(config), 12)
+    expect(result.state.positionM.y).toBeCloseTo(initial.positionM.y, 12)
+    expect(result.state.velocityMps).toEqual({ x: 0, y: 0, z: 0 })
+  })
+
+  it.each([
+    { groundHeightM: 0, buriedTopM: -0.05 },
+    { groundHeightM: 0, buriedTopM: 0 },
+    { groundHeightM: 3.25, buriedTopM: 3.2 },
+  ])('ignores a shallow buried box before a real post, ground=$groundHeightM top=$buriedTopM', ({ groundHeightM, buriedTopM }) => {
+    const groundConfig = { ...config, ground: { ...config.ground, heightM: groundHeightM } }
+    const initial = createInitialDroneState(groundConfig, { x: 0, y: groundHeightM, z: 0 })
+    const buried: StaticBoxCollider = { id: 'shallow-buried', centerM: { x: 0, y: buriedTopM - 0.05, z: 0 }, halfExtentsM: { x: 0.3, y: 0.05, z: 0.3 } }
+    const post: StaticBoxCollider = { id: 'real-post', centerM: { x: 1.5, y: groundHeightM + 1, z: 0 }, halfExtentsM: { x: 0.1, y: 1, z: 0.1 } }
+    // A raw conservative envelope overlaps the buried box at the initial pose.
+    expect(findSweptObstacleHit(initial.positionM, initial.positionM, droneGroundContactRadius(groundConfig), [buried])?.fraction).toBe(0)
+    const result = stepDroneState({ ...initial, velocityMps: { x: 30, y: 0, z: 0 } }, [0, 0, 0, 0], groundConfig, 0.1, [buried, post])
+    expect(result.reset).toBe(false)
+    expect(result.state.crashed).toBe(true)
+    expect(result.warnings).toEqual([`${OBSTACLE_CRASH_WARNING_PREFIX}${post.id}; reset required.`])
+    expect(result.state.positionM.x).toBeCloseTo(post.centerM.x - post.halfExtentsM.x - droneGroundContactRadius(groundConfig), 12)
+  })
+
+  it('detects a post reached during a gentle landing followed by a ground slide', () => {
+    const initial = createInitialDroneState(config, { x: 0, y: 0.2, z: 0 })
+    const post: StaticBoxCollider = { id: 'after-landing', centerM: { x: 2.8, y: 1, z: 0 }, halfExtentsM: { x: 0.1, y: 1, z: 0.1 } }
+    const state = { ...initial, velocityMps: { x: 30, y: -1, z: 0 } }
+    const result = stepDroneState(state, [0, 0, 0, 0], config, 0.1, [post])
+    const grounded = createInitialDroneState(config, { x: 0, y: 0, z: 0 })
+    expect(result.reset).toBe(false)
+    expect(result.state.crashed).toBe(true)
+    expect(result.warnings).toEqual([`${OBSTACLE_CRASH_WARNING_PREFIX}${post.id}; reset required.`])
+    expect(result.state.positionM.x).toBeCloseTo(post.centerM.x - post.halfExtentsM.x - droneGroundContactRadius(config), 12)
+    expect(result.state.positionM.y).toBeCloseTo(grounded.positionM.y, 12)
+  })
+
+  it.each([
+    { postX: 2, expectedWarning: `${OBSTACLE_CRASH_WARNING_PREFIX}ordered-post; reset required.` },
+    { postX: 8, expectedWarning: GROUND_CRASH_WARNING },
+  ])('honors first contact between a hard ground impact and a post at x=$postX', ({ postX, expectedWarning }) => {
+    const initial = createInitialDroneState(config, { x: 0, y: 1, z: 0 })
+    const post: StaticBoxCollider = { id: 'ordered-post', centerM: { x: postX, y: 1, z: 0 }, halfExtentsM: { x: 0.1, y: 1, z: 0.1 } }
+    const result = stepDroneState({ ...initial, velocityMps: { x: 100, y: -20, z: 0 } }, [0, 0, 0, 0], config, 0.1, [post])
+    expect(result.reset).toBe(false)
+    expect(result.state.crashed).toBe(true)
+    expect(result.warnings).toEqual([expectedWarning])
+  })
+
+  it('resets safely on invalid geometry rather than manufacturing a collision', () => {
+    const invalid = { ...gate[0], halfExtentsM: { x: 0, y: 1, z: 1 } }
+    const result = stepDroneState(stateAt(), [0, 0, 0, 0], config, DT, [invalid])
+    expect(result.reset).toBe(true)
+    expect(result.state.crashed).toBe(false)
+    expect(isFiniteDroneState(result.state)).toBe(true)
+    expect(result.warnings[0]).toContain('Static obstacle geometry was invalid')
+  })
+
+  it('preserves the previous empty-field trajectory and ground crash behavior exactly', () => {
+    let legacy = { ...stateAt(), velocityMps: { x: 1, y: -5, z: -2 } }
+    let explicitEmpty = legacy
+    for (let index = 0; index < 240; index += 1) {
+      const commands = index > 120 ? [1, 1, 1, 1] : [0, 0, 0, 0]
+      const legacyResult = stepDroneState(legacy, commands, config, DT)
+      const emptyResult = stepDroneState(explicitEmpty, commands, config, DT, [])
+      expect(emptyResult).toEqual(legacyResult)
+      legacy = legacyResult.state
+      explicitEmpty = emptyResult.state
+    }
+    expect(legacy.crashed).toBe(true)
+    expect(legacy.warnings).toEqual([GROUND_CRASH_WARNING])
   })
 })

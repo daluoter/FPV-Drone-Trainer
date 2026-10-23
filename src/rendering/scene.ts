@@ -9,6 +9,7 @@ import { createDirectionControlTargets, DIRECTION_CONTROL_TARGET_RADIUS_M } from
 import { createCoordinatedTurnTargets, COORDINATED_TURN_TARGET_RADIUS_M } from '../training/coordinatedTurn'
 import { createSquareRouteTargets, SQUARE_ROUTE_TARGET_RADIUS_M } from '../training/squareRoute'
 import { createFigureEightTargets, FIGURE_EIGHT_TARGET_RADIUS_M } from '../training/figureEight'
+import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
 import type { Vector3 } from '../math/vector'
 import type { ReplayGhostState } from '../replay'
 
@@ -48,6 +49,8 @@ export interface FlightScene {
   setSquareTarget(targetId: string | null): void
   /** Select one L08 guide, including the distinct visits to the shared center. */
   setFigureEightTarget(targetId: string | null): void
+  /** Select L09 guidance while keeping every physical gate frame visible. */
+  setWideGateTarget(targetId: string | null): void
   /** Presentation-only bounded path trace; evaluators remain renderer-independent. */
   setTrainingPath(path: readonly Vector3[]): void
   setReplayPath(path: readonly Vector3[]): void
@@ -647,9 +650,58 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   }
   scene.add(figureEightPath)
 
+  // These boxes use the same layout as the collision world. Passing a gate
+  // only advances its guidance; its physical frame remains in the course.
+  const wideGateField = new THREE.Group()
+  wideGateField.name = 'wide-gate-field'
+  wideGateField.visible = false
+  const wideGateReferences: FlightSceneReference[] = []
+  const wideGateGuides = new Map<string, THREE.Group>()
+  const wideGateColors = [0x45d7f7, 0xffc978, 0xb8f36b]
+  for (const [index, gate] of createWideGates(field.launch, config.ground.heightM).entries()) {
+    const frame = new THREE.Group()
+    frame.name = `${gate.id}-frame`
+    frame.position.set(gate.positionM.x, gate.positionM.y, gate.positionM.z)
+    const color = wideGateColors[index]
+    for (const collider of gate.colliders) {
+      const box = new THREE.Mesh(
+        new THREE.BoxGeometry(collider.halfExtentsM.x * 2, collider.halfExtentsM.y * 2, collider.halfExtentsM.z * 2),
+        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.18, roughness: 0.65 }),
+      )
+      box.name = collider.id
+      box.position.set(collider.centerM.x - gate.positionM.x, collider.centerM.y - gate.positionM.y, collider.centerM.z - gate.positionM.z)
+      frame.add(box)
+    }
+
+    const guidance = new THREE.Group()
+    guidance.name = `${gate.id}-guidance`
+    guidance.visible = index === 0
+    const halfWidth = gate.openingWidthM / 2
+    const halfHeight = gate.openingHeightM / 2
+    const guideDepth = WIDE_GATE_FRAME_DEPTH_M / 2 + 0.025
+    const opening = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(-halfWidth, -halfHeight, guideDepth),
+        new THREE.Vector3(halfWidth, -halfHeight, guideDepth),
+        new THREE.Vector3(halfWidth, halfHeight, guideDepth),
+        new THREE.Vector3(-halfWidth, halfHeight, guideDepth),
+      ]),
+      new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, depthWrite: false }),
+    )
+    opening.name = `${gate.id}-opening-guide`
+    const heading = new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 0, 0.6), 1.4, color, 0.35, 0.24)
+    heading.name = `${gate.id}-heading`
+    guidance.add(opening, heading)
+    frame.add(guidance)
+    wideGateGuides.set(gate.id, guidance)
+    wideGateField.add(frame)
+    wideGateReferences.push({ id: gate.id, kind: 'gate', object: frame, positionM: { ...gate.positionM }, sizeM: { x: gate.openingWidthM, y: gate.openingHeightM, z: WIDE_GATE_FRAME_DEPTH_M } })
+  }
+  scene.add(wideGateField)
+
   const landingSurface: FlightSceneReference = { id: 'landing-surface', kind: 'zone', object: landingTarget, positionM: { ...field.landing }, sizeM: { x: LANDING_ZONE_RADIUS_M * 2, y: 0, z: LANDING_ZONE_RADIUS_M * 2 } }
   const launchReference: FlightSceneReference = { id: 'training-launch', kind: 'pad', object: takeoffPad, positionM: { ...field.launch } }
-  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences]
+  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences]
   const referenceById = new Map(sceneReferences.map((reference) => [reference.id, reference]))
 
   const drone = createQuadVisual()
@@ -727,7 +779,8 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     squarePath.visible = lessonId === 'square-route'
     figureEightTargets.visible = lessonId === 'figure-eight'
     figureEightPath.visible = lessonId === 'figure-eight'
-    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight'].includes(lessonId ?? '')
+    wideGateField.visible = lessonId === 'wide-gate'
+    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate'].includes(lessonId ?? '')
     for (const reference of referenceSet.contract) {
       reference.object.visible = !beginner
     }
@@ -747,6 +800,10 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
 
   const setFigureEightTarget = (targetId: string | null): void => {
     for (const reference of figureEightReferences) reference.object.visible = reference.id === targetId
+  }
+
+  const setWideGateTarget = (targetId: string | null): void => {
+    for (const [id, guidance] of wideGateGuides) guidance.visible = id === targetId
   }
 
   const setPath = (line: THREE.Line, path: readonly Vector3[], yOffset: number): void => {
@@ -793,6 +850,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     setTurnTarget,
     setSquareTarget,
     setFigureEightTarget,
+    setWideGateTarget,
     setTrainingPath,
     setReplayPath,
     dispose: () => disposeFlightScene(scene),

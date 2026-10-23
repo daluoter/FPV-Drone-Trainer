@@ -296,6 +296,20 @@ describe('training state machine', () => {
     expect(crashedState.crashed).toBe(true)
   })
 
+  it('preserves the physical frame collision cause before evaluating or scoring a crash', () => {
+    const session = new TrainingSession({ lessons: [testLesson], initialLessonId: testLesson.id, countdownDurationSeconds: 0 })
+    session.start(0)
+    session.tick(0)
+    session.consumeSample(sample(0.05))
+    const source = sample(0.1)
+    const warning = 'Obstacle collision: wide-gate-2-right-post; reset required.'
+    const result = session.consumeSample({ ...source, armed: false, state: { ...source.state, crashed: true, warnings: [warning] } })
+    expect(result.phase).toBe('FAILED')
+    expect(result.result?.message).toBe(warning)
+    expect(result.sampleCount).toBe(1)
+    expect(result.result?.outcome).toBe('FAILED')
+  })
+
   it('guards countdown timing and only evaluates ACTIVE samples', () => {
     const session = new TrainingSession({ lessons: [testLesson], initialLessonId: testLesson.id, countdownDurationSeconds: 2 })
     expect(session.getState().phase).toBe('READY')

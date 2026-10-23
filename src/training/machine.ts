@@ -1,3 +1,4 @@
+import { OBSTACLE_CRASH_WARNING_PREFIX } from '../simulation/obstacles'
 import { isFiniteDroneState, type DroneState } from '../drone'
 import { isFiniteNormalizedRcInput } from '../flight-controller'
 import { DEFAULT_LESSONS } from './lessons'
@@ -392,7 +393,8 @@ function sampleActiveState(
       state,
       [lesson],
       sample.timestampSeconds,
-      'Attempt stopped: the drone crashed; reset and retry the lesson.',
+      sample.state.warnings.find((warning) => warning.startsWith(OBSTACLE_CRASH_WARNING_PREFIX))
+        ?? 'Attempt stopped: the drone crashed; reset and retry the lesson.',
       trajectoryBuffer,
     )
   }

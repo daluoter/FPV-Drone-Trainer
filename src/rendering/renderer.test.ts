@@ -217,4 +217,50 @@ describe('FlightRenderer lifecycle and failure contract', () => {
     }
   })
 
+  it('retains L09 physical gates and the active guidance across reconfiguration on the same canvas', () => {
+    const rendererStub = createRendererStub()
+    const canvas = document.createElement('canvas')
+    const renderer = new FlightRenderer(canvas, { rendererFactory: () => rendererStub })
+    try {
+      renderer.setLessonTarget('wide-gate')
+      renderer.setWideGateTarget('wide-gate-2')
+      const previous = renderer.flightScene
+      const disposePrevious = vi.spyOn(previous, 'dispose')
+      renderer.reconfigureScene({ ...DEFAULT_DRONE_CONFIG,
+        ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 20, z: -3 } })
+      const field = renderer.scene.getObjectByName('wide-gate-field')!
+      const visibleGuides = () => field.children.flatMap((frame) => frame.children.filter((child) => child.name.endsWith('-guidance') && child.visible).map((child) => child.name))
+      const assertFramesRemain = () => {
+        expect(field.children).toHaveLength(3)
+        expect(field.children.every((frame) => frame.visible)).toBe(true)
+        const boxes = field.children.flatMap((frame) => frame.children.filter((child) => !child.name.endsWith('-guidance')))
+        expect(boxes).toHaveLength(12)
+        expect(boxes.every((box) => box.visible)).toBe(true)
+      }
+      expect(field.visible).toBe(true)
+      expect(visibleGuides()).toEqual(['wide-gate-2-guidance'])
+      assertFramesRemain()
+      expect(renderer.flightScene.getReference('wide-gate-2')?.positionM).toEqual({ x: 6, y: 8, z: -19 })
+      for (const name of ['figure-eight-targets', 'figure-eight-path', 'square-route-targets', 'coordinated-turn-targets']) {
+        expect(renderer.scene.getObjectByName(name)?.visible).toBe(false)
+      }
+      expect(renderer.flightScene.getReference('turn-entry')?.object.visible).toBe(false)
+      expect(renderer.canvas).toBe(canvas)
+      expect(renderer.renderer).toBe(rendererStub)
+      expect(disposePrevious).toHaveBeenCalledOnce()
+      renderer.setWideGateTarget('wide-gate-3')
+      expect(visibleGuides()).toEqual(['wide-gate-3-guidance'])
+      assertFramesRemain()
+      for (const id of [null, 'unknown']) {
+        renderer.setWideGateTarget(id)
+        expect(visibleGuides()).toEqual([])
+        assertFramesRemain()
+      }
+      renderer.setLessonTarget('figure-eight')
+      expect(field.visible).toBe(false)
+    } finally {
+      renderer.dispose()
+    }
+  })
+
 })

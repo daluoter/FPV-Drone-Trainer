@@ -1,10 +1,14 @@
 # Training system
 
-The catalog now includes **Takeoff**, **Hover**, **Coordinated Turn**, **Split-S**,
-and **Orbit / 刷鍋**. The original four stable lesson IDs remain unchanged; takeoff
-is presented first by priority. Landing, straight-line, box-pattern and
-figure-eight lessons remain planned. See [the learning contracts](LEARNING_CONTRACT.md)
-for current beginner workflow and [the roadmap](LEARNING_ROADMAP.md) for remaining work.
+The catalog includes beginner flight lessons **L01–L09**: takeoff, hover,
+straight-line rings, landing, direction control, coordinated turns, square route,
+figure eight and wide gates. L00 knowledge completion is tracked separately.
+The original four stable lesson IDs remain unchanged, including the retained
+Split-S and Orbit / 刷鍋 lessons. See [the learning contracts](LEARNING_CONTRACT.md)
+for the current beginner workflow and [the roadmap](LEARNING_ROADMAP.md) for
+remaining work. L08 passed the user's latest manual review of the preceding
+`2026.10.23.3` / `bc19ae2` delivery; exact local build, browser and hardware were
+not supplied. L09 is delivered in `2026.10.23.4` and awaits manual review.
 
 The evaluator result is based on finite fixed-step drone state and geometry. A
 stick sequence cannot pass a lesson. Synthetic fixture success is deterministic
@@ -28,7 +32,10 @@ is observational. Training never rotates the Three.js drone, writes a motor
 command, or changes physics. A lesson setup is a request with
 `requiresDisarmed: true` and `resetSimulation: true`; `FreeFlight` honors it
 through `FlightRuntime.resetForTraining` during COUNTDOWN. ACTIVE evaluator
-callbacks cannot teleport or reset the player.
+callbacks cannot teleport or reset the player. L09 setup additionally supplies
+the shared static gate boxes. The runtime validates and copies them while
+disarmed; the simulation, rather than the evaluator or renderer, owns contact
+and crash decisions. Free Flight and other lessons clear the static field.
 
 The runtime fixed-step sample carries explicit `armed` telemetry into the
 training sample. Disarm, invalid telemetry, runtime reset/rewind, focus loss,
@@ -92,7 +99,7 @@ optional inspection, the total `sampleCount`, and `previousSample` /
 `previousEvaluation` for O(1) incremental calculations. `TrainingSample.armed`
 is supplied by the runtime integration for Phase 7 evaluators; the machine
 waits for the first true arm sample and rejects a later false sample. Legacy
-custom tests may omit it, but the shipped four evaluators never pass without
+custom tests may omit it, but shipped evaluators never pass without
 `armed === true`.
 
 ## Geometric lessons
@@ -117,13 +124,37 @@ dwell; elapsed time or input movement alone cannot pass it.
 
 ### Coordinated Turn
 
-The route is ordered `turn-entry -> turn-apex -> turn-exit`. Position and
-altitude gates use the copied semantic references and a route corridor. The
-apex and exit require a measured heading change from actual trajectory motion
-and aligned route legs; an exact roll/yaw stick sequence is never checked.
-Position jumps, timestamp gaps, out-of-order gates, and corridor/energy
-excursions fail the attempt. Metrics include gate errors, corridor error,
-heading change/alignment, and speed.
+L06 starts on the supported ground, then orders right entry/apex/exit followed
+by left entry/apex/exit. Continuous segments can enter the 1.8 m target spheres
+with a further 0.1 m edge tolerance. Heading has a 70° allowance, and each exit
+needs at least 25° of measured trajectory-direction change in the requested
+direction. An exact roll/yaw stick sequence or yaw in place cannot replace
+motion. Missed targets and non-crash ground returns retain checkpoints; there
+is no extra speed, dwell or corridor-reset requirement. Practice is untimed;
+challenge allows 180 seconds. See [the L06 guide](L06_COORDINATED_TURN.md).
+
+### Wide gates
+
+L09 (`wide-gate`, rules 5) has five checkpoints: actual launch-ground contact,
+manual liftoff, then ordered forward crossings of `wide-gate-1`, `wide-gate-2`
+and `wide-gate-3`. The shared layout places 4 × 4 m clear openings 8 / 16 / 24 m
+ahead of launch, centered at configured ground + 3 m. A crossing is the actual
+continuous movement segment's intersection with the current gate plane inside
+the opening, traveling toward negative scene Z. Reaching the far side by going
+around, flying backward through the gate or sliding along the ground cannot
+substitute for passage. The physics solver first checks the conservative
+full-drone swept envelope against all four solid frame members; the evaluator
+then observes the resolved sample and never invents collision from a COM-only
+test.
+
+There is no added speed, heading, dwell or landing target. Missing a gate or
+returning to the ground without crashing retains completed checkpoints; the
+learner can return in front of the current gate or take off again locally.
+Frame contact latches a physical crash with its gate/member ID and ends the
+attempt. Crash, disarm, focus loss, reset and invalid/discontinuous samples
+remain terminal. Practice has no timeout; challenge allows 240 seconds. All
+three frames remain visible and physical after passing; only the current
+guidance overlay advances. See [the L09 guide](L09_WIDE_GATE.md).
 
 ### Split-S
 
@@ -153,26 +184,30 @@ velocity-consistency error.
 ## Scene references and visualization
 
 `FlightScene.sceneReferences` exposes immutable renderer-independent snapshots
-for `takeoff-pad`, `hover-zone`, ordered turn markers, `split-s-reference`, and
-`orbit-poi`. The renderer presents the hover target, turn gate/poles, Split-S
-gate, orbit tower/circle, and a bounded training path trace. These objects are
-presentation-only; evaluators use copied positions/dimensions and never mutate
-Three.js objects.
+for the launch, landing area, beginner-route targets and retained advanced
+references. L09 appends `wide-gate-1` through `wide-gate-3`, with opening size
+`{ x: 4, y: 4, z: 0.35 }`, without reordering earlier IDs. Evaluators use copied
+positions/dimensions and never mutate Three.js objects. L09's frame meshes use
+the exact shared collider boxes; the opening outline and arrow are guidance
+only. `setWideGateTarget(id | null)` toggles those overlays without removing
+passed physical frames. Other lesson targets, the Split-S reference and orbit
+tower remain visual guides without static collision.
 
 ## Progress persistence and result feedback
 
-`TrainingProgressStore` writes schema version `1` to
+The retained legacy `TrainingProgressStore` format writes schema version `1` to
 `fpv-drone-trainer.training-progress.v1`. Attempts retain score, elapsed time,
 sample count, checkpoint counts, completion time, and finite evaluator metrics.
 Malformed JSON, schema, timestamps, or numeric values fall back to empty
 progress. Only current lesson IDs are merged; legacy placeholder IDs are not
 relabelled as completions. The Phase 7 panel exposes live metrics, checkpoint
 progress, failure hints, retry/reset controls, and persisted recent/best
-attempt status.
+attempt status. Current UI attempts use the separate contextual format below;
+the original document is preserved rather than relabelled as new completion.
 
 ## Evidence boundaries
 
-Automated evaluator fixtures cover positive and negative traces for all four
+The original automated evaluator fixtures cover positive and negative traces for all four
 lessons, retry isolation, disarmed telemetry, upright Split-S U-turns,
 yaw-in-place/oscillatory orbit behavior, and path gaps/teleports. They do not
 prove that a human can pilot the maneuver in a browser or that the simplified
@@ -188,14 +223,20 @@ input source, challenge/practice label and assistance state. Contextual progress
 uses separate validated envelopes, preserving the original v1 document. Result
 and best-score views remain bound to the result context after changing settings;
 failed writes are visible and malformed history is not automatically overwritten.
+Current L06–L09 attempts use rules 5; earlier lesson scopes stay unchanged
+(including rules 4 for L03–L05). L09 is a new lesson with empty initial progress;
+its collision field does not rewrite earlier completion or increase their
+rules/physics version. Physics context remains version 1. Settings, input source
+and practice/challenge remain separate comparison conditions.
 
-Four-axis and takeoff examples are bounded recordings generated through the real
+Four-axis and L01/L03–L09 examples are bounded recordings generated through the real
 240 Hz simulator. They play through the existing independent ghost mechanism;
 pose, normalized input and captions share its timeline. They never feed training,
-never grant progress and remain labeled as simulated pending pilot review.
+never grant progress or mastery and remain labeled as simulated pending pilot
+review. The L09 recording uses the same physical gate field as live practice.
 
 
-## Beginner-school batch two
+## Historical beginner-school batch two (rules 2)
 
 The UI now defaults to `practice`, with explicit `challenge` selection. Practice
 skips challenge timeouts; an evaluator may return `recovery: restart` to clear
@@ -233,7 +274,7 @@ final observations, one measured gap and one next action without inferring a
 cause, independent mastery or hardware skill.
 
 
-## Learner-feedback revision and result review
+## Historical learner-feedback revision and result review (rules 3)
 
 Following manual feedback, display order is now L01 Takeoff, L02 Hover, L03
 Straight Line, L04 Landing, while stable lesson IDs stay unchanged. Rules version

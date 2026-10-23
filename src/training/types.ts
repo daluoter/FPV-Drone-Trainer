@@ -2,6 +2,7 @@ import type { DroneState } from '../drone'
 import type { Quaternion } from '../math/quaternion'
 import type { Vector3 } from '../math/vector'
 import type { NormalizedRcInput } from '../flight-controller'
+import type { StaticBoxCollider } from '../simulation/obstacles'
 import type { TrainingAttemptContext } from './attempt'
 
 export const TRAINING_PHASES = [
@@ -70,6 +71,8 @@ export interface LessonSetup {
   readonly sceneReferenceIds: readonly string[]
   readonly spawnPositionM?: Vector3
   readonly spawnOrientation?: Quaternion
+  /** Physical geometry installed only at the explicit disarmed setup boundary. */
+  readonly staticObstacles?: readonly StaticBoxCollider[]
 }
 
 export interface LessonOutcomeDefinition {
