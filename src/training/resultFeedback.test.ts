@@ -328,4 +328,134 @@ describe('observed result coaching', () => {
     expect(feedback.nextPractice).toMatch(/不必|不需要|不需/)
     expect(feedback.nextPractice).toContain('降落')
   })
+
+  it('reports L08 left/right completion at the central airborne finish without new precision goals', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'figure-eight',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, outcome: 'SUCCESS',
+      completedCheckpoints: 11, totalCheckpoints: 11,
+      metrics: { eightPhase: 11, eightTargetsCompleted: 9, eightLoopsCompleted: 2,
+        horizontalSpeedMps: 15, contiguousDwellSeconds: 0 } })
+    expect(feedback.observedStrength).toContain('左環、中央換向與右環')
+    expect(feedback.observedStrength).toContain('中央空中終點')
+    expect(feedback.observedGap).toBeNull()
+    expect(feedback.nextPractice).toContain('不需降落或停穩')
+    expect(feedback.scopeNote).toContain('不代表已熟練')
+  })
+
+  it('names an unfinished L08 left-loop target from measured progress', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'figure-eight',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, completedCheckpoints: 5, totalCheckpoints: 11,
+      metrics: { eightPhase: 5, eightTargetIndex: 3, eightTargetsCompleted: 3, eightLoopsCompleted: 0,
+        targetDistanceM: 4.2, headingErrorDegrees: 5, horizontalSpeedMps: 20, routeCorridorErrorM: 30 } })
+    expect(feedback.observedStrength).toContain('3 / 9 個八字目標')
+    expect(feedback.observedStrength).not.toContain('左環已完成')
+    expect(feedback.observedGap).toContain('左圈回程')
+    expect(feedback.observedGap).toContain('尚餘 6 個八字目標')
+    expect(feedback.observedGap).toContain('4.2 m')
+    expect(feedback.nextPractice).toContain('再練一次')
+    expect(feedback.nextPractice).toContain('沿左環')
+    expect(feedback.observedGap).not.toMatch(/速度|航廊|停留/)
+  })
+
+  it('keeps the repeated L08 center crossing distinct from the later central finish', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'figure-eight',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, completedCheckpoints: 6, totalCheckpoints: 11,
+      metrics: { eightPhase: 6, eightTargetIndex: 4, eightTargetsCompleted: 4, eightLoopsCompleted: 0,
+        targetDistanceM: 2, headingErrorDegrees: 0 } })
+    expect(feedback.observedGap).toContain('中央換向點')
+    expect(feedback.observedGap).toContain('尚餘 5 個八字目標')
+    expect(feedback.observedGap).not.toContain('中央終點')
+    expect(feedback.observedStrength).not.toContain('左環已完成')
+    expect(feedback.nextPractice).toContain('把左轉切換成右轉')
+    expect(feedback.nextPractice).not.toContain('已完成的目標會保留')
+  })
+
+  it('identifies the completed left loop while the L08 right loop remains unfinished', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'figure-eight',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, completedCheckpoints: 8, totalCheckpoints: 11,
+      metrics: { eightPhase: 8, eightTargetIndex: 6, eightTargetsCompleted: 6, eightLoopsCompleted: 1,
+        targetDistanceM: 3, headingErrorDegrees: 0 } })
+    expect(feedback.observedStrength).toContain('1 / 2 環')
+    expect(feedback.observedStrength).toContain('左環已完成')
+    expect(feedback.observedGap).toContain('右圈外側')
+    expect(feedback.observedGap).toContain('尚餘 3 個八字目標')
+    expect(feedback.nextPractice).toContain('沿右環')
+  })
+
+  it('explains a measured L08 nose-heading blocker without inventing a motion-angle goal', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'figure-eight',
+      attemptContext: { ...currentContext, rulesVersion: 5 },
+      metrics: { eightPhase: 7, eightTargetIndex: 5, eightTargetsCompleted: 5, eightLoopsCompleted: 1,
+        headingErrorDegrees: 110, targetDistanceM: 0.1, turnChangeDegrees: 0 } })
+    expect(feedback.observedGap).toContain('右圈前段')
+    expect(feedback.observedGap).toContain('110°')
+    expect(feedback.observedGap).toContain('70° 內')
+    expect(feedback.nextPractice).toContain('偏航配合傾斜')
+    expect(feedback.observedGap).not.toContain('25°')
+  })
+
+  it('ends a grounded L08 timeout with explicit restart instructions rather than active progress retention', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'figure-eight',
+      attemptContext: { ...currentContext, rulesVersion: 5, mode: 'challenge' },
+      message: '八字航線挑戰逾時：尚未完成左右兩圈。', elapsedSeconds: 301,
+      completedCheckpoints: 9, totalCheckpoints: 11,
+      metrics: { eightPhase: 9, eightTargetIndex: 7, eightTargetsCompleted: 7, eightLoopsCompleted: 1,
+        groundTouching: 1, groundClearanceM: 0, headingErrorDegrees: 130 } })
+    expect(feedback.observedStrength).toContain('左環已完成')
+    expect(feedback.observedGap).toContain('挑戰逾時')
+    expect(feedback.observedGap).toContain('右圈回程')
+    expect(feedback.observedGap).toContain('結束時尚未在空中')
+    expect(feedback.observedGap).not.toContain('130°')
+    expect(feedback.nextPractice).toContain('再練一次')
+    expect(feedback.nextPractice).toContain('清空本次步驟')
+    expect(feedback.nextPractice).toContain('從地面重新開始')
+    expect(feedback.nextPractice).not.toContain('保留')
+    expect(feedback.nextPractice).not.toContain('目前位置')
+  })
+
+  it.each([
+    ['Ground impact latched a crash; reset required.', '發生墜毀'],
+    ['Attempt disarmed because focus was lost.', '解除解鎖、失去焦點'],
+    ['八字練習停止：缺少有效的地面接觸資料。', '飛行資料無效或中斷'],
+    ['八字練習停止：資料中斷、時間倒退或模擬被重設。', '飛行資料無效或中斷'],
+  ])('preserves the explicit L08 terminal cause even without samples: %s', (message, expected) => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'figure-eight',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, sampleCount: 0, metrics: {}, message })
+    expect(feedback.observedGap).toContain(expected)
+    expect(feedback.observedGap).not.toContain('沒有有效的已解鎖飛行樣本')
+    expect(feedback.observedStrength).toBeNull()
+    expect(feedback.nextPractice).toContain('再練一次')
+    expect(feedback.nextPractice).toContain('清空本次步驟')
+  })
+
+  it('distinguishes absent L08 stage evidence from measured failure to take off', () => {
+    const missing = summarizeTrainingResult({ ...result, lessonId: 'figure-eight',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, metrics: {} })
+    expect(missing.observedGap).toContain('分段資料不足')
+    expect(missing.observedGap).not.toContain('尚未完成從地面')
+    expect(missing.observedStrength).toBeNull()
+    expect(missing.nextPractice).toContain('從地面重新開始')
+    const initial = summarizeTrainingResult({ ...result, lessonId: 'figure-eight',
+      metrics: { eightPhase: 1, eightTargetsCompleted: 0, eightLoopsCompleted: 0 } })
+    expect(initial.observedGap).toContain('尚未完成從地面自行起飛')
+    expect(initial.nextPractice).toContain('不需要先懸停')
+    const aborted = summarizeTrainingResult({ ...result, lessonId: 'figure-eight', sampleCount: 0, metrics: {} })
+    expect(aborted.observedGap).toContain('沒有有效的已解鎖飛行樣本')
+    expect(aborted.observedStrength).toBeNull()
+    expect(aborted.nextPractice).toContain('清空本次步驟')
+  })
+
+  it('describes the final L08 central airborne goal as distinct from the original launch', () => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'figure-eight',
+      attemptContext: { ...currentContext, rulesVersion: 5 }, completedCheckpoints: 10, totalCheckpoints: 11,
+      metrics: { eightPhase: 10, eightTargetIndex: 8, eightTargetsCompleted: 8,
+        eightLoopsCompleted: 1, headingErrorDegrees: 0, targetDistanceM: 1.2 } })
+    expect(feedback.observedGap).toContain('中央終點')
+    expect(feedback.observedGap).toContain('尚餘 1 個八字目標')
+    expect(feedback.nextPractice).toContain('起飛點前方 6 m')
+    expect(feedback.nextPractice).toContain('不是原起飛點')
+    expect(feedback.nextPractice).toContain('不需降落或停穩')
+    expect(feedback.nextPractice).toContain('清空本次步驟')
+  })
+
 })

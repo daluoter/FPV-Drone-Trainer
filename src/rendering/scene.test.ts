@@ -5,6 +5,7 @@ import { createDefaultDroneConfig, createInitialDroneState } from '../drone'
 import { rotateVectorByQuaternion } from '../math/quaternion'
 import { createCoordinatedTurnTargets, COORDINATED_TURN_TARGET_RADIUS_M } from '../training/coordinatedTurn'
 import { createSquareRouteTargets, SQUARE_ROUTE_TARGET_RADIUS_M } from '../training/squareRoute'
+import { createFigureEightTargets, FIGURE_EIGHT_TARGET_RADIUS_M } from '../training/figureEight'
 
 import { createFlightScene } from './scene'
 
@@ -189,6 +190,15 @@ describe('flight scene reference contract', () => {
         'square-corner-3',
         'square-leg-4',
         'square-finish',
+        'eight-entry',
+        'eight-left-top',
+        'eight-left-outer',
+        'eight-left-bottom',
+        'eight-crossing',
+        'eight-right-top',
+        'eight-right-outer',
+        'eight-right-bottom',
+        'eight-finish',
       ])
       expect(scene.getReference('hover-zone')?.kind).toBe('zone')
       expect(scene.getReference('hover-zone')?.positionM).toEqual({ x: 0, y: 3, z: 0 })
@@ -481,6 +491,115 @@ describe('flight scene reference contract', () => {
     expect(ringMaterial).toHaveBeenCalledOnce()
     expect(pathGeometry).toHaveBeenCalledOnce()
     expect(pathMaterial).toHaveBeenCalledOnce()
+  })
+
+  it('selects one L08 guide through the shared center and preserves existing lesson references', () => {
+    const scene = createFlightScene()
+    const targets = scene.scene.getObjectByName('figure-eight-targets')!
+    const path = scene.scene.getObjectByName('figure-eight-path')!
+    const anchors = scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM: { ...positionM }, sizeM }))
+    const dronePosition = scene.drone.position.toArray()
+    const visible = () => targets.children.filter((marker) => marker.visible).map((marker) => marker.name)
+    try {
+      expect(targets.visible).toBe(false)
+      expect(path.visible).toBe(false)
+      scene.setLessonTarget('figure-eight')
+      expect(targets.visible).toBe(true)
+      expect(path.visible).toBe(true)
+      expect(targets.children).toHaveLength(9)
+      expect(visible()).toEqual(['eight-entry-zone'])
+      for (const id of ['hover-zone', 'turn-entry', 'turn-apex', 'turn-exit', 'orbit-poi', 'split-s-reference']) {
+        expect(scene.getReference(id)?.object.visible).toBe(false)
+      }
+      for (const name of ['square-route-targets', 'square-route-path', 'direction-control-targets', 'coordinated-turn-targets', 'coordinated-turn-route', 'landing-target', 'straight-line-targets', 'takeoff-height-target']) {
+        expect(scene.scene.getObjectByName(name)?.visible).toBe(false)
+      }
+      const centerObjects = ['eight-entry', 'eight-crossing', 'eight-finish'].map((id) => scene.getReference(id)!.object)
+      expect(new Set(centerObjects).size).toBe(3)
+      expect(centerObjects.map((marker) => marker.position.toArray())).toEqual([[0, 3, -6], [0, 3, -6], [0, 3, -6]])
+      for (const id of ['eight-crossing', 'eight-right-top', 'eight-finish']) {
+        scene.setFigureEightTarget(id)
+        expect(visible()).toEqual([`${id}-zone`])
+      }
+      scene.setFigureEightTarget(null)
+      expect(visible()).toEqual([])
+      scene.setFigureEightTarget('unknown')
+      expect(visible()).toEqual([])
+      scene.setFigureEightTarget('eight-left-outer')
+      scene.setLessonTarget('square-route')
+      expect(targets.visible).toBe(false)
+      expect(path.visible).toBe(false)
+      expect(scene.scene.getObjectByName('square-route-targets')?.visible).toBe(true)
+      scene.setLessonTarget('coordinated-turn')
+      expect(scene.scene.getObjectByName('coordinated-turn-targets')?.visible).toBe(true)
+      expect(targets.visible).toBe(false)
+      scene.setLessonTarget(null)
+      expect(scene.getReference('turn-entry')?.object.visible).toBe(true)
+      expect(scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM, sizeM }))).toEqual(anchors)
+      expect(scene.drone.position.toArray()).toEqual(dronePosition)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('shares L08 spherical geometry on raised ground and closes both loop guides at their shared center', () => {
+    const defaults = createDefaultDroneConfig()
+    const config = { ...defaults, ground: { ...defaults.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 20, z: -3 } }
+    const before = JSON.stringify(config)
+    const scene = createFlightScene(config)
+    try {
+      const launch = scene.getReference('training-launch')!.positionM
+      const layout = createFigureEightTargets(launch, config.ground.heightM)
+      for (const target of layout) {
+        const reference = scene.getReference(target.id)!
+        expect(reference.positionM).toEqual(target.positionM)
+        expect(reference.object.position.toArray()).toEqual([target.positionM.x, target.positionM.y, target.positionM.z])
+        const diameter = FIGURE_EIGHT_TARGET_RADIUS_M * 2
+        expect(reference.sizeM).toEqual({ x: diameter, y: diameter, z: diameter })
+        const ring = scene.scene.getObjectByName(`${target.id}-outline-0`) as THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>
+        expect(ring.geometry.parameters.innerRadius).toBe(FIGURE_EIGHT_TARGET_RADIUS_M)
+        expect(ring.material.color.getHex()).toBe(target.kind === 'finish' ? 0xb8f36b : target.kind === 'crossing' ? 0xd28bff
+          : target.kind === 'entry' ? 0x8abac4 : target.loop === 1 ? 0xffc978 : 0x45d7f7)
+        const paint = scene.scene.getObjectByName(`${target.id}-ground-paint`)!
+        expect(reference.object.position.y + paint.position.y).toBeCloseTo(5.018)
+        const arrow = scene.scene.getObjectByName(`${target.id}-heading`)!
+        const heading = rotateVectorByQuaternion(arrow.quaternion, { x: 0, y: 1, z: 0 })
+        expect(heading.x).toBeCloseTo(target.headingForward.x)
+        expect(heading.y).toBeCloseTo(target.headingForward.y)
+        expect(heading.z).toBeCloseTo(target.headingForward.z)
+      }
+      expect(scene.getReference('eight-entry')?.positionM).toEqual({ x: 6, y: 8, z: -9 })
+      expect(scene.getReference('eight-left-outer')?.positionM).toEqual({ x: -6, y: 8, z: -9 })
+      expect(scene.getReference('eight-right-outer')?.positionM).toEqual({ x: 18, y: 8, z: -9 })
+      expect(scene.getReference('eight-finish')?.positionM).toEqual(scene.getReference('eight-crossing')?.positionM)
+      for (const [loopIndex, loopTargets] of [layout.slice(0, 5), layout.slice(4)].entries()) {
+        const route = scene.scene.getObjectByName(`figure-eight-${loopIndex === 0 ? 'left' : 'right'}-guide`) as THREE.Line<THREE.BufferGeometry, THREE.LineDashedMaterial>
+        const points = route.geometry.getAttribute('position')
+        expect(points.count).toBe(65)
+        expect(route.material.color.getHex()).toBe(loopIndex === 0 ? 0xffc978 : 0x45d7f7)
+        expect(route.material.opacity).toBeLessThan(0.5)
+        for (let index = 0; index < points.count; index++) expect(points.getY(index)).toBeCloseTo(5.025)
+        for (const [index, target] of loopTargets.entries()) {
+          expect(points.getX(index * 16)).toBeCloseTo(target.positionM.x)
+          expect(points.getZ(index * 16)).toBeCloseTo(target.positionM.z)
+        }
+        expect(points.getX(0)).toBeCloseTo(points.getX(64))
+        expect(points.getZ(0)).toBeCloseTo(points.getZ(64))
+      }
+      expect(JSON.stringify(config)).toBe(before)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('disposes both L08 ground loops and hidden finish geometry with the scene', () => {
+    const scene = createFlightScene()
+    const ring = scene.scene.getObjectByName('eight-finish-outline-0') as THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>
+    const left = scene.scene.getObjectByName('figure-eight-left-guide') as THREE.Line<THREE.BufferGeometry, THREE.LineDashedMaterial>
+    const right = scene.scene.getObjectByName('figure-eight-right-guide') as THREE.Line<THREE.BufferGeometry, THREE.LineDashedMaterial>
+    const dispose = [ring.geometry, ring.material, left.geometry, left.material, right.geometry, right.material].map((value) => vi.spyOn(value, 'dispose'))
+    scene.dispose()
+    for (const spy of dispose) expect(spy).toHaveBeenCalledOnce()
   })
 
 })

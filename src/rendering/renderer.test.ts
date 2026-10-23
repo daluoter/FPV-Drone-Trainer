@@ -181,4 +181,40 @@ describe('FlightRenderer lifecycle and failure contract', () => {
     }
   })
 
+  it('retains the L08 crossing step across raised-ground reconfiguration and keeps colocated goals distinct', () => {
+    const rendererStub = createRendererStub()
+    const canvas = document.createElement('canvas')
+    const renderer = new FlightRenderer(canvas, { rendererFactory: () => rendererStub })
+    try {
+      renderer.setLessonTarget('figure-eight')
+      renderer.setFigureEightTarget('eight-crossing')
+      const previous = renderer.flightScene
+      const disposePrevious = vi.spyOn(previous, 'dispose')
+      renderer.reconfigureScene({ ...DEFAULT_DRONE_CONFIG,
+        ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 20, z: -3 } })
+      const targets = renderer.scene.getObjectByName('figure-eight-targets')!
+      const visible = () => targets.children.filter((marker) => marker.visible).map((marker) => marker.name)
+      expect(targets.visible).toBe(true)
+      expect(visible()).toEqual(['eight-crossing-zone'])
+      expect(renderer.flightScene.getReference('eight-crossing')?.positionM).toEqual({ x: 6, y: 8, z: -9 })
+      expect(renderer.scene.getObjectByName('figure-eight-path')?.visible).toBe(true)
+      expect(renderer.scene.getObjectByName('square-route-targets')?.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('coordinated-turn-targets')?.visible).toBe(false)
+      expect(renderer.flightScene.getReference('turn-entry')?.object.visible).toBe(false)
+      expect(renderer.canvas).toBe(canvas)
+      expect(renderer.renderer).toBe(rendererStub)
+      expect(disposePrevious).toHaveBeenCalledOnce()
+      renderer.setFigureEightTarget('eight-finish')
+      expect(visible()).toEqual(['eight-finish-zone'])
+      expect(renderer.flightScene.getReference('eight-finish')?.positionM)
+        .toEqual(renderer.flightScene.getReference('eight-crossing')?.positionM)
+      renderer.setFigureEightTarget(null)
+      expect(visible()).toEqual([])
+      renderer.setFigureEightTarget('unknown')
+      expect(visible()).toEqual([])
+    } finally {
+      renderer.dispose()
+    }
+  })
+
 })

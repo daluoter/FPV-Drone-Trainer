@@ -21,6 +21,7 @@ import { createTeachingDemonstration, teachingCueAt, teachingTargetAt, type Teac
 import { DIRECTION_CONTROL_TARGET_IDS } from '../training/directionControl'
 import { COORDINATED_TURN_TARGET_IDS } from '../training/coordinatedTurn'
 import { SQUARE_ROUTE_TARGET_IDS } from '../training/squareRoute'
+import { FIGURE_EIGHT_TARGET_IDS } from '../training/figureEight'
 import type { TrainingMachineState, TrainingSample, TrainingSceneReference, TrainingSetupRequest } from '../training/types'
 import { copyTuningSettings, flightSimulationConfigFromTuning, type TuningSettings } from '../tuning'
 import { REPLAY_SPEEDS, type ReplaySpeed } from '../replay'
@@ -320,7 +321,12 @@ export default function FreeFlight({
       ? demonstration ? teachingTargetAt(demonstration, telemetry.replay.currentTimeSeconds) : null
       : Number.isInteger(squareIndex) && squareIndex >= 0 ? SQUARE_ROUTE_TARGET_IDS[squareIndex] ?? null : null
     rendererRef.current?.setSquareTarget?.(squareTargetId)
-  }, [trainingState?.lessonId, trainingState?.lastEvaluation?.metrics?.directionTargetIndex, trainingState?.lastEvaluation?.metrics?.turnTargetIndex, trainingState?.lastEvaluation?.metrics?.squareTargetIndex, rendererRetryKey, telemetry?.replay.active, telemetry?.replay.currentTimeSeconds, demonstration])
+    const eightIndex = trainingState?.lastEvaluation?.metrics?.eightTargetIndex ?? 0
+    const eightTargetId = lessonId !== 'figure-eight' ? null : telemetry?.replay.active
+      ? demonstration ? teachingTargetAt(demonstration, telemetry.replay.currentTimeSeconds) : null
+      : Number.isInteger(eightIndex) && eightIndex >= 0 ? FIGURE_EIGHT_TARGET_IDS[eightIndex] ?? null : null
+    rendererRef.current?.setFigureEightTarget?.(eightTargetId)
+  }, [trainingState?.lessonId, trainingState?.lastEvaluation?.metrics?.directionTargetIndex, trainingState?.lastEvaluation?.metrics?.turnTargetIndex, trainingState?.lastEvaluation?.metrics?.squareTargetIndex, trainingState?.lastEvaluation?.metrics?.eightTargetIndex, rendererRetryKey, telemetry?.replay.active, telemetry?.replay.currentTimeSeconds, demonstration])
 
   useEffect(() => {
     rendererRef.current?.setTrainingPath(trainingPath.map((sample) => sample.state.positionM))
@@ -508,7 +514,7 @@ export default function FreeFlight({
 
       <div className="school-demo-bar" aria-label="L00 四軸與起飛示範">
         <strong>L00 看懂四軸</strong>
-        {([['roll', '橫滾 Roll'], ['pitch', '俯仰 Pitch'], ['yaw', '偏航 Yaw'], ['takeoff', 'L01 起飛示範'], ['straight-line', 'L03 直線示範'], ['landing', 'L04 降落示範'], ['direction-control', 'L05 方向示範'], ['coordinated-turn', 'L06 轉彎示範'], ['square-route', 'L07 方形示範']] as const).map(([kind, label]) => <button className="lab-button lab-button-small" type="button" key={kind} disabled={trainingSettingsLocked || Boolean(telemetry?.armed) || renderingState !== 'ready'} onClick={() => startDemonstration(kind)}>{label}</button>)}
+        {([['roll', '橫滾 Roll'], ['pitch', '俯仰 Pitch'], ['yaw', '偏航 Yaw'], ['takeoff', 'L01 起飛示範'], ['straight-line', 'L03 直線示範'], ['landing', 'L04 降落示範'], ['direction-control', 'L05 方向示範'], ['coordinated-turn', 'L06 轉彎示範'], ['square-route', 'L07 方形示範'], ['figure-eight', 'L08 八字示範']] as const).map(([kind, label]) => <button className="lab-button lab-button-small" type="button" key={kind} disabled={trainingSettingsLocked || Boolean(telemetry?.armed) || renderingState !== 'ready'} onClick={() => startDemonstration(kind)}>{label}</button>)}
         <span>左桿：油門／偏航 · 右桿：橫滾／俯仰</span>
       </div>
       {fullscreenError && <p role="status">{fullscreenError}</p>}
@@ -554,7 +560,7 @@ export default function FreeFlight({
             {renderingState === 'ready' && telemetry?.replay.active && <div className="flight-safe-overlay">{demonstration ? demonstration.title : '飛行回放'} · 真人飛行已停止</div>}
             {trainingState?.phase === 'ACTIVE' && <div tabIndex={0} aria-label="目前練習提示" className={`school-viewport-hint${recovery ? ' is-recovering' : ''}`}>{recovery
               ? <><strong>重練原因（當時數值）：{recovery.message}</strong><span>{recovery.hint}</span></>
-              : currentObjective && trainingState.lastEvaluation?.recovery !== 'restart' ? <><strong>{currentObjective.title}</strong><span>{trainingState.lessonId === 'direction-control' || trainingState.lessonId === 'coordinated-turn' || trainingState.lessonId === 'square-route' || !trainingState.lastEvaluation?.hint ? currentObjective.detail : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</span></> : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>}
+              : currentObjective && trainingState.lastEvaluation?.recovery !== 'restart' ? <><strong>{currentObjective.title}</strong><span>{trainingState.lessonId === 'direction-control' || trainingState.lessonId === 'coordinated-turn' || trainingState.lessonId === 'square-route' || trainingState.lessonId === 'figure-eight' || !trainingState.lastEvaluation?.hint ? currentObjective.detail : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</span></> : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>}
           </div>
           <div className="flight-controls" aria-label="Flight controls">
             <div className="flight-control-group">

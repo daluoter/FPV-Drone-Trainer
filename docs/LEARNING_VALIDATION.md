@@ -239,3 +239,28 @@
 瀏覽器產物：`/tmp/fpv-browser-smoke/run-5fgk0vcr/`，含 report、console、preview log 及逐流程截圖。已檢視 `l07-demonstration-fpv.png`、`l07-demonstration-chase.png`、`l07-demonstration-free.png` 與 `square-route-ground-start.png`：終點為綠色、回放高度 3.0 m／相對起點 X 約 +0.4 m／Z 約 0.0 m 正常；地面等待顯示 0.0 m、藍色第一邊目標、Arm 與正確版本。瀏覽器測試亦涵蓋三種視窗 HUD、全螢幕及鍵盤實際爬升後墜毀。這些是軟體畫面核對，不取代使用者操控驗收。
 
 使用者試飛清單見 [L07_SQUARE_ROUTE.md](L07_SQUARE_ROUTE.md)。L07 待使用者人工驗收；L03～L06 原有人工核准保留。本次不包含 L08 實作、UAT／正式 Pages 發布、硬體或飛手校準。
+
+## L07 使用者確認與 L08 八字航線（2026-10-23）
+
+使用者確認「L07 人工驗證通過」，並指示繼續開發。記錄為對應版本 `2026.10.23.2`／`36ad8ff` 交付脈絡的課程功能驗收；未另提供其本機 SHA、輸入設備或瀏覽器，共通硬體／飛手校準仍獨立追蹤。
+
+本批基準 `36ad8ff`，顯示版本 **2026.10.23.3**，交付 L08（`figure-eight`）：
+
+- 實際地面準備、自行起飛，接中央入口、左圈三點、中央換向點、右圈三點及中央空中終點，共 11 步。三個中央目標位於起飛點前方 6 m，使用獨立 ID 與嚴格先後順序，不能提早取得終點。
+- 目標中心為地面上方 3 m、球形半徑 1.8 m、邊緣容差 0.1 m、機頭朝向容差 70°；連續線段快速穿越也計入。不要求精準速度、停留、額外轉角數值或降落。漏點及未墜毀接地保留進度；練習不限時、挑戰 300 秒。既有撞擊／翻覆物理未變更。
+- 場景、判定與示範共用九個目標；左金／右藍雙圈地面指引、紫色中央換向及綠色終點，每次只顯示目前目標。FPV 方位依機身計算、最多兩個方向，固定 XYZ 不跟著機頭旋轉。將前段／回程名稱統一，避免把路線上下位置誤讀為高度目標。
+- 實際 RC／物理示範在新手、一般及高地面／高空自由飛行起點三種設定下均通過全部 11 步；量測位置圍繞左右圈心的相反方向繞行，沒有以原地偏航代替移動。錄影約 57.47 秒、3,449 筆、11 段字幕、零淘汰；上限 120 秒／7,500 筆，字幕與目標對齊保留影格。終點相對 X／Z 約 `+0.316／-5.754 m`，地面上方約 `3.001 m`。
+- 使用規則 5 的新課程 ID，L06／L07 維持規則 5、L03～L05 維持規則 4；測試確認新 L08 從空進度開始、保存／重載後舊完成紀錄維持。L07 下一個可用課程為 L08。
+- App 以實際物理錄影 pose 通過 mock runtime 與真實 session／store，確認結果只保存一次、canvas 保留、選課／次數重載及其他課程隔離。FreeFlight 使用真實 runtime／scene 與 GPU stub 驗證 live／示範目標切換、暫停與 seek；示範資料不餵回真人評分。終止結果清楚說明重試會清空本次步驟，與 ACTIVE 中保留進度的續練提示分開。
+
+| 最終檢查 | 結果 |
+| --- | --- |
+| `npm test -- --maxWorkers=2` | PASS：52 檔、473 項，27.52 秒。 |
+| `npm run typecheck` | PASS。 |
+| `npm run lint` | PASS，零警告規則。 |
+| `npm run build -- --base=/FPV-Drone-Trainer/` | PASS，含嚴格 TypeScript；entry 1,102.71 kB／gzip 304.16 kB，既知 >500 kB 建議仍存在。 |
+| 正式產物 Chromium smoke | PASS：23 項，Chromium 154.0.8037.57；頁面版本 2026.10.23.3，無 page／console error／資源錯誤。包含 L08 原生 Home／End、暫停位置固定、中央終點、選課重載與進度隔離；L03～L08 地面起點均正常。 |
+
+瀏覽器產物：`/tmp/fpv-browser-smoke/run-k7b4xm55/`，含 report、console、preview log 及逐流程截圖。已檢視 `l08-demonstration-fpv.png`、`l08-demonstration-chase.png`、`l08-demonstration-free.png` 與 `figure-eight-ground-start.png`：綠色中央終點、回放高度 3.0 m、相對 X 約 +0.3 m／Z 約 -5.8 m 正常；地面等待顯示 0.0 m、中央入口、Arm 及正確版本。亦通過三種視窗 HUD、全螢幕與鍵盤實際爬升後墜毀回歸。這些是軟體畫面核對，不取代使用者操控驗收。
+
+使用者試飛清單見 [L08_FIGURE_EIGHT.md](L08_FIGURE_EIGHT.md)。L08 待使用者人工驗收；L03～L07 原有人工核准保留。本次不包含必要障礙碰撞／L09 實作、UAT／正式 Pages 發布、硬體或飛手校準。

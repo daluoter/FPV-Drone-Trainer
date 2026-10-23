@@ -1,4 +1,4 @@
-import { coordinatedTurnTargetLabel, directionControlTargetLabel, squareRouteTargetLabel, trainingHint, trainingObjective } from './feedback'
+import { coordinatedTurnTargetLabel, directionControlTargetLabel, figureEightTargetLabel, squareRouteTargetLabel, trainingHint, trainingObjective } from './feedback'
 import { LANDING_LIFTOFF_HEIGHT_M, LANDING_ZONE_RADIUS_M } from './landing'
 import { TAKEOFF_SETTLED_DWELL_SECONDS } from './takeoff'
 import type { TrainingResult } from './types'
@@ -60,6 +60,92 @@ function isLegacyRouteResult(result: TrainingResult): boolean {
   const version = result.attemptContext?.rulesVersion
   return version !== undefined && (['straight-line', 'landing'].includes(result.lessonId) && version < 4
     || result.lessonId === 'coordinated-turn' && version < 5)
+}
+
+function figureEightResultFeedback(result: TrainingResult, scope: string): TrainingResultFeedback | null {
+  if (result.lessonId !== 'figure-eight') return null
+  const restart = '本次練習已結束；按「再練一次」會清空本次步驟，從地面重新開始。'
+  const timedOut = /逾時|timed out|timeout/iu.test(result.message ?? '')
+  if (result.outcome !== 'SUCCESS') {
+    const message = result.message ?? ''
+    if (/墜毀|撞擊|crash|impact/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: '本次發生墜毀，左右八字航線尚未完成。',
+      nextPractice: `${restart}先按 Reset 重設，以小量傾斜與轉向沿目標飛行，留意高度。`,
+      scopeNote: scope,
+    }
+    if (/解除解鎖|失焦|斷線|disarm|focus|disconnect/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: '本次因解除解鎖、失去焦點或連線中斷而停止，不能據此判定八字航線的操控表現。',
+      nextPractice: `${restart}確認網頁與控制器就緒，倒數結束後再明確 Arm。`,
+      scopeNote: scope,
+    }
+    if (/無效|資料中斷|時間倒退|位置跳躍|模擬被重設|缺少有效|支撐高度不一致|invalid|non-finite|telemetry.*gap|impossible.*jump/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: '本次飛行資料無效或中斷，無法以這段資料判定八字航線表現。',
+      nextPractice: `${restart}保持網頁在前景，依序完成左環、中央換向與右環。`,
+      scopeNote: scope,
+    }
+  }
+  if (!Number.isFinite(result.sampleCount) || result.sampleCount <= 0) return {
+    observedStrength: null,
+    observedGap: `${timedOut ? '本次挑戰逾時；' : ''}本次沒有有效的已解鎖飛行樣本，無法判定操控表現。`,
+    nextPractice: `${restart}確認畫面與控制器就緒，倒數完成後明確 Arm。`,
+    scopeNote: scope,
+  }
+  if (result.outcome === 'SUCCESS') return {
+    observedStrength: '本次已依序完成左環、中央換向與右環的九個目標，並回到中央空中終點。',
+    observedGap: null,
+    nextPractice: '以相同條件再練一次，讓左轉、中央換向與右轉更連貫；最後飛入中央空中終點即可，不需降落或停穩。',
+    scopeNote: scope,
+  }
+  const metrics = result.metrics
+  const phase = Number.isInteger(metrics.eightPhase) && metrics.eightPhase >= 0 && metrics.eightPhase <= 11
+    ? metrics.eightPhase : null
+  const passed = Number.isInteger(metrics.eightTargetsCompleted) && metrics.eightTargetsCompleted >= 0 && metrics.eightTargetsCompleted <= 9
+    ? metrics.eightTargetsCompleted : null
+  const loops = Number.isInteger(metrics.eightLoopsCompleted) && metrics.eightLoopsCompleted >= 0 && metrics.eightLoopsCompleted <= 2
+    ? metrics.eightLoopsCompleted : passed !== null ? passed >= 9 ? 2 : passed >= 5 ? 1 : 0 : null
+  const index = Number.isInteger(metrics.eightTargetIndex) && metrics.eightTargetIndex >= 0 && metrics.eightTargetIndex < 9
+    ? metrics.eightTargetIndex : phase !== null && phase >= 2 && phase <= 10 ? phase - 2 : null
+  const strength = passed !== null && passed > 0
+    ? `本次已依序完成 ${passed} / 9 個八字目標${loops !== null && loops > 0 ? `，完成 ${loops} / 2 環${loops === 1 ? '（左環已完成）' : ''}` : ''}。`
+    : phase !== null && phase >= 2 ? '本次已觀察到從地面自行起飛。' : null
+  const ended = timedOut ? '本次挑戰逾時，' : '本次'
+  if (phase !== null && phase <= 1) return {
+    observedStrength: strength,
+    observedGap: `${ended}尚未完成從地面自行起飛。`,
+    nextPractice: `${restart}自行加油門離地，再前往前方中央入口；不需要先懸停。`,
+    scopeNote: scope,
+  }
+  if (index !== null) {
+    let cause = ''
+    if (metrics.groundTouching > 0.5 || (Number.isFinite(metrics.groundClearanceM) && metrics.groundClearanceM < 0.15)) {
+      cause = '結束時尚未在空中，剩餘空中目標未完成。'
+    } else if (Number.isFinite(metrics.headingErrorDegrees) && metrics.headingErrorDegrees > 70) {
+      cause = `結束時機頭偏離箭頭方向 ${metrics.headingErrorDegrees.toFixed(0)}°，需在 70° 內。`
+    } else if (Number.isFinite(metrics.targetDistanceM)) {
+      cause = `結束時距該目標 ${metrics.targetDistanceM.toFixed(1)} m。`
+    }
+    const practice = Number.isFinite(metrics.headingErrorDegrees) && metrics.headingErrorDegrees > 70
+      ? '下次接近該目標時，用小量偏航配合傾斜，讓機頭大致跟隨航線箭頭。'
+      : index === 4 ? '下次回到中央後，看向右環的下一個目標，把左轉切換成右轉；不需要原地停留。'
+        : index === 8 ? '最後飛入前方中央的空中終點即可；位置是起飛點前方 6 m，不是原起飛點，不需降落或停穩。'
+          : index === 0 ? '先前往前方中央入口，再沿左環目標依序飛行；不能直接取得同位置的終點。'
+            : `下次沿${index < 4 ? '左' : '右'}環，以小量 Roll 傾斜配合 Yaw 轉頭，讓實際航線依序通過目標。`
+    return {
+      observedStrength: strength,
+      observedGap: `${ended}尚未完成「${figureEightTargetLabel(index)}」${passed !== null ? `，尚餘 ${9 - passed} 個八字目標` : ''}。${cause}`,
+      nextPractice: `${restart}${practice}`,
+      scopeNote: scope,
+    }
+  }
+  return {
+    observedStrength: null,
+    observedGap: `${ended}八字航線尚未完成；分段資料不足，無法判定卡在哪個目標。`,
+    nextPractice: `${restart}依亮起目標完成左環、中央換向與右環，最後飛入中央空中終點；不要求降落或停穩。`,
+    scopeNote: scope,
+  }
 }
 
 function squareRouteResultFeedback(result: TrainingResult, scope: string): TrainingResultFeedback | null {
@@ -379,6 +465,8 @@ function phaseProgress(result: TrainingResult): { observedGap: string; nextPract
 /** Final-sample observations and checkpoint facts, never inferred causes or a claim about the whole flight. */
 export function summarizeTrainingResult(result: TrainingResult): TrainingResultFeedback {
   const scope = scopeNote(result)
+  const eight = figureEightResultFeedback(result, scope)
+  if (eight) return eight
   const square = squareRouteResultFeedback(result, scope)
   if (square) return square
   const turn = coordinatedTurnResultFeedback(result, scope)

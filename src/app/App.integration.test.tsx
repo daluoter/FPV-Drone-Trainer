@@ -292,7 +292,8 @@ describe('integrated training/runtime UI boundaries', () => {
   it.each([
     { lessonId: 'direction-control', code: 'L05', steps: 9, nextCode: 'L06' },
     { lessonId: 'coordinated-turn', code: 'L06', steps: 8, nextCode: 'L07' },
-    { lessonId: 'square-route', code: 'L07', steps: 10, nextCode: 'L13' },
+    { lessonId: 'square-route', code: 'L07', steps: 10, nextCode: 'L08' },
+    { lessonId: 'figure-eight', code: 'L08', steps: 11, nextCode: 'L13' },
   ] as const)('records an ordered $code result once and restores its current-rule progress after reload', ({ lessonId, steps, nextCode }) => {
     const { unmount } = render(<App />)
     const training = trainingSection()

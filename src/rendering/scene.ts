@@ -8,6 +8,7 @@ import { LANDING_ZONE_RADIUS_M } from '../training/landing'
 import { createDirectionControlTargets, DIRECTION_CONTROL_TARGET_RADIUS_M } from '../training/directionControl'
 import { createCoordinatedTurnTargets, COORDINATED_TURN_TARGET_RADIUS_M } from '../training/coordinatedTurn'
 import { createSquareRouteTargets, SQUARE_ROUTE_TARGET_RADIUS_M } from '../training/squareRoute'
+import { createFigureEightTargets, FIGURE_EIGHT_TARGET_RADIUS_M } from '../training/figureEight'
 import type { Vector3 } from '../math/vector'
 import type { ReplayGhostState } from '../replay'
 
@@ -45,6 +46,8 @@ export interface FlightScene {
   setTurnTarget(targetId: string | null): void
   /** Select a single L07 guide; null hides the active square-route target. */
   setSquareTarget(targetId: string | null): void
+  /** Select one L08 guide, including the distinct visits to the shared center. */
+  setFigureEightTarget(targetId: string | null): void
   /** Presentation-only bounded path trace; evaluators remain renderer-independent. */
   setTrainingPath(path: readonly Vector3[]): void
   setReplayPath(path: readonly Vector3[]): void
@@ -579,9 +582,74 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   squarePath.add(squareGuide)
   scene.add(squarePath)
 
+  const figureEightTargets = new THREE.Group()
+  figureEightTargets.name = 'figure-eight-targets'
+  figureEightTargets.visible = false
+  const figureEightReferences: FlightSceneReference[] = []
+  const figureEightLayout = createFigureEightTargets(field.launch, config.ground.heightM)
+  for (const [targetIndex, target] of figureEightLayout.entries()) {
+    const marker = new THREE.Group()
+    marker.name = `${target.id}-zone`
+    marker.position.set(target.positionM.x, target.positionM.y, target.positionM.z)
+    marker.visible = targetIndex === 0
+    const color = target.kind === 'finish' ? 0xb8f36b : target.kind === 'crossing' ? 0xd28bff
+      : target.kind === 'entry' ? 0x8abac4 : target.loop === 1 ? 0xffc978 : 0x45d7f7
+    for (const [index, rotation] of [[0, 0], [Math.PI / 2, 0], [0, Math.PI / 2]].entries()) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(FIGURE_EIGHT_TARGET_RADIUS_M, FIGURE_EIGHT_TARGET_RADIUS_M + 0.045, 64),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }),
+      )
+      ring.name = `${target.id}-outline-${index}`
+      ring.rotation.set(rotation[0], rotation[1], 0)
+      marker.add(ring)
+    }
+    const groundOffset = config.ground.heightM - target.positionM.y
+    const paint = new THREE.Mesh(
+      new THREE.RingGeometry(0.04, FIGURE_EIGHT_TARGET_RADIUS_M, 48),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }),
+    )
+    paint.name = `${target.id}-ground-paint`
+    paint.rotation.x = -Math.PI / 2
+    paint.position.y = groundOffset + 0.018
+    const beacon = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.035, 0.035, -groundOffset, 8, 1, true),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false }),
+    )
+    beacon.name = `${target.id}-beacon`
+    beacon.position.y = groundOffset / 2
+    const heading = new THREE.ArrowHelper(
+      new THREE.Vector3(target.headingForward.x, target.headingForward.y, target.headingForward.z).normalize(),
+      new THREE.Vector3(), 1.4, color, 0.4, 0.26,
+    )
+    heading.name = `${target.id}-heading`
+    marker.add(paint, beacon, heading)
+    figureEightTargets.add(marker)
+    const diameter = FIGURE_EIGHT_TARGET_RADIUS_M * 2
+    figureEightReferences.push({ id: target.id, kind: 'zone', object: marker, positionM: { ...target.positionM }, sizeM: { x: diameter, y: diameter, z: diameter } })
+  }
+  scene.add(figureEightTargets)
+
+  // Each loop returns to the shared center. The faint route is presentation
+  // guidance; completing it still depends on the ordered airborne targets.
+  const figureEightPath = new THREE.Group()
+  figureEightPath.name = 'figure-eight-path'
+  figureEightPath.visible = false
+  for (const [loopIndex, loopTargets] of [figureEightLayout.slice(0, 5), figureEightLayout.slice(4)].entries()) {
+    const points = loopTargets.map((target) => new THREE.Vector3(target.positionM.x, config.ground.heightM + 0.025, target.positionM.z))
+    const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal')
+    const guide = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(curve.getPoints(64)),
+      new THREE.LineDashedMaterial({ color: loopIndex === 0 ? 0xffc978 : 0x45d7f7, transparent: true, opacity: 0.36, dashSize: 0.7, gapSize: 0.4, depthWrite: false }),
+    )
+    guide.name = `figure-eight-${loopIndex === 0 ? 'left' : 'right'}-guide`
+    guide.computeLineDistances()
+    figureEightPath.add(guide)
+  }
+  scene.add(figureEightPath)
+
   const landingSurface: FlightSceneReference = { id: 'landing-surface', kind: 'zone', object: landingTarget, positionM: { ...field.landing }, sizeM: { x: LANDING_ZONE_RADIUS_M * 2, y: 0, z: LANDING_ZONE_RADIUS_M * 2 } }
   const launchReference: FlightSceneReference = { id: 'training-launch', kind: 'pad', object: takeoffPad, positionM: { ...field.launch } }
-  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences]
+  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences]
   const referenceById = new Map(sceneReferences.map((reference) => [reference.id, reference]))
 
   const drone = createQuadVisual()
@@ -657,7 +725,9 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     turnRoute.visible = lessonId === 'coordinated-turn'
     squareTargets.visible = lessonId === 'square-route'
     squarePath.visible = lessonId === 'square-route'
-    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route'].includes(lessonId ?? '')
+    figureEightTargets.visible = lessonId === 'figure-eight'
+    figureEightPath.visible = lessonId === 'figure-eight'
+    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight'].includes(lessonId ?? '')
     for (const reference of referenceSet.contract) {
       reference.object.visible = !beginner
     }
@@ -673,6 +743,10 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
 
   const setSquareTarget = (targetId: string | null): void => {
     for (const reference of squareReferences) reference.object.visible = reference.id === targetId
+  }
+
+  const setFigureEightTarget = (targetId: string | null): void => {
+    for (const reference of figureEightReferences) reference.object.visible = reference.id === targetId
   }
 
   const setPath = (line: THREE.Line, path: readonly Vector3[], yOffset: number): void => {
@@ -718,6 +792,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     setDirectionTarget,
     setTurnTarget,
     setSquareTarget,
+    setFigureEightTarget,
     setTrainingPath,
     setReplayPath,
     dispose: () => disposeFlightScene(scene),

@@ -61,6 +61,7 @@ export class FlightRenderer {
   private directionTarget: string | null = null
   private turnTarget: string | null = null
   private squareTarget: string | null = null
+  private figureEightTarget: string | null = null
   public get flightScene(): FlightScene { return this.currentFlightScene }
   public readonly cameraRig: FlightCameraRig
   public readonly renderer: THREE.WebGLRenderer
@@ -145,6 +146,13 @@ export class FlightRenderer {
     this.flightScene.setSquareTarget(targetId)
   }
 
+  /** Advance the presentation-only L08 route without altering live flight. */
+  public setFigureEightTarget(targetId: string | null): void {
+    if (this.disposed) return
+    this.figureEightTarget = targetId
+    this.flightScene.setFigureEightTarget(targetId)
+  }
+
   /** Rebuild anchors only after the owner has explicitly reset and disarmed. */
   public reconfigureScene(config: DroneConfig): void {
     if (this.disposed) return
@@ -154,6 +162,7 @@ export class FlightRenderer {
     this.currentFlightScene.setDirectionTarget(this.directionTarget)
     this.currentFlightScene.setTurnTarget(this.turnTarget)
     this.currentFlightScene.setSquareTarget(this.squareTarget)
+    this.currentFlightScene.setFigureEightTarget(this.figureEightTarget)
     previous.dispose()
   }
 

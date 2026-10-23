@@ -250,6 +250,21 @@ describe('training progress persistence', () => {
       expect(afterL07.lessons[lessonId]).toMatchObject({ completed: true, attempts: 1 })
     }
     expect(storage.getItem(trainingAttemptContextKey(baseline))).toBe(originalBaseline)
+
+    // The new L08 lesson starts empty and preserves both approved route courses.
+    expect(afterL07.lessons['figure-eight']).toMatchObject({ completed: false, attempts: 0 })
+    expect(store.recordResult(result({
+      lessonId: 'figure-eight', sessionId: 'figure-eight:new', attemptContext: revised,
+      completedCheckpoints: 11, totalCheckpoints: 11, metrics: { eightTargetsCompleted: 9, eightLoopsCompleted: 2 },
+    })).saved).toBe(true)
+    const afterL08 = new TrainingProgressStore(storage).loadCurrent(revised).progress
+    expect(afterL08.lessons['figure-eight']).toMatchObject({ completed: true, attempts: 1 })
+    expect(afterL08.lessons['square-route']).toMatchObject({ completed: true, attempts: 1, best: { sessionId: 'square-route:new' } })
+    expect(afterL08.lessons['coordinated-turn']).toEqual(afterL07.lessons['coordinated-turn'])
+    for (const lessonId of ['straight-line', 'landing', 'direction-control']) {
+      expect(afterL08.lessons[lessonId]).toEqual(afterL07.lessons[lessonId])
+    }
+    expect(storage.getItem(trainingAttemptContextKey(baseline))).toBe(originalBaseline)
   })
 
   it('keeps both current rule scopes isolated by mode, preset, input and settings', () => {

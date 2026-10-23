@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatTrainingMetrics, squareRouteTargetLabel, trainingHint, trainingObjective, trainingRouteGuide } from './feedback'
+import { figureEightTargetLabel, formatTrainingMetrics, squareRouteTargetLabel, trainingHint, trainingObjective, trainingRouteGuide } from './feedback'
 
 describe('beginner-facing training feedback', () => {
   it('prioritizes lesson facts with Chinese names and units, without guessing error direction', () => {
@@ -370,4 +370,114 @@ describe('beginner-facing training feedback', () => {
     expect(hint).toContain(expected)
     expect(hint).not.toContain('第一段亮起的直線目標')
   })
+
+  it('introduces the ordered left loop, central switch and right loop from supported ground', () => {
+    const guide = trainingRouteGuide('figure-eight')
+    expect(guide).toMatch(/地面起飛.*中央入口.*左圈.*中央換向點.*右圈.*中央空中終點/)
+    expect(guide).toContain('起飛點前方 6 m')
+    expect(guide).toContain('相同位置要依順序經過')
+    expect(guide).toContain('不要求精準速度、停留或降落')
+    expect(guide).toContain('挑戰 300 秒')
+    expect(trainingObjective('figure-eight', null)?.title).toBe('1／11 起飛區地面準備')
+    expect(trainingObjective('figure-eight', { metrics: { eightPhase: 1 } })?.title).toBe('2／11 自行起飛')
+    expect(trainingObjective('figure-eight', { metrics: { eightPhase: 1 } })?.detail).toContain('不需要先懸停')
+    expect(trainingHint('figure-eight', null)).toContain('中央換向點接右圈')
+  })
+
+  it('distinguishes the three visits to the shared center without calling an entry completion', () => {
+    const entry = trainingObjective('figure-eight', { metrics: { eightPhase: 2, eightTargetIndex: 0 } })
+    expect(entry?.title).toBe('3／11 中央入口')
+    expect(entry?.detail).toContain('仍須依序飛完左右兩圈')
+    const crossing = trainingObjective('figure-eight', { metrics: { eightPhase: 6, eightTargetIndex: 4 } })
+    expect(crossing?.title).toBe('7／11 中央換向點')
+    expect(crossing?.detail).toContain('先飛過中央換向點完成左圈')
+    expect(crossing?.detail).toContain('下一個目標亮起後改向右轉')
+    expect(crossing?.detail).not.toContain('現在可以 Disarm')
+    const finish = trainingObjective('figure-eight', { metrics: { eightPhase: 10, eightTargetIndex: 8 } })
+    expect(finish?.title).toBe('11／11 中央終點')
+    expect(finish?.detail).toContain('仍需在空中，不必降落或停穩')
+    expect(finish?.detail).toContain('與地面起飛區不同')
+    expect(finish?.detail).not.toContain('現在可以 Disarm')
+    expect(figureEightTargetLabel(-1)).toBe('目前八字航線目標')
+  })
+
+  it('shows left and right arc coaching with only two body-relative offsets', () => {
+    const metrics = { eightPhase: 3, eightTargetIndex: 1, eightLoop: 1,
+      targetRightM: -4, targetForwardM: 2, targetUpM: 0.5, headingErrorDegrees: 10,
+      positionXM: 400, positionZM: -600 }
+    const left = trainingObjective('figure-eight', { metrics })
+    expect(left?.title).toBe('4／11 左圈前段')
+    expect(left?.detail).toContain('目標在左方 4.0 m、前方 2.0 m')
+    expect(left?.detail).not.toContain('上方 0.5 m')
+    expect(left?.detail).not.toMatch(/400|600/)
+    expect(left?.detail).toContain('Roll 向左傾斜')
+    expect(left?.detail).toContain('XYZ 不會隨機頭旋轉')
+    const right = trainingObjective('figure-eight', { metrics: { ...metrics, eightPhase: 7, eightTargetIndex: 5, eightLoop: 2 } })
+    expect(right?.title).toBe('8／11 右圈前段')
+    expect(right?.detail).toContain('Roll 向右傾斜')
+    expect(right?.detail).toContain('已完成的步驟會保留')
+  })
+
+  it('places an observed L08 heading blocker before arc movement and keeps grounded retries local', () => {
+    const metrics = { eightPhase: 8, eightTargetIndex: 6, eightLoop: 2,
+      headingErrorDegrees: 112, targetDistanceM: 0.6, eightLoopsCompleted: 1 }
+    const heading = trainingObjective('figure-eight', { metrics })
+    expect(heading?.title).toBe('9／11 右圈外側')
+    expect(heading?.detail).toContain('偏離本步箭頭方向 112°，需在 70° 內')
+    expect(heading?.detail).not.toContain('Roll 向右傾斜')
+    expect(formatTrainingMetrics(metrics, 'figure-eight').map(({ key }) => key))
+      .toEqual(['headingErrorDegrees', 'targetDistanceM', 'eightLoopsCompleted'])
+    const grounded = trainingObjective('figure-eight', { metrics: { ...metrics, groundTouching: 1, groundClearanceM: 0 } })
+    expect(grounded?.detail).toContain('目前位置再次自行起飛')
+    expect(grounded?.detail).toContain('已完成的步驟會保留')
+    expect(grounded?.detail).toContain('不需要回原起飛點或中央入口')
+    expect(grounded?.detail).not.toContain('112°')
+  })
+
+  it('formats the actual two-loop progress and hides non-finite or internal L08 facts', () => {
+    expect(formatTrainingMetrics({ eightPhase: 8, eightTargetsCompleted: 6, eightLoopsCompleted: 1,
+      targetDistanceM: 4.2, headingErrorDegrees: 10, turnChangeDegrees: 0, contiguousDwellSeconds: 0 }, 'figure-eight'))
+      .toEqual([
+        { key: 'eightTargetsCompleted', label: '已完成八字目標', value: '6 / 9' },
+        { key: 'eightLoopsCompleted', label: '已完成八字圈段', value: '1 / 2' },
+        { key: 'targetDistanceM', label: '距目前目標', value: '4.20 m' },
+      ])
+    expect(formatTrainingMetrics({ eightPhase: 1, groundClearanceM: 0.02, altitudeM: 0.1, eightTargetsCompleted: 0 }, 'figure-eight').map(({ key }) => key))
+      .toEqual(['groundClearanceM', 'altitudeM', 'eightTargetsCompleted'])
+    const missing = trainingObjective('figure-eight', { metrics: { eightPhase: 4,
+      targetRightM: Number.NaN, targetForwardM: Infinity, targetUpM: Number.NaN, headingErrorDegrees: Number.NaN } })
+    expect(missing?.detail).not.toMatch(/NaN|Infinity/)
+    expect(missing?.detail).toContain('方向以目前機頭為準')
+  })
+
+  it('marks L08 complete only at the terminal stage and avoids a landing or mastery claim', () => {
+    const done = trainingObjective('figure-eight', { metrics: { eightPhase: 11, eightTargetsCompleted: 9, eightLoopsCompleted: 2 } })
+    expect(done?.title).toBe('11／11 八字航線已完成')
+    expect(done?.detail).toContain('左圈、中央換向與右圈')
+    expect(done?.detail).toContain('中央空中終點')
+    expect(done?.detail).toContain('不必降落或停留，現在可以 Disarm')
+    expect(done?.detail).not.toContain('熟練')
+  })
+
+  it.each([
+    ['Ground impact latched a crash; reset required.', '發生墜毀'],
+    ['Flight disarmed after focus was lost.', '解除解鎖、失去焦點'],
+    ['八字航線停止：缺少有效的地面接觸資料。', '飛行資料無效或中斷'],
+    ['八字航線停止：資料中斷、時間倒退或模擬被重設。', '飛行資料無效或中斷'],
+  ])('keeps the explicit L08 stop cause before absent stage facts: %s', (message, expected) => {
+    const hint = trainingHint('figure-eight', { status: 'failure', message, metrics: {} })
+    expect(hint).toContain(expected)
+    expect(hint).not.toContain('先飛向前方中央入口')
+  })
+
+  it('distinguishes a terminated L08 timeout from active progress-preserving ground recovery', () => {
+    const metrics = { eightPhase: 7, eightTargetIndex: 5, groundTouching: 1, groundClearanceM: 0 }
+    expect(trainingHint('figure-eight', { status: 'continue', metrics })).toContain('已完成的步驟會保留')
+    const stopped = trainingHint('figure-eight', { status: 'failure', metrics, message: '八字航線挑戰逾時：尚未完成左右兩圈。' })
+    expect(stopped).toContain('挑戰逾時')
+    expect(stopped).toContain('再練一次')
+    expect(stopped).toContain('清空本次步驟')
+    expect(stopped).not.toContain('保留')
+  })
+
 })

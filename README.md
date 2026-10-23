@@ -2,9 +2,11 @@
 
 A browser-based FPV flight school and freestyle trick trainer focused on trustworthy transmitter input, believable Acro / Rate flight, and measurable feedback.
 
-> **Status: beginner-school release 2026.10.23.2.** L06 passed learner review. The classroom now adds **L07 square-route practice**: take off from ground, fly four 12-metre legs and their ordered corner goals, then return above launch. Active targets, a visible square route, body-relative hints, an actual-physics synchronized recording and progress are included. Ordinary misses and non-crash ground returns retain checkpoints. L06/L07 use rules 5; L03–L05 remain under rules 4 with saved progress preserved. See [local update instructions](docs/DEVELOPMENT.md#confirm-the-updated-local-screen), [the L07 tryout guide](docs/L07_SQUARE_ROUTE.md), and [validation records](docs/LEARNING_VALIDATION.md). L07 awaits learner review; shared hardware and pilot-calibration checks remain separate.
+> **Status: beginner-school release 2026.10.23.3.** L07 passed learner review. The classroom now adds **L08 figure-eight practice**: ground takeoff, central entry, a left loop, a central transition, a right loop and the central airborne finish. Ordered targets, visible loop guides, body-relative hints, a synchronized actual-physics demo and saved progress are included. Repeated centre visits advance only after their preceding route targets; misses and non-crash ground returns retain checkpoints. L06–L08 use rules 5; L03–L05 retain rules 4 and saved progress. See [local update instructions](docs/DEVELOPMENT.md#confirm-the-updated-local-screen), [the L08 tryout guide](docs/L08_FIGURE_EIGHT.md), and [validation records](docs/LEARNING_VALIDATION.md). L08 awaits learner review; shared hardware and pilot-calibration checks remain separate.
 
 ## Implemented
+
+- L08 ground-start figure-eight route with opposing left/right loops, ordered central visits, active goal markers, relative hints and an actual-physics synchronized demo; see [the L08 tryout guide](docs/L08_FIGURE_EIGHT.md).
 
 - L07 ground-start square route, four straight legs and ordered corners, active goal markers, relative hints and a synchronized actual-physics demo; see [the L07 tryout guide](docs/L07_SQUARE_ROUTE.md).
 

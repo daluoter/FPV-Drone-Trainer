@@ -3,6 +3,7 @@ import { STRAIGHT_LINE_LESSON } from './straightLine'
 import { DIRECTION_CONTROL_LESSON } from './directionControl'
 import { COORDINATED_TURN_LESSON } from './coordinatedTurn'
 import { SQUARE_ROUTE_LESSON } from './squareRoute'
+import { FIGURE_EIGHT_LESSON } from './figureEight'
 import {
   hoverEvaluator,
   orbitEvaluator,
@@ -218,6 +219,7 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
   STRAIGHT_LINE_LESSON,
   DIRECTION_CONTROL_LESSON,
   SQUARE_ROUTE_LESSON,
+  FIGURE_EIGHT_LESSON,
 ]
 
 export const TRAINING_LESSONS = DEFAULT_LESSONS

@@ -6,7 +6,7 @@ export function prepareTrainingSetup(
   references: readonly TrainingSceneReference[],
 ): TrainingSetupRequest | null {
   if (!request) return null
-  if (request.lessonId === 'landing' || request.lessonId === 'straight-line' || request.lessonId === 'direction-control' || request.lessonId === 'coordinated-turn' || request.lessonId === 'square-route') {
+  if (request.lessonId === 'landing' || request.lessonId === 'straight-line' || request.lessonId === 'direction-control' || request.lessonId === 'coordinated-turn' || request.lessonId === 'square-route' || request.lessonId === 'figure-eight') {
     const launch = references.find((reference) => reference.id === 'training-launch')
     if (!launch) return request
     return {
