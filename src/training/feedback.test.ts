@@ -629,3 +629,147 @@ describe('beginner-facing training feedback', () => {
   })
 
 })
+
+describe('L10 guided recovery coaching', () => {
+  const baseline = { recoveryPhase: 2, recoveryExercise: 1, exerciseReady: 0, currentEpisodeValid: 0,
+    episodeInterrupted: 0, preparationDwellSeconds: 0.1, recoveryDwellSeconds: 0,
+    exercisesCompleted: 0, groundTouching: 0, insideRecoveryArea: 1, altitudeM: 6,
+    tiltDegrees: 0, bodyRateDegreesPerSecond: 0, verticalSpeedMps: 0, horizontalSpeedMps: 0 }
+
+  it('explains a self-operated ground start and actual onset before recovery', () => {
+    const guide = trainingRouteGuide('basic-recovery')!
+    expect(guide).toMatch(/地面自行起飛.*5 m.*6 m.*傾斜.*下沉.*漂移/)
+    expect(guide).toContain('先確認實際偏差，再確認恢復 0.5 秒')
+    expect(guide).toContain('全程由你操控')
+    expect(guide).toContain('不要求回到固定座標或精準懸停')
+    expect(guide).toContain('引導練習不限時，挑戰 300 秒')
+    expect(trainingObjective('basic-recovery', null)?.title).toBe('1／8 起飛區地面準備')
+    expect(trainingObjective('basic-recovery', { metrics: { recoveryPhase: 1 } })?.detail).toContain('從地面自行起飛到離地 5 m 以上')
+    const preparing = trainingObjective('basic-recovery', { metrics: baseline })!
+    expect(preparing.detail).toContain('準備確認 0.10／0.20 s')
+    expect(preparing.detail).not.toContain('已偵測')
+  })
+
+  it.each([
+    [2, '製造小幅傾斜', '實際傾角達到 15°'],
+    [4, '製造小幅下沉', '下降速度達到 0.8 m/s'],
+    [6, '建立水平漂移', '實際水平速度達到 1.5 m/s'],
+  ] as const)('uses the ready state to guide phase %s onset without claiming recovery', (recoveryPhase, label, threshold) => {
+    const goal = trainingObjective('basic-recovery', { metrics: { ...baseline, recoveryPhase, exerciseReady: 1 } })!
+    expect(goal.title).toContain(label)
+    expect(goal.detail).toContain('現在由你製造小幅偏差')
+    expect(goal.detail).toContain(threshold)
+    expect(goal.detail).not.toContain('已偵測到實際')
+  })
+
+  it.each([
+    [3, '主動修回水平', '已偵測到實際傾斜', '主動修回 10° 內'],
+    [5, '止住下沉', '已偵測到實際下沉', '±0.6 m/s 內'],
+    [7, '減速並修回水平', '已偵測到實際水平漂移', '水平速度降至 0.8 m/s 內'],
+  ] as const)('guides the actual observed phase %s recovery and short confirmation', (recoveryPhase, label, observed, action) => {
+    const metrics = { ...baseline, recoveryPhase, currentEpisodeValid: 1, recoveryDwellSeconds: 0.23 }
+    const goal = trainingObjective('basic-recovery', { metrics })!
+    expect(goal.title).toContain(label)
+    expect(goal.detail).toContain(observed)
+    expect(goal.detail).toContain(action)
+    expect(goal.detail).toContain('恢復確認 0.23／0.50 s')
+    expect(goal.detail).toContain('至少 2.5 m 高度')
+    expect(goal.detail).toContain('不要求回到原位置')
+    expect(trainingHint('basic-recovery', { status: 'continue', metrics, hint: '依序穿越下一個目標。' })).toContain(observed)
+  })
+
+  it('shows the actual blocker while preparing rather than telling a learner to induce an error too early', () => {
+    for (const [changes, cause] of [
+      [{ altitudeM: 4.2 }, '先自行升到 5 m 以上'],
+      [{ tiltDegrees: 16 }, '目前傾角 16.0°'],
+      [{ bodyRateDegreesPerSecond: 60 }, '目前旋轉速度 60.0°/s'],
+      [{ horizontalSpeedMps: 1.4 }, '目前水平速度 1.4 m/s'],
+      [{ verticalSpeedMps: -0.7 }, '調整到 ±0.6 m/s 內'],
+    ] as const) {
+      const goal = trainingObjective('basic-recovery', { metrics: { ...baseline, ...changes } })!
+      expect(goal.detail).toContain(cause)
+      expect(goal.detail).not.toContain('現在由你製造')
+    }
+    const sinkTooLow = trainingObjective('basic-recovery', { metrics: { ...baseline,
+      recoveryPhase: 4, exerciseReady: 1, altitudeM: 4.3 } })!
+    expect(sinkTooLow.detail).toContain('下沉練習要先回到至少 4.5 m')
+    expect(sinkTooLow.detail).not.toContain('下降速度達到')
+  })
+
+  it.each([
+    [{ groundTouching: 1, altitudeM: 0.06 }, '碰地停住不算空中恢復'],
+    [{ altitudeM: 2 }, '低於本項恢復需要的 2.5 m'],
+  ] as const)('requires a fresh actual onset after unsafe episode interruption: %j', (changes, cause) => {
+    const metrics = { ...baseline, recoveryPhase: 5, exercisesCompleted: 1,
+      currentEpisodeValid: 0, episodeInterrupted: 1, ...changes }
+    const goal = trainingObjective('basic-recovery', { metrics })!
+    expect(goal.detail).toContain(cause)
+    expect(goal.detail).toContain('先前已完成的整項練習會保留')
+    expect(goal.detail).toContain('本項需重新製造偏差')
+    expect(goal.detail).not.toContain('已偵測到實際下沉')
+  })
+
+  it('distinguishes re-preparation and re-onset from resuming a stale recovery checkpoint', () => {
+    const interrupted = { ...baseline, recoveryPhase: 7, exercisesCompleted: 2, episodeInterrupted: 1 }
+    const prepare = trainingObjective('basic-recovery', { metrics: interrupted })!
+    expect(prepare.detail).toContain('本項恢復已中斷')
+    expect(prepare.detail).toContain('準備確認')
+    expect(prepare.detail).not.toContain('已偵測到實際水平漂移')
+    const repeat = trainingObjective('basic-recovery', { metrics: { ...interrupted, exerciseReady: 1 } })!
+    expect(repeat.detail).toContain('重新製造本項偏差')
+    expect(repeat.detail).toContain('先前的偏差不會沿用')
+    expect(repeat.detail).toContain('實際水平速度達到 1.5 m/s')
+  })
+
+  it('pauses outside the broad area and preserves a still-valid onset for return', () => {
+    const goal = trainingObjective('basic-recovery', { metrics: { ...baseline,
+      recoveryPhase: 5, currentEpisodeValid: 1, insideRecoveryArea: 0 } })!
+    expect(goal.detail).toContain('起飛點半徑 25 m')
+    expect(goal.detail).toContain('不必回到原起飛點')
+    expect(goal.detail).toContain('已偵測到的偏差會保留')
+    expect(goal.detail).toContain('出區期間不累積確認時間')
+    expect(goal.detail).not.toContain('重新製造')
+  })
+
+  it('limits stage facts to three localized finite observations and keeps signed vertical motion clear', () => {
+    const sink = { ...baseline, recoveryPhase: 5, currentEpisodeValid: 1, verticalSpeedMps: -1.2,
+      recoveryDwellSeconds: 0.12, impossibleInternalAccumulator: 99 }
+    expect(formatTrainingMetrics(sink, 'basic-recovery', 10)).toEqual([
+      { key: 'verticalSpeedMps', label: '升降速度（上＋／下−）', value: '-1.20 m/s' },
+      { key: 'altitudeM', label: '離地高度', value: '6.00 m' },
+      { key: 'recoveryDwellSeconds', label: '恢復確認時間', value: '0.12 / 0.50 s' },
+    ])
+    const drift = formatTrainingMetrics({ ...baseline, recoveryPhase: 7, currentEpisodeValid: 1,
+      horizontalSpeedMps: 2.1, tiltDegrees: 12 }, 'basic-recovery')
+    expect(drift.map(({ key }) => key)).toEqual(['horizontalSpeedMps', 'tiltDegrees', 'recoveryDwellSeconds'])
+    expect(formatTrainingMetrics({ ...baseline, verticalSpeedMps: -0.7 }, 'basic-recovery').map(({ key }) => key))
+      .toEqual(['verticalSpeedMps', 'altitudeM', 'preparationDwellSeconds'])
+    const unknown = trainingObjective('basic-recovery', { metrics: { ...baseline,
+      preparationDwellSeconds: Number.NaN, altitudeM: Infinity, tiltDegrees: Infinity,
+      bodyRateDegreesPerSecond: Infinity, horizontalSpeedMps: Infinity, verticalSpeedMps: Infinity } })!
+    expect(unknown.detail).not.toMatch(/NaN|Infinity/)
+  })
+
+  it('only declares completion at the final stage and describes repeated practice rather than mastery', () => {
+    expect(trainingObjective('basic-recovery', { metrics: { ...baseline, recoveryPhase: 7,
+      currentEpisodeValid: 1 } })?.detail).not.toContain('現在可以 Disarm')
+    const done = trainingObjective('basic-recovery', { metrics: { recoveryPhase: 8, exercisesCompleted: 3 } })!
+    expect(done.title).toContain('三項基礎失誤恢復已完成')
+    expect(done.detail).toContain('現在可以 Disarm')
+    expect(done.detail).not.toMatch(/熟練|完美/)
+  })
+
+  it.each([
+    ['Ground impact latched a crash; reset required.', '本次發生墜毀'],
+    ['Flight disarmed after focus was lost.', '解除解鎖、失去焦點'],
+    ['失誤恢復停止：資料中斷、時間倒退或模擬被重設。', '飛行資料無效、中斷或被重設'],
+    ['失誤恢復挑戰逾時：尚未完成三種實際偏差與恢復。', '基礎恢復挑戰逾時'],
+  ])('prioritizes terminal cause over stale active retention: %s', (message, cause) => {
+    const hint = trainingHint('basic-recovery', { status: 'failure', message,
+      metrics: { ...baseline, recoveryPhase: 5, currentEpisodeValid: 1, episodeInterrupted: 1 } })
+    expect(hint).toContain(cause)
+    expect(hint).toContain('再練一次')
+    expect(hint).toContain('清空本次步驟')
+    expect(hint).not.toMatch(/保留|已偵測到實際/)
+  })
+})

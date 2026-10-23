@@ -274,6 +274,16 @@ describe('training progress persistence', () => {
     for (const lessonId of ['straight-line', 'landing', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight']) {
       expect(afterL09.lessons[lessonId]).toEqual(afterL08.lessons[lessonId])
     }
+    expect(afterL09.lessons['basic-recovery']).toMatchObject({ completed: false, attempts: 0 })
+    expect(store.recordResult(result({
+      lessonId: 'basic-recovery', sessionId: 'basic-recovery:new', attemptContext: revised,
+      completedCheckpoints: 8, totalCheckpoints: 8, metrics: { exercisesCompleted: 3 },
+    })).saved).toBe(true)
+    const afterL10 = new TrainingProgressStore(storage).loadCurrent(revised).progress
+    expect(afterL10.lessons['basic-recovery']).toMatchObject({ completed: true, attempts: 1 })
+    for (const lessonId of ['straight-line', 'landing', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate']) {
+      expect(afterL10.lessons[lessonId]).toEqual(afterL09.lessons[lessonId])
+    }
     expect(storage.getItem(trainingAttemptContextKey(baseline))).toBe(originalBaseline)
   })
 

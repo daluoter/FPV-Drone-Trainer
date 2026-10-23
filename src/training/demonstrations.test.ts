@@ -6,7 +6,7 @@ import { quaternionNorm, rotateVectorByQuaternion } from '../math/quaternion'
 import { ReplayPlayback, type ReplaySample } from '../replay'
 import { createDefaultTuningSettings, type TuningSettings } from '../tuning/config'
 import { createTuningPreset } from '../tuning/presets'
-import { createTeachingDemonstration, teachingCueAt, teachingTargetAt } from './demonstrations'
+import { createTeachingDemonstration, teachingCueAt, teachingRecoveryPhaseAt, teachingTargetAt } from './demonstrations'
 import { DEFAULT_LESSONS } from './lessons'
 import { LANDING_LESSON, landingEvaluator } from './landing'
 import { STRAIGHT_LINE_LESSON, straightLineEvaluator } from './straightLine'
@@ -20,6 +20,7 @@ import { COORDINATED_TURN_LESSON } from './coordinatedTurn'
 import { SQUARE_ROUTE_LESSON } from './squareRoute'
 import { FIGURE_EIGHT_LESSON } from './figureEight'
 import { WIDE_GATE_LESSON } from './wideGate'
+import { BASIC_RECOVERY_LESSON, measureBasicRecoveryMotion } from './basicRecovery'
 import { createWideGates } from '../world/wideGates'
 import { findSweptObstacleHit, OBSTACLE_CRASH_WARNING_PREFIX } from '../simulation/obstacles'
 import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample, TrainingSceneReference } from './types'
@@ -66,6 +67,120 @@ function referencesFor(settings: TuningSettings): readonly TrainingSceneReferenc
 }
 
 describe('bounded simulation teaching recordings', () => {
+  it.each(['beginner', 'standard', 'raised-field'] as const)('records actual L10 onset and recovery in all eight stages with %s settings', (preset) => {
+    const defaults = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
+    const settings = preset === 'raised-field' ? {
+      ...defaults, drone: { ...defaults.drone, ground: { ...defaults.drone.ground, heightM: 10 }, spawnPositionM: { x: 6, y: 25, z: -3 } },
+    } : defaults
+    const before = JSON.stringify(settings)
+    const demo = createTeachingDemonstration(settings, 'basic-recovery')
+    const { launch } = createTrainingFieldAnchors(settings.drone)
+    expect(demo).toMatchObject({ lessonId: 'basic-recovery', source: 'simulated', rulesVersion: 5, physicsVersion: 1 })
+    expect(demo.recording.samples[0]!.positionM).toEqual(launch)
+    expect(demo.recording.durationSeconds).toBeGreaterThan(10)
+    expect(demo.recording.durationSeconds).toBeLessThanOrEqual(120)
+    expect(demo.recording).toMatchObject({ capacity: 7_500, decimation: 4, droppedSamples: 0 })
+    expect(demo.recording.samples.length).toBeLessThanOrEqual(7_500)
+    expect(Object.isFrozen(demo)).toBe(true)
+    expect(Object.isFrozen(demo.cues)).toBe(true)
+    expect(demo.cues.every(Object.isFrozen)).toBe(true)
+    const retainedTimes = new Set(demo.recording.samples.map((pose) => pose.timestampSeconds))
+    expect(demo.cues.every((cue) => retainedTimes.has(cue.timeSeconds))).toBe(true)
+    expect(demo.cues.every((cue) => cue.targetReferenceId === 'recovery-zone')).toBe(true)
+    expect(demo.cues.at(-1)!.timeSeconds).toBe(demo.recording.durationSeconds)
+    expect(teachingRecoveryPhaseAt(demo, demo.recording.durationSeconds)).toBe(8)
+    expect(teachingCueAt(demo, demo.recording.durationSeconds)).toContain('已完成傾斜、下沉與漂移恢復')
+    const session = new TrainingSession({
+      lessons: [BASIC_RECOVERY_LESSON], initialLessonId: 'basic-recovery', countdownDurationSeconds: 0,
+      sceneReferences: referencesFor(settings),
+    })
+    session.start(0)
+    session.tick(0)
+    for (let index = 0; index < demo.recording.samples.length; index += 1) {
+      const pose = demo.recording.samples[index]
+      expect(Object.values(pose.normalizedInput!).every(Number.isFinite)).toBe(true)
+      expect(Object.values(pose.positionM).every(Number.isFinite)).toBe(true)
+      expect(Object.values(pose.velocityMps).every(Number.isFinite)).toBe(true)
+      expect(pose.controllerOutput.motorCommands.every((value) => Number.isFinite(value) && value >= 0 && value <= 1)).toBe(true)
+      expect(quaternionNorm(pose.orientation)).toBeCloseTo(1, 8)
+      if (index > 0) {
+        const previous = demo.recording.samples[index - 1]
+        const dt = pose.timestampSeconds - previous.timestampSeconds
+        expect(dt).toBeGreaterThan(0)
+        expect(dt).toBeLessThan(0.02)
+        expect(Math.hypot(
+          pose.positionM.x - previous.positionM.x - (pose.velocityMps.x + previous.velocityMps.x) * 0.5 * dt,
+          pose.positionM.y - previous.positionM.y - (pose.velocityMps.y + previous.velocityMps.y) * 0.5 * dt,
+          pose.positionM.z - previous.positionM.z - (pose.velocityMps.z + previous.velocityMps.z) * 0.5 * dt,
+        )).toBeLessThan(0.003)
+      }
+      const state = session.consumeSample(geometricSample(settings, pose))
+      expect(state.phase, JSON.stringify({ time: pose.timestampSeconds, result: state.result, evaluation: state.lastEvaluation })).not.toBe('FAILED')
+      // Every stage cue is tied to the retained sample that actually completes
+      // its preceding checkpoint; seeking cannot display future recovery early.
+      expect(teachingRecoveryPhaseAt(demo, pose.timestampSeconds)).toBe(state.lastEvaluation?.metrics?.recoveryPhase)
+    }
+    const state = session.getState()
+    expect(state.phase, JSON.stringify(state.lastEvaluation)).toBe('SUCCESS')
+    expect(state.result?.completedCheckpoints).toBe(8)
+    expect(Object.values(state.checkpoints).every((checkpoint) => checkpoint.completed)).toBe(true)
+    const observedAt = (id: string): ReplaySample => at(demo.recording.samples, state.checkpoints[id]!.completedAtSeconds!)
+    const tiltOnset = observedAt('recovery-tilt-onset')
+    const tiltRecovered = observedAt('recovery-tilt-level')
+    const sinkOnset = observedAt('recovery-sink-onset')
+    const sinkRecovered = observedAt('recovery-sink-stop')
+    const driftOnset = observedAt('recovery-drift-onset')
+    const driftRecovered = observedAt('recovery-drift-stop')
+    expect(measureBasicRecoveryMotion(tiltOnset).tiltDegrees).toBeGreaterThanOrEqual(15)
+    expect(measureBasicRecoveryMotion(tiltRecovered).tiltDegrees).toBeLessThanOrEqual(10)
+    expect(measureBasicRecoveryMotion(sinkOnset).verticalSpeedMps).toBeLessThanOrEqual(-0.8)
+    expect(Math.abs(measureBasicRecoveryMotion(sinkRecovered).verticalSpeedMps)).toBeLessThanOrEqual(0.6)
+    expect(measureBasicRecoveryMotion(driftOnset).horizontalSpeedMps).toBeGreaterThanOrEqual(1.5)
+    expect(measureBasicRecoveryMotion(driftRecovered).horizontalSpeedMps).toBeLessThanOrEqual(0.8)
+    expect(tiltOnset.normalizedInput!.roll).toBeGreaterThan(0)
+    expect(sinkOnset.normalizedInput!.throttle).toBeLessThan(sinkRecovered.normalizedInput!.throttle)
+    expect(driftOnset.normalizedInput!.pitch).toBeLessThan(0)
+    for (const [onset, recovered] of [[tiltOnset, tiltRecovered], [sinkOnset, sinkRecovered], [driftOnset, driftRecovered]]) {
+      expect(recovered.timestampSeconds - onset.timestampSeconds).toBeGreaterThanOrEqual(0.5)
+      expect(recovered.positionM.y - settings.drone.ground.heightM).toBeGreaterThanOrEqual(2.5)
+      expect(measureBasicRecoveryMotion(recovered).bodyRateDegreesPerSecond).toBeLessThanOrEqual(45)
+    }
+    expect(JSON.stringify(settings)).toBe(before)
+  })
+
+  it('keeps L10 recovery stages and measured ghost data synchronized while paused, slowed and seeked', () => {
+    const demo = createTeachingDemonstration(createTuningPreset('beginner'), 'basic-recovery')
+    const player = new ReplayPlayback(demo.recording)
+    expect(teachingTargetAt(demo, 0)).toBe('recovery-zone')
+    expect(teachingCueAt(demo, 0)).toContain('地面自行起飛')
+    expect(teachingRecoveryPhaseAt(createTeachingDemonstration(createTuningPreset('beginner'), 'wide-gate'), 0)).toBeNull()
+    const onset = demo.cues.find((cue) => cue.recoveryPhase === 3)!
+    player.seek(onset.timeSeconds)
+    expect(teachingRecoveryPhaseAt(demo, player.currentTime)).toBe(3)
+    expect(teachingCueAt(demo, player.currentTime)).toContain('已偵測傾斜')
+    expect(measureBasicRecoveryMotion(player.getGhostState()!).tiltDegrees).toBeGreaterThanOrEqual(15)
+    const frozen = player.getGhostState()
+    player.pause()
+    player.advance(20)
+    expect(player.getGhostState()).toEqual(frozen)
+    const sink = demo.cues.find((cue) => cue.recoveryPhase === 5)!
+    player.seek(sink.timeSeconds)
+    expect(teachingRecoveryPhaseAt(demo, player.currentTime)).toBe(5)
+    expect(teachingCueAt(demo, player.currentTime)).toContain('已偵測下沉')
+    player.setSpeed(0.5)
+    player.play()
+    player.advance(0.4)
+    expect(player.currentTime).toBeCloseTo(sink.timeSeconds + 0.2)
+    player.seek(demo.recording.durationSeconds)
+    expect(teachingRecoveryPhaseAt(demo, player.currentTime)).toBe(8)
+    expect(teachingCueAt(demo, player.currentTime - 5e-10)).toContain('已完成傾斜、下沉與漂移恢復')
+    expect(teachingCueAt(demo, player.currentTime - 0.001)).not.toContain('已完成傾斜、下沉與漂移恢復')
+    player.seek(0)
+    expect(player.getGhostState()?.positionM).toEqual(demo.recording.samples[0]!.positionM)
+    expect(teachingRecoveryPhaseAt(demo, player.currentTime)).toBe(1)
+  })
+
+
   it.each(['beginner', 'standard', 'raised-field'] as const)('flies through all three solid L09 openings with %s settings', (preset) => {
     const defaults = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
     const settings = preset === 'raised-field' ? {

@@ -1,4 +1,4 @@
-import { coordinatedTurnTargetLabel, directionControlTargetLabel, figureEightTargetLabel, squareRouteTargetLabel, trainingHint, trainingObjective, wideGateCollisionCause } from './feedback'
+import { basicRecoveryStageLabel, coordinatedTurnTargetLabel, directionControlTargetLabel, figureEightTargetLabel, squareRouteTargetLabel, trainingHint, trainingObjective, wideGateCollisionCause } from './feedback'
 import { LANDING_LIFTOFF_HEIGHT_M, LANDING_ZONE_RADIUS_M } from './landing'
 import { TAKEOFF_SETTLED_DWELL_SECONDS } from './takeoff'
 import type { TrainingResult } from './types'
@@ -60,6 +60,95 @@ function isLegacyRouteResult(result: TrainingResult): boolean {
   const version = result.attemptContext?.rulesVersion
   return version !== undefined && (['straight-line', 'landing'].includes(result.lessonId) && version < 4
     || result.lessonId === 'coordinated-turn' && version < 5)
+}
+
+function basicRecoveryResultFeedback(result: TrainingResult, scope: string): TrainingResultFeedback | null {
+  if (result.lessonId !== 'basic-recovery') return null
+  const restart = '本次練習已結束；按「再練一次」會清空本次步驟，從地面重新開始。'
+  const message = result.message ?? ''
+  const timedOut = /逾時|timed out|timeout/iu.test(message)
+  if (result.outcome !== 'SUCCESS') {
+    if (/墜毀|撞擊|crash|impact|Obstacle collision:/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: '本次發生墜毀，基礎失誤恢復尚未完成。',
+      nextPractice: `先按 Reset 重設。${restart}下次先取得約 6 m 的練習高度，再依提示製造小偏差並修正。`,
+      scopeNote: scope,
+    }
+    if (/解除解鎖|失焦|斷線|disarm|focus|disconnect/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: '本次因解除解鎖、失去焦點或連線中斷而停止，不能據此判定恢復操控表現。',
+      nextPractice: `${restart}確認網頁與控制器就緒，倒數結束後再明確 Arm。`,
+      scopeNote: scope,
+    }
+    if (/無效|資料中斷|時間倒退|位置跳躍|缺少有效|支撐高度不一致|重設|invalid|non-finite|telemetry.*gap|impossible.*jump|reset|rewind/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: '本次飛行資料無效、中斷或被重設，無法以這段資料判定恢復表現。',
+      nextPractice: `${restart}保持網頁在前景，自行起飛後，先依提示產生實際偏差，再練習修正。`,
+      scopeNote: scope,
+    }
+  }
+  if (!Number.isFinite(result.sampleCount) || result.sampleCount <= 0) return {
+    observedStrength: null,
+    observedGap: `${timedOut ? '本次挑戰逾時；' : ''}本次沒有有效的已解鎖飛行樣本，無法判定操控表現。`,
+    nextPractice: `${restart}確認畫面與控制器就緒，倒數完成後明確 Arm。`,
+    scopeNote: scope,
+  }
+  if (result.outcome === 'SUCCESS') return {
+    observedStrength: '本次已從地面自行起飛，實際製造並修正傾斜、下沉與漂移，完成三項基礎失誤恢復。',
+    observedGap: null,
+    nextPractice: '以相同條件再練一次，練習辨認偏差後及早修正；主動帶回水平、止住下降與降低漂移，不需回到原位置或降落。',
+    scopeNote: scope,
+  }
+  const metrics = result.metrics
+  const phase = Number.isInteger(metrics.recoveryPhase) && metrics.recoveryPhase >= 0 && metrics.recoveryPhase <= 8
+    ? metrics.recoveryPhase : null
+  const completed = Number.isInteger(metrics.exercisesCompleted) && metrics.exercisesCompleted >= 0 && metrics.exercisesCompleted <= 3
+    ? metrics.exercisesCompleted : null
+  const strength = completed !== null && completed > 0 ? `本次已完成 ${completed} / 3 項恢復練習。`
+    : phase !== null && phase >= 2 ? '本次已觀察到從地面自行起飛並取得練習高度。' : null
+  const ended = timedOut ? '本次挑戰逾時，' : '本次'
+  if (phase === null || phase === 8) return {
+    observedStrength: strength,
+    observedGap: `${ended}基礎失誤恢復尚未完成；分段資料不足，無法判定卡在哪項練習。`,
+    nextPractice: `${restart}從地面自行起飛，依提示製造傾斜、下沉與漂移，再分別完成恢復。`,
+    scopeNote: scope,
+  }
+  if (phase <= 1) return {
+    observedStrength: null,
+    observedGap: `${ended}尚未完成從地面自行起飛並取得練習高度。`,
+    nextPractice: `${restart}先自行起飛到離地 5 m 以上，建議約 6 m，再依提示開始製造小偏差。`,
+    scopeNote: scope,
+  }
+  const exercise = phase <= 3 ? '傾斜' : phase <= 5 ? '下沉' : '漂移'
+  let observation: string
+  if (metrics.groundTouching > 0.5) observation = '結束時已接地；碰地停住不能算空中恢復。'
+  else if (metrics.insideRecoveryArea === 0) observation = '結束時超出起飛點半徑 25 m 的練習區，本項恢復確認已暫停。'
+  else if (Number.isFinite(metrics.altitudeM) && metrics.altitudeM < 2.5) observation = `結束時離地 ${metrics.altitudeM.toFixed(1)} m，未保留恢復需要的 2.5 m 高度餘裕。`
+  else if (!(metrics.currentEpisodeValid > 0.5)) observation = metrics.episodeInterrupted > 0.5
+    ? `本項先前的偏差已中斷，尚未重新完成準備並製造實際${exercise}。`
+    : metrics.exerciseReady > 0.5 ? `已準備完成，但尚未偵測到本項實際${exercise}；只推動搖桿不能代替飛行狀態。`
+      : '尚未完成本項的準備確認，還未開始製造小偏差。'
+  else {
+    const observations: string[] = []
+    if (phase <= 3 && Number.isFinite(metrics.tiltDegrees) && metrics.tiltDegrees > 10) observations.push(`結束時傾角 ${metrics.tiltDegrees.toFixed(1)}°，尚未修回 10° 內`)
+    if (phase >= 4 && phase <= 5 && Number.isFinite(metrics.verticalSpeedMps) && Math.abs(metrics.verticalSpeedMps) > 0.6) observations.push(`結束時升降速度 ${metrics.verticalSpeedMps.toFixed(1)} m/s（上＋／下−），尚未收斂到 ±0.6 m/s 內`)
+    if (phase >= 6 && Number.isFinite(metrics.horizontalSpeedMps) && metrics.horizontalSpeedMps > 0.8) observations.push(`結束時水平速度 ${metrics.horizontalSpeedMps.toFixed(1)} m/s，尚未降低到 0.8 m/s 內`)
+    if (phase >= 4 && Number.isFinite(metrics.tiltDegrees) && metrics.tiltDegrees > 10) observations.push(`機身仍傾斜 ${metrics.tiltDegrees.toFixed(1)}°，需主動修回 10° 內`)
+    if (Number.isFinite(metrics.bodyRateDegreesPerSecond) && metrics.bodyRateDegreesPerSecond > 45) observations.push(`機身仍以 ${metrics.bodyRateDegreesPerSecond.toFixed(1)}°/s 旋轉，需減緩到 45°/s 內`)
+    if (phase >= 6 && Number.isFinite(metrics.verticalSpeedMps) && Math.abs(metrics.verticalSpeedMps) > 0.8) observations.push(`升降速度仍為 ${metrics.verticalSpeedMps.toFixed(1)} m/s，需調整到 ±0.8 m/s 內`)
+    if (Number.isFinite(metrics.recoveryDwellSeconds) && metrics.recoveryDwellSeconds < 0.5) observations.push(`恢復確認 ${Math.max(0, metrics.recoveryDwellSeconds).toFixed(2)}／0.50 s，尚未連續完成`)
+    observation = observations.length ? `${observations.slice(0, 2).join('；')}。` : '已記錄本項偏差，尚未連續確認恢復完成。'
+  }
+  const action = phase <= 3
+    ? '下次先製造小幅傾斜，再朝反方向小量修正，主動帶回水平；回中會停止旋轉，回到水平需要主動修正。'
+    : phase <= 5 ? '下次在足夠高度稍收油門產生小幅下降，再適量補油，把升降速度收斂到接近零；保持空中與高度餘裕。'
+      : '下次先建立實際漂移，再朝移動反方向適度傾斜減速，接著主動帶回接近水平；回中不會自動煞停。'
+  return {
+    observedStrength: strength,
+    observedGap: `${ended}尚未完成「${basicRecoveryStageLabel(phase)}」。${observation}`,
+    nextPractice: `${restart}${action}每項恢復需短暫確認 0.5 秒，不要求回到原位置或精準懸停。`,
+    scopeNote: scope,
+  }
 }
 
 function wideGateResultFeedback(result: TrainingResult, scope: string): TrainingResultFeedback | null {
@@ -564,6 +653,8 @@ function phaseProgress(result: TrainingResult): { observedGap: string; nextPract
 /** Final-sample observations and checkpoint facts, never inferred causes or a claim about the whole flight. */
 export function summarizeTrainingResult(result: TrainingResult): TrainingResultFeedback {
   const scope = scopeNote(result)
+  const recovery = basicRecoveryResultFeedback(result, scope)
+  if (recovery) return recovery
   const gate = wideGateResultFeedback(result, scope)
   if (gate) return gate
   const eight = figureEightResultFeedback(result, scope)

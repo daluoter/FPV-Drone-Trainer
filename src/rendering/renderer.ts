@@ -63,6 +63,7 @@ export class FlightRenderer {
   private squareTarget: string | null = null
   private figureEightTarget: string | null = null
   private wideGateTarget: string | null = null
+  private recoveryStage: number | null = 0
   public get flightScene(): FlightScene { return this.currentFlightScene }
   public readonly cameraRig: FlightCameraRig
   public readonly renderer: THREE.WebGLRenderer
@@ -161,6 +162,13 @@ export class FlightRenderer {
     this.flightScene.setWideGateTarget(targetId)
   }
 
+  /** Update the L10 visual stage without writing the live flight state. */
+  public setRecoveryStage(stage: number | null): void {
+    if (this.disposed) return
+    this.recoveryStage = stage
+    this.flightScene.setRecoveryStage(stage)
+  }
+
   /** Rebuild anchors only after the owner has explicitly reset and disarmed. */
   public reconfigureScene(config: DroneConfig): void {
     if (this.disposed) return
@@ -172,6 +180,7 @@ export class FlightRenderer {
     this.currentFlightScene.setSquareTarget(this.squareTarget)
     this.currentFlightScene.setFigureEightTarget(this.figureEightTarget)
     this.currentFlightScene.setWideGateTarget(this.wideGateTarget)
+    this.currentFlightScene.setRecoveryStage(this.recoveryStage)
     previous.dispose()
   }
 

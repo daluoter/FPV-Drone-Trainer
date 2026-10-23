@@ -8,6 +8,7 @@ import { createDefaultTuningSettings } from '../tuning'
 import FreeFlight from './FreeFlight'
 import type { FlightRuntime, FlightRuntimeOptions } from '../runtime'
 import { createTrainingMachineState } from '../training/machine'
+import { measureBasicRecoveryMotion } from '../training/basicRecovery'
 import type { TrainingMachineState, TrainingResult } from '../training/types'
 
 const frames = vi.hoisted(() => ({ now: 0, next: null as ((time: number) => void) | null, runtime: null as FlightRuntime | null, renderer: null as FlightRenderer | null }))
@@ -199,6 +200,80 @@ describe('Free Flight native navigation confirmation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reset crashed drone' }))
     expect(frames.runtime!.getTelemetry().state.crashed).toBe(false)
     expect(screen.getByRole('button', { name: /^Arm$/ })).toBeEnabled()
+  })
+
+  it('shows L10 stages and actual live motion while clearing the preceding gate field on the same canvas', () => {
+    const props = { poller: createBrowserGamepadPoller(), profile: null, settings: createDefaultTuningSettings() }
+    const { rerender } = render(<FreeFlight {...props} trainingState={createTrainingMachineState({ initialLessonId: 'wide-gate' })} />)
+    const canvas = screen.getByLabelText('Free Flight 3D scene')
+    expect(frames.runtime!.simulation.getStaticObstacles()).toHaveLength(12)
+    const base = createTrainingMachineState({ initialLessonId: 'basic-recovery' })
+    // This phase fixture exercises UI binding, not recovery mastery. The motion
+    // instruments must read the real live state rather than these stale metrics.
+    const active: TrainingMachineState = { ...base, phase: 'ACTIVE', lastEvaluation: { status: 'continue', metrics: {
+      recoveryPhase: 3, currentEpisodeValid: 1, tiltDegrees: 99, verticalSpeedMps: 99, horizontalSpeedMps: 99,
+    } } }
+    rerender(<FreeFlight {...props} trainingState={active} />)
+    const scene = frames.renderer!.flightScene
+    const level = scene.scene.getObjectByName('recovery-level-reference') as THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>
+    expect(scene.scene.getObjectByName('wide-gate-field')!.visible).toBe(false)
+    expect(scene.scene.getObjectByName('basic-recovery-field')!.visible).toBe(true)
+    expect(frames.runtime!.simulation.getStaticObstacles()).toHaveLength(0)
+    expect(level.material.color.getHex()).toBe(0xffc978)
+    expect(screen.getByTestId('recovery-tilt')).toHaveTextContent('0.0°')
+    expect(screen.getByTestId('recovery-vertical-speed')).toHaveTextContent('0.0 m/s')
+    expect(screen.getByTestId('recovery-horizontal-speed')).toHaveTextContent('0.0 m/s')
+    expect(screen.getByLabelText('恢復練習數值')).toHaveTextContent('即時')
+    rerender(<FreeFlight {...props} trainingState={{ ...active, lastEvaluation: { status: 'success', metrics: { recoveryPhase: 8 } } }} />)
+    expect(level.material.color.getHex()).toBe(0xb8f36b)
+    expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
+    rerender(<FreeFlight {...props} trainingState={null} />)
+    expect(scene.scene.getObjectByName('basic-recovery-field')!.visible).toBe(false)
+    expect(screen.queryByLabelText('恢復練習數值')).not.toBeInTheDocument()
+    expect(frames.runtime!.simulation.getStaticObstacles()).toHaveLength(0)
+  })
+
+  it('seeks L10 motion instruments and stage guidance with real recorded physics without scoring live training', () => {
+    const onFixedStep = vi.fn()
+    const selected = createTrainingMachineState({ initialLessonId: 'basic-recovery' })
+    render(<FreeFlight poller={createBrowserGamepadPoller()} profile={null} settings={createDefaultTuningSettings()}
+      trainingState={selected} onFixedStep={onFixedStep} />)
+    const liveBefore = frames.runtime!.getTelemetry().state
+    const storedBefore = { ...window.localStorage }
+    fireEvent.click(screen.getByRole('button', { name: 'L10 恢復示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    const playback = frames.runtime!.getReplayPlayback()!
+    const onset = playback.recording.samples.find((sample) => measureBasicRecoveryMotion(sample).tiltDegrees >= 15)!
+    expect(onset).toBeDefined()
+    fireEvent.change(screen.getByRole('slider'), { target: { value: onset.timestampSeconds } })
+    const ghost = playback.getGhostState()!
+    const motion = measureBasicRecoveryMotion(ghost)
+    expect(screen.getByTestId('recovery-tilt')).toHaveTextContent(`${motion.tiltDegrees.toFixed(1)}°`)
+    expect(screen.getByTestId('recovery-vertical-speed')).toHaveTextContent(`${motion.verticalSpeedMps.toFixed(1)} m/s`)
+    expect(screen.getByTestId('recovery-horizontal-speed')).toHaveTextContent(`${motion.horizontalSpeedMps.toFixed(1)} m/s`)
+    expect(screen.getByLabelText('恢復練習數值')).toHaveTextContent('回放')
+    expect(screen.getByText(/已偵測傾斜；向反方向/)).toBeInTheDocument()
+    const level = frames.renderer!.flightScene.scene.getObjectByName('recovery-level-reference') as THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>
+    expect(level.material.color.getHex()).toBe(0xffc978)
+    const paused = screen.getByLabelText('恢復練習數值').textContent
+    frame(200)
+    frame(400)
+    expect(screen.getByLabelText('恢復練習數值').textContent).toBe(paused)
+    expect(onFixedStep).not.toHaveBeenCalled()
+    expect(frames.runtime!.getTelemetry().state.positionM).toEqual(liveBefore.positionM)
+    fireEvent.change(screen.getByRole('slider'), { target: { value: playback.durationSeconds } })
+    expect(screen.getByText(/已完成傾斜、下沉與漂移恢復/)).toBeInTheDocument()
+    expect(level.material.color.getHex()).toBe(0xb8f36b)
+    fireEvent.change(screen.getByRole('slider'), { target: { value: 0 } })
+    expect(screen.getByTestId('recovery-tilt')).toHaveTextContent('0.0°')
+    expect(screen.getByTestId('recovery-vertical-speed')).toHaveTextContent('0.0 m/s')
+    expect(level.material.color.getHex()).toBe(0x45d7f7)
+    fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
+    expect(screen.getByRole('button', { name: /^Disarm$/ })).toBeDisabled()
+    expect(screen.getByLabelText('恢復練習數值')).toHaveTextContent('即時')
+    expect(selected.checkpoints).toEqual({})
+    expect(selected.result).toBeNull()
+    expect({ ...window.localStorage }).toEqual(storedBefore)
   })
 
   it('requests confirmation while armed and removes it after an explicit disarm', () => {

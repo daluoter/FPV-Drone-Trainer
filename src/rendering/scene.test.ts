@@ -203,6 +203,7 @@ describe('flight scene reference contract', () => {
         'wide-gate-1',
         'wide-gate-2',
         'wide-gate-3',
+        'recovery-zone',
       ])
       expect(scene.getReference('hover-zone')?.kind).toBe('zone')
       expect(scene.getReference('hover-zone')?.positionM).toEqual({ x: 0, y: 3, z: 0 })
@@ -710,6 +711,103 @@ describe('flight scene reference contract', () => {
     const frame = scene.scene.getObjectByName('wide-gate-1-left-post') as THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>
     const guidance = scene.scene.getObjectByName('wide-gate-3-opening-guide') as THREE.LineLoop<THREE.BufferGeometry, THREE.LineBasicMaterial>
     const dispose = [frame.geometry, frame.material, guidance.geometry, guidance.material].map((value) => vi.spyOn(value, 'dispose'))
+    scene.dispose()
+    for (const spy of dispose) expect(spy).toHaveBeenCalledOnce()
+  })
+
+  it('shows the L10 practice area without previous course frames and colors only its stage guidance', () => {
+    const scene = createFlightScene()
+    const area = scene.scene.getObjectByName('basic-recovery-field')!
+    const accent = scene.scene.getObjectByName('recovery-stage-guidance')!
+    const level = scene.scene.getObjectByName('recovery-level-reference') as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
+    const anchors = scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM: { ...positionM }, sizeM }))
+    const dronePosition = scene.drone.position.toArray()
+    try {
+      expect(area.visible).toBe(false)
+      scene.setLessonTarget('basic-recovery')
+      expect(area.visible).toBe(true)
+      for (const name of ['wide-gate-field', 'figure-eight-targets', 'figure-eight-path', 'square-route-targets', 'coordinated-turn-targets', 'straight-line-targets', 'landing-target']) {
+        expect(scene.scene.getObjectByName(name)?.visible).toBe(false)
+      }
+      for (const id of ['hover-zone', 'orbit-poi', 'split-s-reference']) expect(scene.getReference(id)?.object.visible).toBe(false)
+      for (const stage of [0, 1, 2, 4, 6]) {
+        scene.setRecoveryStage(stage)
+        expect(accent.visible).toBe(true)
+        expect(level.material.color.getHex()).toBe(0x45d7f7)
+      }
+      for (const stage of [3, 5, 7]) {
+        scene.setRecoveryStage(stage)
+        expect(level.material.color.getHex()).toBe(0xffc978)
+      }
+      scene.setRecoveryStage(8)
+      expect(level.material.color.getHex()).toBe(0xb8f36b)
+      for (const stage of [null, -1, 9, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+        scene.setRecoveryStage(stage)
+        expect(accent.visible).toBe(false)
+        expect(area.visible).toBe(true)
+        expect(scene.scene.getObjectByName('recovery-area-boundary')?.visible).toBe(true)
+        expect(scene.scene.getObjectByName('recovery-height-band')?.visible).toBe(true)
+      }
+      scene.setLessonTarget('wide-gate')
+      expect(area.visible).toBe(false)
+      expect(scene.scene.getObjectByName('wide-gate-field')?.visible).toBe(true)
+      scene.setLessonTarget(null)
+      expect(area.visible).toBe(false)
+      expect(scene.scene.getObjectByName('wide-gate-field')?.visible).toBe(false)
+      expect(scene.getReference('hover-zone')?.object.visible).toBe(true)
+      expect(scene.drone.position.toArray()).toEqual(dronePosition)
+      expect(scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM, sizeM }))).toEqual(anchors)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('anchors the broad L10 floor, height band and horizontal reference to ground rather than a high configured spawn', () => {
+    const defaults = createDefaultDroneConfig()
+    const config = { ...defaults, ground: { ...defaults.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 30, z: -3 } }
+    const before = JSON.stringify(config)
+    const scene = createFlightScene(config)
+    try {
+      const reference = scene.getReference('recovery-zone')!
+      expect(reference.kind).toBe('zone')
+      expect(reference.positionM).toEqual({ x: 6, y: 11, z: -3 })
+      expect(reference.object.position.toArray()).toEqual([6, 11, -3])
+      expect(reference.sizeM).toEqual({ x: 50, y: 3, z: 50 })
+      const floor = scene.scene.getObjectByName('recovery-area-boundary') as THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>
+      expect(floor.geometry.parameters.innerRadius).toBeCloseTo(24.93)
+      expect(floor.geometry.parameters.outerRadius).toBe(25)
+      expect(floor.rotation.x).toBe(-Math.PI / 2)
+      expect(floor.getWorldPosition(floor.position.clone()).y).toBeCloseTo(5.025)
+      expect(floor.material.transparent).toBe(true)
+      const band = scene.scene.getObjectByName('recovery-height-band') as THREE.LineLoop<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      const points = band.geometry.getAttribute('position')
+      expect(Array.from({ length: points.count }, (_, index) => points.getY(index) + reference.positionM.y)).toEqual([10, 10, 13, 13])
+      expect(band.material.opacity).toBeLessThan(0.5)
+      const level = scene.scene.getObjectByName('recovery-level-reference') as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      const levelPoints = level.geometry.getAttribute('position')
+      // The long reference is truly horizontal in world space, centered at 6 m AGL.
+      expect(levelPoints.getY(0) + reference.positionM.y).toBe(11)
+      expect(levelPoints.getY(1) + reference.positionM.y).toBe(11)
+      expect(levelPoints.getX(0) + reference.positionM.x).toBe(1)
+      expect(levelPoints.getX(1) + reference.positionM.x).toBe(11)
+      expect(levelPoints.getZ(0) + reference.positionM.z).toBe(-15)
+      const pole = scene.scene.getObjectByName('recovery-height-pole') as THREE.LineSegments<THREE.BufferGeometry>
+      expect(pole.geometry.getAttribute('position').getX(0)).toBe(8)
+      expect(pole.geometry.getAttribute('position').getZ(0)).toBe(-10)
+      expect(reference.object.children.filter((child) => (child as THREE.Mesh).isMesh)).toEqual([floor])
+      expect(JSON.stringify(config)).toBe(before)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('disposes the hidden L10 floor and each visual line without leaving resources behind', () => {
+    const scene = createFlightScene()
+    const resources = ['recovery-area-boundary', 'recovery-height-pole', 'recovery-height-band', 'recovery-level-reference'].flatMap((name) => {
+      const object = scene.scene.getObjectByName(name) as THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      return [object.geometry, object.material]
+    })
+    const dispose = resources.map((resource) => vi.spyOn(resource, 'dispose'))
     scene.dispose()
     for (const spy of dispose) expect(spy).toHaveBeenCalledOnce()
   })

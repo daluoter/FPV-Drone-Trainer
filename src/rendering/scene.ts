@@ -9,6 +9,7 @@ import { createDirectionControlTargets, DIRECTION_CONTROL_TARGET_RADIUS_M } from
 import { createCoordinatedTurnTargets, COORDINATED_TURN_TARGET_RADIUS_M } from '../training/coordinatedTurn'
 import { createSquareRouteTargets, SQUARE_ROUTE_TARGET_RADIUS_M } from '../training/squareRoute'
 import { createFigureEightTargets, FIGURE_EIGHT_TARGET_RADIUS_M } from '../training/figureEight'
+import { BASIC_RECOVERY_AREA_RADIUS_M, BASIC_RECOVERY_MIN_PREPARATION_HEIGHT_M, BASIC_RECOVERY_TARGET_HEIGHT_M } from '../training/basicRecovery'
 import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
 import type { Vector3 } from '../math/vector'
 import type { ReplayGhostState } from '../replay'
@@ -51,6 +52,8 @@ export interface FlightScene {
   setFigureEightTarget(targetId: string | null): void
   /** Select L09 guidance while keeping every physical gate frame visible. */
   setWideGateTarget(targetId: string | null): void
+  /** Color a presentation-only L10 stage; null hides its accent, not the area. */
+  setRecoveryStage(stage: number | null): void
   /** Presentation-only bounded path trace; evaluators remain renderer-independent. */
   setTrainingPath(path: readonly Vector3[]): void
   setReplayPath(path: readonly Vector3[]): void
@@ -699,9 +702,70 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   }
   scene.add(wideGateField)
 
+  // L10 supplies visual room and a world-horizontal reference, with no solid
+  // planes or physical obstacles. Its center follows the supported launch X/Z.
+  const recoveryField = new THREE.Group()
+  recoveryField.name = 'basic-recovery-field'
+  recoveryField.position.set(field.launch.x, config.ground.heightM + BASIC_RECOVERY_TARGET_HEIGHT_M, field.launch.z)
+  recoveryField.visible = false
+  const recoveryFloor = new THREE.Mesh(
+    new THREE.RingGeometry(BASIC_RECOVERY_AREA_RADIUS_M - 0.07, BASIC_RECOVERY_AREA_RADIUS_M, 128),
+    new THREE.MeshBasicMaterial({ color: 0x8abac4, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false }),
+  )
+  recoveryFloor.name = 'recovery-area-boundary'
+  recoveryFloor.rotation.x = -Math.PI / 2
+  recoveryFloor.position.y = -BASIC_RECOVERY_TARGET_HEIGHT_M + 0.025
+  recoveryField.add(recoveryFloor)
+
+  const recoveryHeightPole = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(8, -BASIC_RECOVERY_TARGET_HEIGHT_M, -10), new THREE.Vector3(8, 8.3 - BASIC_RECOVERY_TARGET_HEIGHT_M, -10),
+      ...[BASIC_RECOVERY_MIN_PREPARATION_HEIGHT_M, BASIC_RECOVERY_TARGET_HEIGHT_M, 8].flatMap((height) => [
+        new THREE.Vector3(7.6, height - BASIC_RECOVERY_TARGET_HEIGHT_M, -10), new THREE.Vector3(8.4, height - BASIC_RECOVERY_TARGET_HEIGHT_M, -10),
+      ]),
+    ]),
+    new THREE.LineBasicMaterial({ color: 0x8abac4, transparent: true, opacity: 0.7, depthWrite: false }),
+  )
+  recoveryHeightPole.name = 'recovery-height-pole'
+  recoveryField.add(recoveryHeightPole)
+
+  const recoveryHeightBand = new THREE.LineLoop(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-6, BASIC_RECOVERY_MIN_PREPARATION_HEIGHT_M - BASIC_RECOVERY_TARGET_HEIGHT_M, -12),
+      new THREE.Vector3(6, BASIC_RECOVERY_MIN_PREPARATION_HEIGHT_M - BASIC_RECOVERY_TARGET_HEIGHT_M, -12),
+      new THREE.Vector3(6, 8 - BASIC_RECOVERY_TARGET_HEIGHT_M, -12),
+      new THREE.Vector3(-6, 8 - BASIC_RECOVERY_TARGET_HEIGHT_M, -12),
+    ]),
+    new THREE.LineBasicMaterial({ color: 0x8abac4, transparent: true, opacity: 0.25, depthWrite: false }),
+  )
+  recoveryHeightBand.name = 'recovery-height-band'
+  recoveryField.add(recoveryHeightBand)
+
+  const recoveryAccent = new THREE.Group()
+  recoveryAccent.name = 'recovery-stage-guidance'
+  const recoveryStageMaterial = new THREE.LineBasicMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.9, depthWrite: false })
+  const recoveryLevel = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-5, 0, -12), new THREE.Vector3(5, 0, -12),
+      new THREE.Vector3(-5, -0.25, -12), new THREE.Vector3(-5, 0.25, -12),
+      new THREE.Vector3(5, -0.25, -12), new THREE.Vector3(5, 0.25, -12),
+      new THREE.Vector3(0, -0.16, -12), new THREE.Vector3(0, 0.16, -12),
+    ]), recoveryStageMaterial,
+  )
+  recoveryLevel.name = 'recovery-level-reference'
+  recoveryAccent.add(recoveryLevel)
+  recoveryField.add(recoveryAccent)
+  scene.add(recoveryField)
+
+  const recoveryReference: FlightSceneReference = {
+    id: 'recovery-zone', kind: 'zone', object: recoveryField,
+    positionM: { x: field.launch.x, y: config.ground.heightM + BASIC_RECOVERY_TARGET_HEIGHT_M, z: field.launch.z },
+    sizeM: { x: BASIC_RECOVERY_AREA_RADIUS_M * 2, y: 3, z: BASIC_RECOVERY_AREA_RADIUS_M * 2 },
+  }
+
   const landingSurface: FlightSceneReference = { id: 'landing-surface', kind: 'zone', object: landingTarget, positionM: { ...field.landing }, sizeM: { x: LANDING_ZONE_RADIUS_M * 2, y: 0, z: LANDING_ZONE_RADIUS_M * 2 } }
   const launchReference: FlightSceneReference = { id: 'training-launch', kind: 'pad', object: takeoffPad, positionM: { ...field.launch } }
-  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences]
+  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, recoveryReference]
   const referenceById = new Map(sceneReferences.map((reference) => [reference.id, reference]))
 
   const drone = createQuadVisual()
@@ -780,7 +844,8 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     figureEightTargets.visible = lessonId === 'figure-eight'
     figureEightPath.visible = lessonId === 'figure-eight'
     wideGateField.visible = lessonId === 'wide-gate'
-    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate'].includes(lessonId ?? '')
+    recoveryField.visible = lessonId === 'basic-recovery'
+    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery'].includes(lessonId ?? '')
     for (const reference of referenceSet.contract) {
       reference.object.visible = !beginner
     }
@@ -804,6 +869,15 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
 
   const setWideGateTarget = (targetId: string | null): void => {
     for (const [id, guidance] of wideGateGuides) guidance.visible = id === targetId
+  }
+
+  const setRecoveryStage = (stage: number | null): void => {
+    if (stage === null || !Number.isInteger(stage) || stage < 0 || stage > 8) {
+      recoveryAccent.visible = false
+      return
+    }
+    recoveryAccent.visible = true
+    recoveryStageMaterial.color.set(stage === 8 ? 0xb8f36b : stage >= 3 && stage % 2 === 1 ? 0xffc978 : 0x45d7f7)
   }
 
   const setPath = (line: THREE.Line, path: readonly Vector3[], yOffset: number): void => {
@@ -851,6 +925,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     setSquareTarget,
     setFigureEightTarget,
     setWideGateTarget,
+    setRecoveryStage,
     setTrainingPath,
     setReplayPath,
     dispose: () => disposeFlightScene(scene),

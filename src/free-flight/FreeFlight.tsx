@@ -17,13 +17,14 @@ import {
 import Mode2StickOverlay from '../training/StickOverlay'
 import { trainingHint, trainingObjective, wideGateCollisionCause } from '../training/feedback'
 import { createResultReplaySnapshot, type ResultReplayMarker, type ResultReplaySnapshot } from '../training/resultReplay'
-import { createTeachingDemonstration, teachingCueAt, teachingTargetAt, type TeachingDemonstration, type TeachingDemonstrationKind } from '../training/demonstrations'
+import { createTeachingDemonstration, teachingCueAt, teachingTargetAt, teachingRecoveryPhaseAt, type TeachingDemonstration, type TeachingDemonstrationKind } from '../training/demonstrations'
 import { DIRECTION_CONTROL_TARGET_IDS } from '../training/directionControl'
 import { COORDINATED_TURN_TARGET_IDS } from '../training/coordinatedTurn'
 import { SQUARE_ROUTE_TARGET_IDS } from '../training/squareRoute'
 import { FIGURE_EIGHT_TARGET_IDS } from '../training/figureEight'
 import { createTrainingFieldAnchors } from '../training/field'
 import { createWideGates, WIDE_GATE_IDS } from '../world/wideGates'
+import { measureBasicRecoveryMotion } from '../training/basicRecovery'
 import type { TrainingMachineState, TrainingSample, TrainingSceneReference, TrainingSetupRequest } from '../training/types'
 import { copyTuningSettings, flightSimulationConfigFromTuning, type TuningSettings } from '../tuning'
 import { REPLAY_SPEEDS, type ReplaySpeed } from '../replay'
@@ -343,7 +344,11 @@ export default function FreeFlight({
       ? demonstration ? teachingTargetAt(demonstration, telemetry.replay.currentTimeSeconds) : null
       : Number.isInteger(gateIndex) && gateIndex >= 0 ? WIDE_GATE_IDS[gateIndex] ?? null : null
     rendererRef.current?.setWideGateTarget?.(gateTargetId)
-  }, [trainingState?.lessonId, trainingState?.lastEvaluation?.metrics?.directionTargetIndex, trainingState?.lastEvaluation?.metrics?.turnTargetIndex, trainingState?.lastEvaluation?.metrics?.squareTargetIndex, trainingState?.lastEvaluation?.metrics?.eightTargetIndex, trainingState?.lastEvaluation?.metrics?.gateTargetIndex, rendererRetryKey, telemetry?.replay.active, telemetry?.replay.currentTimeSeconds, demonstration])
+    const recoveryPhase = lessonId !== 'basic-recovery' ? null : telemetry?.replay.active
+      ? demonstration ? teachingRecoveryPhaseAt(demonstration, telemetry.replay.currentTimeSeconds) : null
+      : trainingState?.lastEvaluation?.metrics?.recoveryPhase ?? 0
+    rendererRef.current?.setRecoveryStage?.(recoveryPhase)
+  }, [trainingState?.lessonId, trainingState?.lastEvaluation?.metrics?.directionTargetIndex, trainingState?.lastEvaluation?.metrics?.turnTargetIndex, trainingState?.lastEvaluation?.metrics?.squareTargetIndex, trainingState?.lastEvaluation?.metrics?.eightTargetIndex, trainingState?.lastEvaluation?.metrics?.gateTargetIndex, trainingState?.lastEvaluation?.metrics?.recoveryPhase, rendererRetryKey, telemetry?.replay.active, telemetry?.replay.currentTimeSeconds, demonstration])
 
   useEffect(() => {
     rendererRef.current?.setTrainingPath(trainingPath.map((sample) => sample.state.positionM))
@@ -508,6 +513,11 @@ export default function FreeFlight({
     positionConfig ?? settings.drone,
   )
   const collisionCause = telemetry?.state.warnings.map(wideGateCollisionCause).find(Boolean)
+  const showRecoveryHud = telemetry?.replay.active && demonstration
+    ? demonstration.lessonId === 'basic-recovery'
+    : trainingState?.lessonId === 'basic-recovery'
+  const recoveryMotionState = telemetry?.replay.active ? replayGhost : telemetry?.state
+  const recoveryMotion = showRecoveryHud && recoveryMotionState ? measureBasicRecoveryMotion(recoveryMotionState) : null
   const recovery = trainingState?.recoveryInProgress ? trainingState.lastRecovery : null
   const currentObjective = trainingObjective(trainingState?.lessonId ?? null, trainingState?.lastEvaluation)
   const visibleResultReplay = resultReplay?.sessionId === trainingState?.result?.sessionId && !demonstration ? resultReplay : null
@@ -531,9 +541,9 @@ export default function FreeFlight({
         </div>
       </div>
 
-      <div className="school-demo-bar" aria-label="L00 四軸與起飛示範">
+      <div className="school-demo-bar school-demo-toolbar" aria-label="L00 四軸與起飛示範">
         <strong>L00 看懂四軸</strong>
-        {([['roll', '橫滾 Roll'], ['pitch', '俯仰 Pitch'], ['yaw', '偏航 Yaw'], ['takeoff', 'L01 起飛示範'], ['straight-line', 'L03 直線示範'], ['landing', 'L04 降落示範'], ['direction-control', 'L05 方向示範'], ['coordinated-turn', 'L06 轉彎示範'], ['square-route', 'L07 方形示範'], ['figure-eight', 'L08 八字示範'], ['wide-gate', 'L09 穿門示範']] as const).map(([kind, label]) => <button className="lab-button lab-button-small" type="button" key={kind} disabled={trainingSettingsLocked || Boolean(telemetry?.armed) || renderingState !== 'ready'} onClick={() => startDemonstration(kind)}>{label}</button>)}
+        {([['roll', '橫滾 Roll'], ['pitch', '俯仰 Pitch'], ['yaw', '偏航 Yaw'], ['takeoff', 'L01 起飛示範'], ['straight-line', 'L03 直線示範'], ['landing', 'L04 降落示範'], ['direction-control', 'L05 方向示範'], ['coordinated-turn', 'L06 轉彎示範'], ['square-route', 'L07 方形示範'], ['figure-eight', 'L08 八字示範'], ['wide-gate', 'L09 穿門示範'], ['basic-recovery', 'L10 恢復示範']] as const).map(([kind, label]) => <button className="lab-button lab-button-small" type="button" key={kind} disabled={trainingSettingsLocked || Boolean(telemetry?.armed) || renderingState !== 'ready'} onClick={() => startDemonstration(kind)}>{label}</button>)}
         <span>左桿：油門／偏航 · 右桿：橫滾／俯仰</span>
       </div>
       {fullscreenError && <p role="status">{fullscreenError}</p>}
@@ -546,13 +556,14 @@ export default function FreeFlight({
             <button className="lab-button lab-button-primary" type="button" onClick={exitReplay}>{demonstration ? '結束示範' : '結束回放'}</button>
             <span>結束後回到練習，仍需自行解鎖。</span>
           </div>}
-          <div className="free-flight-viewport" role="group" aria-label="Three.js Free Flight simulation viewport">
+          <div className={`free-flight-viewport${showRecoveryHud ? ' has-recovery-hud' : ''}`} role="group" aria-label="Three.js Free Flight simulation viewport">
             <canvas key={rendererRetryKey} ref={canvasRef} className="flight-canvas" aria-label="Free Flight 3D scene" />
             <div className="flight-viewport-overlay" aria-hidden="true">
               <span>{telemetry?.replay.active ? 'PLAYBACK GHOST' : 'LIVE SIM'} / {telemetry?.cameraMode?.toUpperCase() ?? 'FPV'}</span>
               <span>{format(telemetry?.metrics.fps, 0)} FPS · {format(telemetry?.metrics.simHz, 0)} SIM HZ</span>
             </div>
-            <div className="flight-position-hud" role="group" aria-label="飛行位置">
+            <div className={showRecoveryHud ? 'flight-instruments' : undefined}>
+              <div className="flight-position-hud" role="group" aria-label="飛行位置">
               <div className="flight-altitude"><span>{telemetry?.replay.active ? '回放高度' : '高度'} <small>地面上方</small></span><strong data-testid="flight-altitude">{positionValue(position.altitudeAboveGroundM)}</strong></div>
               <div className="flight-position-coordinates">
                 <span data-testid="flight-position-x">X 左右 <b data-testid="flight-position-right">{positionValue(position.rightM, true)}</b></span>
@@ -560,6 +571,15 @@ export default function FreeFlight({
                 <span>Z 前後 <b data-testid="flight-position-z">{positionValue(position.zM, true)}</b></span>
               </div>
               <small>相對起飛點 · −Z 為前方 · 單位 m</small>
+              </div>
+              {showRecoveryHud && <div className="flight-recovery-hud" role="group" aria-label="恢復練習數值">
+                <strong>{telemetry?.replay.active ? '回放恢復數值' : '即時恢復數值'}</strong>
+                <div>
+                  <span>傾斜角<b data-testid="recovery-tilt">{format(recoveryMotion?.tiltDegrees, 1)}°</b></span>
+                  <span>升降速度<b data-testid="recovery-vertical-speed">{format(recoveryMotion?.verticalSpeedMps, 1)} m/s</b></span>
+                  <span>水平速度<b data-testid="recovery-horizontal-speed">{format(recoveryMotion?.horizontalSpeedMps, 1)} m/s</b></span>
+                </div>
+              </div>}
             </div>
             {renderingState !== 'ready' && (
               <div className="flight-rendering-error" role="alert" data-testid="flight-rendering-error">
@@ -581,7 +601,7 @@ export default function FreeFlight({
             {renderingState === 'ready' && telemetry?.replay.active && <div className="flight-safe-overlay">{demonstration ? demonstration.title : '飛行回放'} · 真人飛行已停止</div>}
             {trainingState?.phase === 'ACTIVE' && <div tabIndex={0} aria-label="目前練習提示" className={`school-viewport-hint${recovery ? ' is-recovering' : ''}`}>{recovery
               ? <><strong>重練原因（當時數值）：{recovery.message}</strong><span>{recovery.hint}</span></>
-              : currentObjective && trainingState.lastEvaluation?.recovery !== 'restart' ? <><strong>{currentObjective.title}</strong><span>{trainingState.lessonId === 'direction-control' || trainingState.lessonId === 'coordinated-turn' || trainingState.lessonId === 'square-route' || trainingState.lessonId === 'figure-eight' || trainingState.lessonId === 'wide-gate' || !trainingState.lastEvaluation?.hint ? currentObjective.detail : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</span></> : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>}
+              : currentObjective && trainingState.lastEvaluation?.recovery !== 'restart' ? <><strong>{currentObjective.title}</strong><span>{trainingState.lessonId === 'direction-control' || trainingState.lessonId === 'coordinated-turn' || trainingState.lessonId === 'square-route' || trainingState.lessonId === 'figure-eight' || trainingState.lessonId === 'wide-gate' || trainingState.lessonId === 'basic-recovery' || !trainingState.lastEvaluation?.hint ? currentObjective.detail : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</span></> : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>}
           </div>
           <div className="flight-controls" aria-label="Flight controls">
             <div className="flight-control-group">

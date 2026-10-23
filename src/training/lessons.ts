@@ -5,6 +5,7 @@ import { COORDINATED_TURN_LESSON } from './coordinatedTurn'
 import { SQUARE_ROUTE_LESSON } from './squareRoute'
 import { FIGURE_EIGHT_LESSON } from './figureEight'
 import { WIDE_GATE_LESSON } from './wideGate'
+import { BASIC_RECOVERY_LESSON } from './basicRecovery'
 import {
   hoverEvaluator,
   orbitEvaluator,
@@ -222,6 +223,7 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
   SQUARE_ROUTE_LESSON,
   FIGURE_EIGHT_LESSON,
   WIDE_GATE_LESSON,
+  BASIC_RECOVERY_LESSON,
 ]
 
 export const TRAINING_LESSONS = DEFAULT_LESSONS

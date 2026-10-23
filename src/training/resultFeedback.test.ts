@@ -588,3 +588,113 @@ describe('observed result coaching', () => {
   })
 
 })
+
+describe('L10 observed recovery results', () => {
+  const recoveryResult: TrainingResult = { ...result, lessonId: 'basic-recovery', totalCheckpoints: 8,
+    attemptContext: { ...currentContext, rulesVersion: 5 }, message: 'Stopped',
+    metrics: { recoveryPhase: 2, exercisesCompleted: 0, exerciseReady: 0, currentEpisodeValid: 0,
+      episodeInterrupted: 0, altitudeM: 6, groundTouching: 0, insideRecoveryArea: 1 } }
+
+  it('reports the three actual error/recovery pairs without claiming mastery or precise position holding', () => {
+    const feedback = summarizeTrainingResult({ ...recoveryResult, outcome: 'SUCCESS', completedCheckpoints: 8,
+      metrics: { recoveryPhase: 8, exercisesCompleted: 3 } })
+    expect(feedback.observedStrength).toContain('實際製造並修正傾斜、下沉與漂移')
+    expect(feedback.observedStrength).toContain('從地面自行起飛')
+    expect(feedback.observedGap).toBeNull()
+    expect(feedback.nextPractice).toContain('相同條件再練一次')
+    expect(feedback.nextPractice).toContain('不需回到原位置或降落')
+    expect(feedback.scopeNote).toContain('不代表已熟練')
+  })
+
+  it('does not infer takeoff or recovery skill from missing phase evidence or no samples', () => {
+    const unknown = summarizeTrainingResult({ ...recoveryResult, metrics: {} })
+    expect(unknown.observedStrength).toBeNull()
+    expect(unknown.observedGap).toContain('分段資料不足')
+    expect(unknown.observedGap).not.toContain('尚未完成從地面')
+    const ground = summarizeTrainingResult({ ...recoveryResult, metrics: { recoveryPhase: 1 } })
+    expect(ground.observedStrength).toBeNull()
+    expect(ground.observedGap).toContain('尚未完成從地面自行起飛並取得練習高度')
+    const none = summarizeTrainingResult({ ...recoveryResult, sampleCount: 0, outcome: 'SUCCESS',
+      metrics: { recoveryPhase: 8, exercisesCompleted: 3 } })
+    expect(none.observedStrength).toBeNull()
+    expect(none.observedGap).toContain('沒有有效的已解鎖飛行樣本')
+  })
+
+  it.each([
+    ['Ground impact latched a crash; reset required.', '本次發生墜毀'],
+    ['Obstacle collision: unexpected-box; reset required.', '本次發生墜毀'],
+    ['Attempt disarmed because focus was lost.', '解除解鎖、失去焦點'],
+    ['失誤恢復停止：資料中斷、時間倒退或模擬被重設。', '飛行資料無效、中斷或被重設'],
+    ['失誤恢復停止：缺少有效的地面接觸資料。', '飛行資料無效、中斷或被重設'],
+  ])('preserves explicit cause before stage performance or missing samples: %s', (message, cause) => {
+    const feedback = summarizeTrainingResult({ ...recoveryResult, sampleCount: 0, message,
+      metrics: { recoveryPhase: 7, exercisesCompleted: 2, currentEpisodeValid: 1, horizontalSpeedMps: 4 } })
+    expect(feedback.observedGap).toContain(cause)
+    expect(feedback.observedStrength).toBeNull()
+    expect(feedback.observedGap).not.toMatch(/水平速度|沒有有效的已解鎖飛行樣本/)
+    expect(feedback.nextPractice).toContain('再練一次')
+    expect(feedback.nextPractice).toContain('清空本次步驟')
+  })
+
+  it('identifies incomplete preparation and ready-onset separately without crediting input gestures', () => {
+    const prepare = summarizeTrainingResult(recoveryResult)
+    expect(prepare.observedGap).toContain('尚未完成本項的準備確認')
+    expect(prepare.observedGap).not.toContain('已記錄本項偏差')
+    const ready = summarizeTrainingResult({ ...recoveryResult,
+      metrics: { ...recoveryResult.metrics, exerciseReady: 1 } })
+    expect(ready.observedGap).toContain('已準備完成，但尚未偵測到本項實際傾斜')
+    expect(ready.observedGap).toContain('只推動搖桿不能代替飛行狀態')
+    expect(ready.observedStrength).not.toContain('恢復練習')
+  })
+
+  it('names the incomplete recovery and final measured tilt and rate without guessing its cause', () => {
+    const feedback = summarizeTrainingResult({ ...recoveryResult, metrics: { ...recoveryResult.metrics,
+      recoveryPhase: 3, currentEpisodeValid: 1, tiltDegrees: 17, bodyRateDegreesPerSecond: 55,
+      recoveryDwellSeconds: 0 } })
+    expect(feedback.observedGap).toContain('尚未完成「主動修回水平」')
+    expect(feedback.observedGap).toContain('結束時傾角 17.0°')
+    expect(feedback.observedGap).toContain('55.0°/s 旋轉')
+    expect(feedback.observedGap).not.toContain('因為')
+    expect(feedback.nextPractice).toContain('回中會停止旋轉，回到水平需要主動修正')
+  })
+
+  it('distinguishes excessive upward velocity from recovered sinking and reports the final signed speed', () => {
+    const feedback = summarizeTrainingResult({ ...recoveryResult, metrics: { ...recoveryResult.metrics,
+      recoveryPhase: 5, exercisesCompleted: 1, currentEpisodeValid: 1, verticalSpeedMps: 2,
+      tiltDegrees: 0, bodyRateDegreesPerSecond: 0, recoveryDwellSeconds: 0 } })
+    expect(feedback.observedStrength).toContain('1 / 3 項恢復練習')
+    expect(feedback.observedGap).toContain('升降速度 2.0 m/s（上＋／下−）')
+    expect(feedback.observedGap).toContain('±0.6 m/s 內')
+    expect(feedback.observedGap).not.toContain('仍在下沉')
+  })
+
+  it('does not classify a brief speed reduction with a tilted body as complete drift recovery', () => {
+    const feedback = summarizeTrainingResult({ ...recoveryResult, metrics: { ...recoveryResult.metrics,
+      recoveryPhase: 7, exercisesCompleted: 2, currentEpisodeValid: 1,
+      horizontalSpeedMps: 0.4, verticalSpeedMps: 0, tiltDegrees: 22,
+      bodyRateDegreesPerSecond: 0, recoveryDwellSeconds: 0.1 } })
+    expect(feedback.observedStrength).toContain('2 / 3 項恢復練習')
+    expect(feedback.observedGap).toContain('機身仍傾斜 22.0°')
+    expect(feedback.observedGap).toContain('恢復確認 0.10／0.50 s')
+    expect(feedback.nextPractice).toContain('反方向適度傾斜減速')
+    expect(feedback.nextPractice).toContain('回中不會自動煞停')
+  })
+
+  it.each([
+    [{ groundTouching: 1, altitudeM: 0.06 }, '碰地停住不能算空中恢復'],
+    [{ altitudeM: 2.1 }, '未保留恢復需要的 2.5 m 高度餘裕'],
+    [{ currentEpisodeValid: 0, episodeInterrupted: 1 }, '先前的偏差已中斷'],
+    [{ insideRecoveryArea: 0 }, '恢復確認已暫停'],
+  ] as const)('reports episode interruption or pause without promising retained progress after terminal retry: %j', (changes, cause) => {
+    const feedback = summarizeTrainingResult({ ...recoveryResult,
+      message: '失誤恢復挑戰逾時：尚未完成三種實際偏差與恢復。',
+      metrics: { ...recoveryResult.metrics, recoveryPhase: 5, exercisesCompleted: 1,
+        currentEpisodeValid: 1, ...changes } })
+    expect(feedback.observedGap).toContain('挑戰逾時')
+    expect(feedback.observedGap).toContain(cause)
+    expect(feedback.observedStrength).toContain('1 / 3 項恢復練習')
+    expect(feedback.nextPractice).toContain('清空本次步驟')
+    expect(feedback.nextPractice).toContain('從地面重新開始')
+    expect(feedback.nextPractice).not.toMatch(/保留|就地|繼續本項/)
+  })
+})

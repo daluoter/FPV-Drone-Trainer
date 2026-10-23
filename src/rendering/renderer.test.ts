@@ -263,4 +263,49 @@ describe('FlightRenderer lifecycle and failure contract', () => {
     }
   })
 
+  it('retains the L10 recovery stage and ground-relative guides on the same renderer and canvas', () => {
+    const rendererStub = createRendererStub()
+    const canvas = document.createElement('canvas')
+    const renderer = new FlightRenderer(canvas, { rendererFactory: () => rendererStub })
+    try {
+      renderer.setLessonTarget('basic-recovery')
+      renderer.setRecoveryStage(5)
+      const previous = renderer.flightScene
+      const disposePrevious = vi.spyOn(previous, 'dispose')
+      renderer.reconfigureScene({ ...DEFAULT_DRONE_CONFIG,
+        ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 20, z: -3 } })
+      const area = renderer.scene.getObjectByName('basic-recovery-field')!
+      const accent = renderer.scene.getObjectByName('recovery-stage-guidance')!
+      const level = renderer.scene.getObjectByName('recovery-level-reference') as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      expect(area.visible).toBe(true)
+      expect(accent.visible).toBe(true)
+      expect(level.material.color.getHex()).toBe(0xffc978)
+      expect(renderer.flightScene.getReference('recovery-zone')?.positionM).toEqual({ x: 6, y: 11, z: -3 })
+      expect(renderer.scene.getObjectByName('wide-gate-field')?.visible).toBe(false)
+      expect(renderer.flightScene.getReference('orbit-poi')?.object.visible).toBe(false)
+      expect(renderer.canvas).toBe(canvas)
+      expect(renderer.renderer).toBe(rendererStub)
+      expect(disposePrevious).toHaveBeenCalledOnce()
+      renderer.setRecoveryStage(8)
+      expect(level.material.color.getHex()).toBe(0xb8f36b)
+      renderer.setRecoveryStage(null)
+      expect(accent.visible).toBe(false)
+      expect(area.visible).toBe(true)
+      renderer.reconfigureScene(DEFAULT_DRONE_CONFIG)
+      expect(renderer.scene.getObjectByName('basic-recovery-field')?.visible).toBe(true)
+      expect(renderer.scene.getObjectByName('recovery-stage-guidance')?.visible).toBe(false)
+      renderer.setRecoveryStage(2)
+      const updatedLevel = renderer.scene.getObjectByName('recovery-level-reference') as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      expect(updatedLevel.material.color.getHex()).toBe(0x45d7f7)
+      renderer.render(createInitialDroneState(DEFAULT_DRONE_CONFIG))
+      expect(renderer.getStatus()).toEqual({ kind: 'ready' })
+      expect(rendererStub.render).toHaveBeenCalledOnce()
+      renderer.setLessonTarget('wide-gate')
+      expect(renderer.scene.getObjectByName('basic-recovery-field')?.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('wide-gate-field')?.visible).toBe(true)
+    } finally {
+      renderer.dispose()
+    }
+  })
+
 })

@@ -5,6 +5,7 @@ import { COORDINATED_TURN_LEARNING_CONTENT } from './coordinatedTurn'
 import { SQUARE_ROUTE_LEARNING_CONTENT } from './squareRoute'
 import { FIGURE_EIGHT_LEARNING_CONTENT } from './figureEight'
 import { WIDE_GATE_LEARNING_CONTENT } from './wideGate'
+import { BASIC_RECOVERY_LEARNING_CONTENT } from './basicRecovery'
 
 export interface LessonLearningContent {
   readonly code: string
@@ -61,6 +62,7 @@ const LEARNING_CONTENT: Readonly<Record<string, LessonLearningContent>> = {
   'square-route': SQUARE_ROUTE_LEARNING_CONTENT,
   'figure-eight': FIGURE_EIGHT_LEARNING_CONTENT,
   'wide-gate': WIDE_GATE_LEARNING_CONTENT,
+  'basic-recovery': BASIC_RECOVERY_LEARNING_CONTENT,
   'split-s': {
     code: 'L13',
     title: 'Split-S 翻轉下降',
