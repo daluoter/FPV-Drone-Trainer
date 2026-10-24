@@ -10,6 +10,7 @@ import { createCoordinatedTurnTargets, COORDINATED_TURN_TARGET_RADIUS_M } from '
 import { createSquareRouteTargets, SQUARE_ROUTE_TARGET_RADIUS_M } from '../training/squareRoute'
 import { createFigureEightTargets, FIGURE_EIGHT_TARGET_RADIUS_M } from '../training/figureEight'
 import { BASIC_RECOVERY_AREA_RADIUS_M, BASIC_RECOVERY_MIN_PREPARATION_HEIGHT_M, BASIC_RECOVERY_TARGET_HEIGHT_M } from '../training/basicRecovery'
+import { FULL_ROLL_AREA_RADIUS_M, FULL_ROLL_MIN_PREPARATION_HEIGHT_M, FULL_ROLL_TARGET_HEIGHT_M } from '../training/fullRoll'
 import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
 import type { Vector3 } from '../math/vector'
 import type { ReplayGhostState } from '../replay'
@@ -54,6 +55,8 @@ export interface FlightScene {
   setWideGateTarget(targetId: string | null): void
   /** Color a presentation-only L10 stage; null hides its accent, not the area. */
   setRecoveryStage(stage: number | null): void
+  /** Color the full-roll guide without changing the drone or its control inputs. */
+  setFullRollStage(stage: number | null): void
   /** Presentation-only bounded path trace; evaluators remain renderer-independent. */
   setTrainingPath(path: readonly Vector3[]): void
   setReplayPath(path: readonly Vector3[]): void
@@ -763,9 +766,76 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     sizeM: { x: BASIC_RECOVERY_AREA_RADIUS_M * 2, y: 8 - BASIC_RECOVERY_MIN_PREPARATION_HEIGHT_M, z: BASIC_RECOVERY_AREA_RADIUS_M * 2 },
   }
 
+  // World-fixed lines provide an upright reference while the FPV camera rolls.
+  // These are visual guides; this open practice area adds no solid obstacles.
+  const rollField = new THREE.Group()
+  rollField.name = 'full-roll-field'
+  rollField.position.set(field.launch.x, config.ground.heightM + FULL_ROLL_TARGET_HEIGHT_M, field.launch.z)
+  rollField.visible = false
+  const rollFloor = new THREE.Mesh(
+    new THREE.RingGeometry(FULL_ROLL_AREA_RADIUS_M - 0.07, FULL_ROLL_AREA_RADIUS_M, 128),
+    new THREE.MeshBasicMaterial({ color: 0x8abac4, transparent: true, opacity: 0.4, side: THREE.DoubleSide, depthWrite: false }),
+  )
+  rollFloor.name = 'roll-area-boundary'
+  rollFloor.rotation.x = -Math.PI / 2
+  rollFloor.position.y = -FULL_ROLL_TARGET_HEIGHT_M + 0.025
+  rollField.add(rollFloor)
+  const rollGuideTopM = FULL_ROLL_TARGET_HEIGHT_M + 4
+  const rollHeightPole = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(10, -FULL_ROLL_TARGET_HEIGHT_M, -16), new THREE.Vector3(10, rollGuideTopM - FULL_ROLL_TARGET_HEIGHT_M, -16),
+      ...[FULL_ROLL_MIN_PREPARATION_HEIGHT_M, FULL_ROLL_TARGET_HEIGHT_M, rollGuideTopM].flatMap((height) => [
+        new THREE.Vector3(9.5, height - FULL_ROLL_TARGET_HEIGHT_M, -16), new THREE.Vector3(10.5, height - FULL_ROLL_TARGET_HEIGHT_M, -16),
+      ]),
+    ]),
+    new THREE.LineBasicMaterial({ color: 0x8abac4, transparent: true, opacity: 0.75, depthWrite: false }),
+  )
+  rollHeightPole.name = 'roll-height-pole'
+  rollField.add(rollHeightPole)
+  const rollHeightBand = new THREE.LineLoop(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-8, FULL_ROLL_MIN_PREPARATION_HEIGHT_M - FULL_ROLL_TARGET_HEIGHT_M, -16),
+      new THREE.Vector3(8, FULL_ROLL_MIN_PREPARATION_HEIGHT_M - FULL_ROLL_TARGET_HEIGHT_M, -16),
+      new THREE.Vector3(8, rollGuideTopM - FULL_ROLL_TARGET_HEIGHT_M, -16),
+      new THREE.Vector3(-8, rollGuideTopM - FULL_ROLL_TARGET_HEIGHT_M, -16),
+    ]),
+    new THREE.LineBasicMaterial({ color: 0x8abac4, transparent: true, opacity: 0.25, depthWrite: false }),
+  )
+  rollHeightBand.name = 'roll-height-band'
+  rollField.add(rollHeightBand)
+  const rollAccent = new THREE.Group()
+  rollAccent.name = 'roll-stage-guidance'
+  const rollStageMaterial = new THREE.LineBasicMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.95, depthWrite: false })
+  const rollLevel = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-8, 0, -16), new THREE.Vector3(8, 0, -16),
+      new THREE.Vector3(-8, -0.4, -16), new THREE.Vector3(-8, 0.4, -16),
+      new THREE.Vector3(8, -0.4, -16), new THREE.Vector3(8, 0.4, -16),
+      new THREE.Vector3(0, -0.2, -16), new THREE.Vector3(0, 0.2, -16),
+    ]), rollStageMaterial,
+  )
+  rollLevel.name = 'roll-level-reference'
+  const rollUpMaterial = rollStageMaterial.clone()
+  const rollUp = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0.6, -16), new THREE.Vector3(0, 2, -16),
+      new THREE.Vector3(-0.6, 1.4, -16), new THREE.Vector3(0, 2, -16),
+      new THREE.Vector3(0.6, 1.4, -16), new THREE.Vector3(0, 2, -16),
+    ]), rollUpMaterial,
+  )
+  rollUp.name = 'roll-world-up-reference'
+  rollAccent.add(rollLevel, rollUp)
+  rollField.add(rollAccent)
+  scene.add(rollField)
+  const rollReference: FlightSceneReference = {
+    id: 'roll-zone', kind: 'zone', object: rollField,
+    positionM: { x: field.launch.x, y: config.ground.heightM + FULL_ROLL_TARGET_HEIGHT_M, z: field.launch.z },
+    sizeM: { x: FULL_ROLL_AREA_RADIUS_M * 2, y: rollGuideTopM - FULL_ROLL_MIN_PREPARATION_HEIGHT_M, z: FULL_ROLL_AREA_RADIUS_M * 2 },
+  }
+
   const landingSurface: FlightSceneReference = { id: 'landing-surface', kind: 'zone', object: landingTarget, positionM: { ...field.landing }, sizeM: { x: LANDING_ZONE_RADIUS_M * 2, y: 0, z: LANDING_ZONE_RADIUS_M * 2 } }
   const launchReference: FlightSceneReference = { id: 'training-launch', kind: 'pad', object: takeoffPad, positionM: { ...field.launch } }
-  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, recoveryReference]
+  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, recoveryReference, rollReference]
   const referenceById = new Map(sceneReferences.map((reference) => [reference.id, reference]))
 
   const drone = createQuadVisual()
@@ -845,7 +915,8 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     figureEightPath.visible = lessonId === 'figure-eight'
     wideGateField.visible = lessonId === 'wide-gate'
     recoveryField.visible = lessonId === 'basic-recovery'
-    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery'].includes(lessonId ?? '')
+    rollField.visible = lessonId === 'full-roll'
+    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll'].includes(lessonId ?? '')
     for (const reference of referenceSet.contract) {
       reference.object.visible = !beginner
     }
@@ -878,6 +949,17 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     }
     recoveryAccent.visible = true
     recoveryStageMaterial.color.set(stage === 8 ? 0xb8f36b : stage >= 3 && stage % 2 === 1 ? 0xffc978 : 0x45d7f7)
+  }
+
+  const setFullRollStage = (stage: number | null): void => {
+    if (stage === null || !Number.isInteger(stage) || stage < 0 || stage > 6) {
+      rollAccent.visible = false
+      return
+    }
+    rollAccent.visible = true
+    const color = stage >= 5 ? 0xb8f36b : stage >= 3 ? 0xffc978 : 0x45d7f7
+    rollStageMaterial.color.set(color)
+    rollUpMaterial.color.set(color)
   }
 
   const setPath = (line: THREE.Line, path: readonly Vector3[], yOffset: number): void => {
@@ -926,6 +1008,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     setFigureEightTarget,
     setWideGateTarget,
     setRecoveryStage,
+    setFullRollStage,
     setTrainingPath,
     setReplayPath,
     dispose: () => disposeFlightScene(scene),

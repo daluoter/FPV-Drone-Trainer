@@ -723,3 +723,130 @@ describe('L10 observed recovery results', () => {
     expect(feedback.nextPractice).not.toMatch(/保留|就地|繼續本項/)
   })
 })
+
+describe('L10 observed complete-roll results', () => {
+  const rollResult: TrainingResult = { ...result, lessonId: 'full-roll', totalCheckpoints: 6,
+    attemptContext: { ...currentContext, rulesVersion: 6 }, completedCheckpoints: 3,
+    metrics: { rollPhase: 3, rollEpisodeValid: 1, rollProgressDegrees: 0, rollDirection: 0,
+      rollInverted: 0, rollCompleted: 0, rollInterrupted: 0, groundTouching: 0,
+      insideRollArea: 1, altitudeM: 10, tiltDegrees: 0, bodyRateDegreesPerSecond: 0,
+      horizontalSpeedMps: 0, verticalSpeedMps: 0, recoveryDwellSeconds: 0 } }
+
+  it('reports measured full-turn and airborne recovery without implying mastery or requiring a landing', () => {
+    const feedback = summarizeTrainingResult({ ...rollResult, outcome: 'SUCCESS', completedCheckpoints: 6,
+      metrics: { ...rollResult.metrics, rollPhase: 6, rollCompleted: 1, rollInverted: 1, rollProgressDegrees: 359 } })
+    expect(feedback.observedStrength).toContain('同一圈的實際倒飛、完整橫滾')
+    expect(feedback.observedStrength).toContain('空中正飛與控制恢復')
+    expect(feedback.observedGap).toBeNull()
+    expect(feedback.nextPractice).toContain('熟悉後再練另一側')
+    expect(feedback.nextPractice).toContain('不需要回到原位置或降落')
+    expect(feedback.scopeNote).toContain('不代表已熟練')
+  })
+
+  it('does not infer rotation, liftoff or completion from absent phase data or zero samples', () => {
+    const unknown = summarizeTrainingResult({ ...rollResult, metrics: {} })
+    expect(unknown.observedStrength).toBeNull()
+    expect(unknown.observedGap).toContain('分段資料不足')
+    expect(unknown.observedGap).not.toContain('尚未完成從地面')
+    const ground = summarizeTrainingResult({ ...rollResult, metrics: { rollPhase: 1 } })
+    expect(ground.observedStrength).toBeNull()
+    expect(ground.observedGap).toContain('尚未完成從地面自行起飛並取得橫滾練習高度')
+    const none = summarizeTrainingResult({ ...rollResult, sampleCount: 0, outcome: 'SUCCESS', completedCheckpoints: 6,
+      metrics: { rollPhase: 6, rollCompleted: 1 } })
+    expect(none.observedStrength).toBeNull()
+    expect(none.observedGap).toContain('沒有有效的已解鎖飛行樣本')
+  })
+
+  it('keeps preparation, real partial rotation and the inverted milestone distinct', () => {
+    const preparing = summarizeTrainingResult({ ...rollResult,
+      metrics: { ...rollResult.metrics, rollPhase: 2, rollEpisodeValid: 0 } })
+    expect(preparing.observedGap).toContain('尚未完成橫滾前的短暫準備')
+    const partial = summarizeTrainingResult({ ...rollResult, metrics: { ...rollResult.metrics, rollProgressDegrees: 97 } })
+    expect(partial.observedGap).toContain('本圈橫滾進度約 97.0°')
+    expect(partial.observedGap).toContain('尚未觀察到這一圈的實際倒飛與完整橫滾')
+    expect(partial.observedStrength).not.toContain('倒飛姿態')
+    const inverted = summarizeTrainingResult({ ...rollResult, metrics: { ...rollResult.metrics,
+      rollPhase: 4, rollInverted: 1, rollProgressDegrees: 184 } })
+    expect(inverted.observedStrength).toContain('這一圈的實際倒飛姿態')
+    expect(inverted.observedGap).toContain('尚未沿同一方向完成一圈並回正')
+    expect(inverted.observedGap).toContain('倒飛後反向翻回不等於完成')
+    expect(inverted.observedStrength).not.toContain('完整橫滾')
+  })
+
+  it('does not reuse invalidated inversion or upright milestones as a new valid rotation', () => {
+    const feedback = summarizeTrainingResult({ ...rollResult, completedCheckpoints: 5,
+      metrics: { ...rollResult.metrics, rollPhase: 5, rollEpisodeValid: 0, rollInterrupted: 1,
+        rollInverted: 0, rollCompleted: 0, rollProgressDegrees: 0 } })
+    expect(feedback.observedGap).toContain('先前這一圈已中斷')
+    expect(feedback.observedGap).toContain('歷史倒飛或回正標記不代替新一圈')
+    expect(feedback.observedStrength).not.toContain('實際倒飛姿態')
+    expect(feedback.observedStrength).not.toContain('一圈完整橫滾')
+    expect(feedback.nextPractice).toContain('清空本次步驟')
+    expect(feedback.nextPractice).not.toMatch(/(?:步驟|進度)[^。；]*保留|保留[^。；]*(?:步驟|進度)/)
+  })
+
+  it('reports the actual tilt and unfinished hold after a valid complete turn', () => {
+    const feedback = summarizeTrainingResult({ ...rollResult, metrics: { ...rollResult.metrics,
+      rollPhase: 5, rollInverted: 1, rollCompleted: 1, rollProgressDegrees: 350,
+      tiltDegrees: 30, recoveryDwellSeconds: 0.1 } })
+    expect(feedback.observedStrength).toContain('已觀察到一圈完整橫滾')
+    expect(feedback.observedGap).toContain('結束時傾角 30.0°')
+    expect(feedback.observedGap).toContain('恢復確認 0.10／0.25 s')
+    expect(feedback.nextPractice).toContain('回中不會自動回平或煞停')
+    expect(feedback.observedGap).not.toContain('因為')
+  })
+
+  it('allows modest climb during recovery but names an excessive signed vertical speed', () => {
+    const climb = { ...rollResult.metrics, rollPhase: 5, rollInverted: 1, rollCompleted: 1,
+      rollProgressDegrees: 358, verticalSpeedMps: 2, recoveryDwellSeconds: 0.12 }
+    expect(summarizeTrainingResult({ ...rollResult, metrics: climb }).observedGap).not.toContain('升降速度')
+    expect(summarizeTrainingResult({ ...rollResult, metrics: { ...climb, verticalSpeedMps: 4 } }).observedGap)
+      .toContain('升降速度 4.0 m/s（上＋／下−），尚未回到 −1.5～+3 m/s')
+  })
+
+  it.each([
+    [{ groundTouching: 1 }, '地面停住不能算空中恢復'],
+    [{ altitudeM: 1.1 }, '未保留空中恢復需要的 1.5 m 高度'],
+    [{ insideRollArea: 0 }, '超出起飛點半徑 60 m'],
+  ] as const)('records an interrupted episode on timeout without promising retained checkpoints on retry: %j', (changes, reason) => {
+    const feedback = summarizeTrainingResult({ ...rollResult,
+      message: '橫滾挑戰逾時：尚未完成完整橫滾與空中恢復。', metrics: { ...rollResult.metrics, ...changes } })
+    expect(feedback.observedGap).toContain('挑戰逾時')
+    expect(feedback.observedGap).toContain(reason)
+    expect(feedback.nextPractice).toContain('從地面重新開始')
+    expect(feedback.nextPractice).not.toMatch(/(?:步驟|進度)[^。；]*保留|保留[^。；]*(?:步驟|進度)|就地/)
+  })
+
+  it.each([
+    ['Ground impact latched a crash; reset required.', '本次發生墜毀'],
+    ['Flight disarmed after focus was lost.', '解除解鎖、失去焦點'],
+    ['橫滾停止：姿態與角速度不一致。', '飛行資料無效、中斷或被重設'],
+    ['橫滾停止：缺少有效的地面接觸資料。', '飛行資料無效、中斷或被重設'],
+  ])('preserves the explicit terminal cause before missing samples or partial skill: %s', (message, reason) => {
+    const feedback = summarizeTrainingResult({ ...rollResult, message, sampleCount: 0,
+      metrics: { ...rollResult.metrics, rollPhase: 5, rollInverted: 1, rollCompleted: 1 } })
+    expect(feedback.observedGap).toContain(reason)
+    expect(feedback.observedStrength).toBeNull()
+    expect(feedback.observedGap).not.toContain('沒有有效的已解鎖飛行樣本')
+    expect(feedback.nextPractice).toContain('清空本次步驟')
+  })
+})
+
+describe('captured roll interruption in terminal summaries', () => {
+  it.each([
+    [4, { interruptionOffAxisDegrees: 126 }, '俯仰／偏航旋轉累積約 126.0°'],
+    [5, {}, '這一圈持續過轉'],
+    [6, {}, '這一圈反向轉過了起始姿態'],
+  ] as const)('preserves the actual interrupted-maneuver cause without reviving historical inversion: %s', (reason, captured, expected) => {
+    const feedback = summarizeTrainingResult({ ...result, lessonId: 'full-roll', totalCheckpoints: 6,
+      completedCheckpoints: 4, attemptContext: { ...currentContext, rulesVersion: 6 },
+      message: '橫滾挑戰逾時：尚未完成完整橫滾與空中恢復。',
+      metrics: { rollPhase: 4, rollInterrupted: 1, rollInterruptionReason: reason, rollEpisodeValid: 0,
+        rollInverted: 0, rollCompleted: 0, altitudeM: 10, insideRollArea: 1, groundTouching: 0, ...captured } })
+    expect(feedback.observedGap).toContain(expected)
+    expect(feedback.observedGap).toContain('挑戰逾時')
+    expect(feedback.observedStrength).not.toContain('實際倒飛姿態')
+    expect(feedback.nextPractice).toContain('清空本次步驟')
+    expect(feedback.nextPractice).not.toContain('本次先前步驟保留')
+  })
+})

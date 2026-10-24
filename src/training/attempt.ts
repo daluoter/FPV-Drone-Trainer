@@ -3,7 +3,7 @@ export const CURRENT_TRAINING_RULES_VERSION = 4
 
 /** Use the current route-course rules while preserving the approved earlier goals. */
 export function trainingRulesVersionForLesson(lessonId: string | null): 4 | 5 | 6 {
-  if (lessonId === 'basic-recovery') return 6
+  if (lessonId === 'basic-recovery' || lessonId === 'full-roll') return 6
   return lessonId === 'coordinated-turn' || lessonId === 'square-route' || lessonId === 'figure-eight' || lessonId === 'wide-gate' ? 5 : CURRENT_TRAINING_RULES_VERSION
 }
 

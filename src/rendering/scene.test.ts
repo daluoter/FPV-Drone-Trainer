@@ -204,6 +204,7 @@ describe('flight scene reference contract', () => {
         'wide-gate-2',
         'wide-gate-3',
         'recovery-zone',
+        'roll-zone',
       ])
       expect(scene.getReference('hover-zone')?.kind).toBe('zone')
       expect(scene.getReference('hover-zone')?.positionM).toEqual({ x: 0, y: 3, z: 0 })
@@ -804,6 +805,100 @@ describe('flight scene reference contract', () => {
   it('disposes the hidden L10 floor and each visual line without leaving resources behind', () => {
     const scene = createFlightScene()
     const resources = ['recovery-area-boundary', 'recovery-height-pole', 'recovery-height-band', 'recovery-level-reference'].flatMap((name) => {
+      const object = scene.scene.getObjectByName(name) as THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      return [object.geometry, object.material]
+    })
+    const dispose = resources.map((resource) => vi.spyOn(resource, 'dispose'))
+    scene.dispose()
+    for (const spy of dispose) expect(spy).toHaveBeenCalledOnce()
+  })
+
+  it('shows only the full-roll field and colors its world-upright reference without moving flight objects or anchors', () => {
+    const scene = createFlightScene()
+    const field = scene.scene.getObjectByName('full-roll-field')!
+    const accent = scene.scene.getObjectByName('roll-stage-guidance')!
+    const level = scene.scene.getObjectByName('roll-level-reference') as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
+    const up = scene.scene.getObjectByName('roll-world-up-reference') as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
+    const before = scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM: { ...positionM }, sizeM }))
+    const drone = scene.drone.position.toArray()
+    const ghost = scene.ghost.position.toArray()
+    try {
+      expect(field.visible).toBe(false)
+      scene.setLessonTarget('full-roll')
+      expect(field.visible).toBe(true)
+      for (const name of ['basic-recovery-field', 'wide-gate-field', 'figure-eight-targets', 'square-route-targets', 'coordinated-turn-targets', 'straight-line-targets', 'landing-target', 'takeoff-height-target']) {
+        expect(scene.scene.getObjectByName(name)?.visible).toBe(false)
+      }
+      for (const id of ['hover-zone', 'orbit-poi', 'split-s-reference']) expect(scene.getReference(id)?.object.visible).toBe(false)
+      for (const [stage, color] of [[0, 0x45d7f7], [2, 0x45d7f7], [3, 0xffc978], [4, 0xffc978], [5, 0xb8f36b], [6, 0xb8f36b]]) {
+        scene.setFullRollStage(stage)
+        expect(accent.visible).toBe(true)
+        expect(level.material.color.getHex()).toBe(color)
+        expect(up.material.color.getHex()).toBe(color)
+      }
+      for (const stage of [null, -1, 7, 1.5, Number.NaN]) {
+        scene.setFullRollStage(stage)
+        expect(accent.visible).toBe(false)
+        expect(field.visible).toBe(true)
+        expect(scene.scene.getObjectByName('roll-height-band')?.visible).toBe(true)
+      }
+      expect(scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM, sizeM }))).toEqual(before)
+      expect(scene.drone.position.toArray()).toEqual(drone)
+      expect(scene.ghost.position.toArray()).toEqual(ghost)
+      scene.setLessonTarget('basic-recovery')
+      expect(field.visible).toBe(false)
+      expect(scene.scene.getObjectByName('basic-recovery-field')?.visible).toBe(true)
+      scene.setLessonTarget(null)
+      expect(field.visible).toBe(false)
+      expect(scene.getReference('hover-zone')?.object.visible).toBe(true)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('anchors full-roll height and ground guides to raised ground rather than a configured airborne spawn', () => {
+    const defaults = createDefaultDroneConfig()
+    const config = { ...defaults, ground: { ...defaults.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 30, z: -3 } }
+    const original = JSON.stringify(config)
+    const scene = createFlightScene(config)
+    try {
+      const reference = scene.getReference('roll-zone')!
+      expect(scene.sceneReferences.at(-1)?.id).toBe('roll-zone')
+      expect(reference.kind).toBe('zone')
+      expect(reference.positionM).toEqual({ x: 6, y: 15, z: -3 })
+      expect(reference.object.position.toArray()).toEqual([6, 15, -3])
+      expect(reference.sizeM).toEqual({ x: 120, y: 6, z: 120 })
+      const floor = scene.scene.getObjectByName('roll-area-boundary') as THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>
+      expect(floor.geometry.parameters.innerRadius).toBeCloseTo(59.93)
+      expect(floor.geometry.parameters.outerRadius).toBe(60)
+      expect(floor.getWorldPosition(floor.position.clone()).y).toBeCloseTo(5.025)
+      const meshes: THREE.Object3D[] = []
+      reference.object.traverse((object) => { if ((object as THREE.Mesh).isMesh) meshes.push(object) })
+      expect(meshes).toEqual([floor])
+      expect(floor.material.transparent).toBe(true)
+      const band = scene.scene.getObjectByName('roll-height-band') as THREE.LineLoop<THREE.BufferGeometry>
+      const bandPoints = band.geometry.getAttribute('position')
+      expect(Array.from({ length: bandPoints.count }, (_, i) => bandPoints.getY(i) + reference.positionM.y)).toEqual([13, 13, 19, 19])
+      const level = scene.scene.getObjectByName('roll-level-reference') as THREE.LineSegments<THREE.BufferGeometry>
+      const levelPoints = level.geometry.getAttribute('position')
+      expect(levelPoints.getY(0) + reference.positionM.y).toBe(15)
+      expect(levelPoints.getY(1) + reference.positionM.y).toBe(15)
+      expect(levelPoints.getX(0) + reference.positionM.x).toBe(-2)
+      expect(levelPoints.getX(1) + reference.positionM.x).toBe(14)
+      const up = scene.scene.getObjectByName('roll-world-up-reference') as THREE.LineSegments<THREE.BufferGeometry>
+      expect(up.geometry.getAttribute('position').getY(1) + reference.positionM.y).toBe(17)
+      const worldDirection = rotateVectorByQuaternion(level.getWorldQuaternion(level.quaternion.clone()), { x: 1, y: 0, z: 0 })
+      scene.applyState({ ...createInitialDroneState(config), orientation: { x: 0, y: 0, z: -1, w: 0 } })
+      expect(rotateVectorByQuaternion(level.getWorldQuaternion(level.quaternion.clone()), { x: 1, y: 0, z: 0 })).toEqual(worldDirection)
+      expect(JSON.stringify(config)).toBe(original)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('disposes every full-roll guide including its hidden world-up marker', () => {
+    const scene = createFlightScene()
+    const resources = ['roll-area-boundary', 'roll-height-pole', 'roll-height-band', 'roll-level-reference', 'roll-world-up-reference'].flatMap((name) => {
       const object = scene.scene.getObjectByName(name) as THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>
       return [object.geometry, object.material]
     })

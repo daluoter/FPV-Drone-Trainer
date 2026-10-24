@@ -2,7 +2,7 @@
 
 ## Current scope
 
-The application implements the controller boundary, canonical Actual Rates, a modular SI angular-rate PID loop, deterministic controller-to-simulation runtime, the Free Flight presentation seam, bounded tuning, beginner lessons through L09, the retained Split-S/Orbit evaluators, and bounded replay. The application-owned poller is sampled by the runtime's requestAnimationFrame owner; React receives throttled telemetry only. The direct Three.js scene contains ground/grid, a takeoff pad, lesson guidance, L08 physical gate frames, an L09 visual recovery area, bounded training path, a live quad, and an independent replay ghost, with rigid FPV, chase and free/debug cameras. The explicit RC arm handoff consumes the Controller Lab's verified profile/session and checks current neutral/low throttle only at arm time. Developer keyboard input is opt-in and follows the same normalized RC/rates/PID path. Tuning edits a copied, validated versioned configuration and reaches flight only through an explicit disarmed reset/reconfiguration boundary. Training consumes one per-fixed-step sample hook, carries explicit armed telemetry, uses O(1) incremental evaluator state with a fixed-capacity decimated/ring path snapshot, and never mutates physics. Replay records only compact decimated fields from armed fixed-step samples, retains one bounded in-memory last flight, and interpolates an immutable ghost without writing the live `DroneState`.
+The application implements the controller boundary, canonical Actual Rates, a modular SI angular-rate PID loop, deterministic controller-to-simulation runtime, the Free Flight presentation seam, bounded tuning, beginner lessons through L10, the retained Split-S/Orbit evaluators, and bounded replay. The application-owned poller is sampled by the runtime's requestAnimationFrame owner; React receives throttled telemetry only. The direct Three.js scene contains ground/grid, a takeoff pad, lesson guidance, L08 physical gate frames, an L09 visual recovery area, an L10 visual roll-practice field, bounded training path, a live quad, and an independent replay ghost, with rigid FPV, chase and free/debug cameras. The explicit RC arm handoff consumes the Controller Lab's verified profile/session and checks current neutral/low throttle only at arm time. Developer keyboard input is opt-in and follows the same normalized RC/rates/PID path. Tuning edits a copied, validated versioned configuration and reaches flight only through an explicit disarmed reset/reconfiguration boundary. Training consumes one per-fixed-step sample hook, carries explicit armed telemetry, uses O(1) incremental evaluator state with a fixed-capacity decimated/ring path snapshot, and never mutates physics. Replay records only compact decimated fields from armed fixed-step samples, retains one bounded in-memory last flight, and interpolates an immutable ghost without writing the live `DroneState`.
 
 The phase contract is tracked in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Each later phase must preserve the boundaries below and pass the phase gate before the next seam is started.
 
@@ -13,7 +13,7 @@ active choices, while the registry retains the old `hover` definition for
 historical data and evaluator compatibility. A saved `hover` selection resolves
 to `takeoff` without rewriting the source preferences document. Lesson IDs,
 checkpoint IDs, rule scopes and stored results do not depend on display numbers.
-The accepted recovery lesson is now L09; the next planned course is L10 Roll.
+The accepted recovery lesson is now L09. Release `2026.10.24.2` adds L10 (`full-roll`) as the twelfth active choice; the registry also retains historical Hover. The user accepted the L01 merge, navigation and record preservation in the `.1` delivery context. New L10 awaits separate learner acceptance; L11 Flip is next in the planned order.
 
 ## Runtime boundaries
 
@@ -93,9 +93,30 @@ The pure evaluator computes tilt from the authoritative quaternion, rotation rat
 
 The `basic-recovery-field` scene group and appended `recovery-zone` reference are visual guides around the launch, with a recommended 4 m height and a 40 m horizontal radius. They add no static colliders. Stage presentation and the live / replay motion HUD consume snapshots; the existing runtime remains the sole animation-loop and physics owner. A simulated teaching recording uses actual RC inputs through the solver, then plays as an independent ghost without awarding progress. See [the L09 guide](L09_BASIC_RECOVERY.md) and [the training contract](LEARNING_CONTRACT.md).
 
+## L10 observational full roll
+
+L10 (`full-roll`, rules 6) is a new lesson ID after accepted L09. It starts on
+supported ground and observes launch, takeoff, preparation, inversion, a full
+roll and airborne recovery. A signed net roll is accumulated from consecutive
+quaternion increments and checked against actual body angular velocity. Both
+left and right are valid. Inversion and a return to upright flight in the same
+valid episode are required; yaw spins, pitch flips, absolute-angle rocking and
+quaternion sign changes do not substitute for the maneuver.
+
+The evaluator retains bounded incremental evidence. Ground/low-height contact,
+leaving the area, excessive off-axis motion or overrotation invalidates the
+current episode; historical checkpoints alone cannot bypass a fresh full roll.
+Recovery requires a short airborne confirmation. The visual roll field and
+`roll-zone` reference are ground-relative presentation geometry, not colliders.
+`setFullRollStage` changes guidance on the same renderer/canvas. Live HUD derives
+actual roll rate and tilt from state, while replay uses ghost state and the
+recording's independent progress observer. No additional physics loop or player
+control assistance is installed. Exact prototype thresholds and manual checks
+are in [the L10 guide](L10_FULL_ROLL.md).
+
 ## Independent demonstration progress
 
-All 12 existing demo kinds have their own bounded presentation timeline. For
+All 13 existing demo kinds have their own bounded presentation timeline. For
 course demos, `demonstrationProgress.ts` projects retained recording measurements
 into a separate evaluator/checkpoint observer once. It never uses or writes the
 live TrainingSession or progress store. L00 axis demos instead use authored
@@ -104,10 +125,11 @@ chapter seek pauses at the recorded start and seeking backward restores earlier
 checkmarks. The React demo view temporarily replaces live objective/checkpoint/
 result presentation; exiting restores the unchanged learner state.
 
-L09's generated recording adds reading and actual-onset observation intervals and
-opens at 0.5×. These are recorded control choices and presentation settings, not
+L09's generated recording adds reading and actual-onset observation intervals; L10's
+recording separates preparation, inversion, a complete roll and recovery. Both
+open at 0.5×. These are recorded control choices and presentation settings, not
 live flight assistance. Rules 6 isolates eased L09 results from historical rules 5;
-L05–L08 and earlier course scopes remain unchanged.
+New `full-roll` results also use rules 6 under their own lesson ID; L05–L08 and earlier course scopes remain unchanged.
 
 ## Safety boundary
 

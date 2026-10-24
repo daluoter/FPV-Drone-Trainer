@@ -1,10 +1,10 @@
 # Training system
 
-Release **2026.10.24.1** presents beginner lessons **L01–L09**: combined
+Release **2026.10.24.2** presents lessons **L01–L10**: combined
 takeoff/stationary hover, straight-line rings, landing, direction control,
-coordinated turns, square route, figure eight, wide gates and basic recovery.
+coordinated turns, square route, figure eight, wide gates, basic recovery and a complete roll with airborne recovery.
 L00 knowledge completion is separate; retained Split-S and Orbit are L12/L13.
-The learning menu has 11 flight lessons. `LEARNING_LESSONS` excludes the retired
+The learning menu has 12 flight lessons. `LEARNING_LESSONS` excludes the retired
 standalone `hover` entry, while the registry and evaluator remain available for
 historical compatibility. The `takeoff` ID retains its existing 1.5-second
 settled-hover condition, so the merge changes teaching labels and navigation
@@ -15,8 +15,7 @@ The user accepted basic recovery in `2026.10.23.6` / `b30806e`, under its old
 number L10. It is now L09 and retains rules 6. Earlier approvals carry forward
 with the stable lesson IDs. Exact local build, browser and hardware details
 were not supplied. See [the numbering table](LEARNING_CONTRACT.md#課程編號與合併相容性)
-and [the roadmap](LEARNING_ROADMAP.md). The next planned course is L10 Roll;
-it is not implemented in this merge.
+and [the roadmap](LEARNING_ROADMAP.md). The user also accepted the L01 merge, renumbering and record preservation in the `.1` delivery context. New L10 (`full-roll`) uses rules 6 under a new ID and awaits learner acceptance. The next planned course is L11 Flip.
 
 The evaluator result is based on finite fixed-step drone state and geometry. A
 stick sequence cannot pass a lesson. Synthetic fixture success is deterministic
@@ -201,6 +200,39 @@ thresholds pending broader learner and pilot calibration. No fixed
 XYZ return, heading target or long hover dwell is imposed. The motion HUD reads
 live state or the paused ghost as appropriate. See [the L09 guide](L09_BASIC_RECOVERY.md).
 
+### Complete roll
+
+L10 (`full-roll`, rules 6) has six checkpoints: ground, manual takeoff,
+preparation, observed inversion, one full roll and airborne recovery. Its
+suggested height is 10 m, with preparation at least 8 m high inside a 60 m
+horizontal radius. Preparation takes 0.1 s with tilt ≤20°, body rate ≤90°/s,
+horizontal speed ≤5 m/s and vertical speed within ±3.5 m/s. Once readiness is
+latched, an upward throttle blip can establish height margin before the roll.
+
+The observer accumulates signed net roll from successive actual quaternion
+increments and checks their consistency with actual body angular velocity.
+Left or right is accepted. A valid episode must pass actual inversion (tilt
+at least 150°), reach a net 360° ±20° and return to tilt ≤25°. Summed absolute
+Euler angles or rate integration alone are not proof; rocking half-rolls,
+yaw spins, pitch flips, stationary stick input and antipodal quaternion signs
+cannot create completion.
+
+Recovery stays airborne and at least 1.5 m above ground, with tilt ≤25°, body
+rate ≤90°/s, horizontal speed ≤5 m/s and vertical velocity −1.5 to +3 m/s for
+0.25 consecutive seconds. There is no landing, original-XYZ return, fixed
+heading or long hover requirement. Contact/low altitude, leaving the area,
+excessive off-axis motion or overrotation invalidates the current episode.
+Earlier checkpoint milestones may remain, but a fresh preparation and complete
+observed roll are needed before recovery can pass. Crash, disarm, reset,
+invalid samples and time/path discontinuity end the attempt; retry clears its
+checkpoints. Practice is untimed; challenge allows 300 s.
+
+The real-RC simulated demonstration uses the same evaluator, starts on the
+ground and opens at 0.5×. It has its own chapter progress; replay cannot count
+as a learner result. The live/replay roll HUD shows current episode progress,
+signed roll rate (right positive) and actual tilt alongside altitude/XYZ. New
+L10 still awaits learner acceptance. See [the L10 guide](L10_FULL_ROLL.md).
+
 ### Split-S
 
 The setup requests an explicit disarmed reset at `{ x: 0, y: 25, z: 0 }` with
@@ -239,7 +271,7 @@ passed physical frames. Other lesson targets, the Split-S reference and orbit
 tower remain visual guides without static collision. L09 appends `recovery-zone`
 at launch X/Z and ground + 4 m, with a 40 m horizontal practice radius. The
 `basic-recovery-field` is a visual practice boundary and height guide; it does
-not add collision or move the drone. Stage changes preserve the scene and canvas.
+not add collision or move the drone. Stage changes preserve the scene and canvas. L10 appends `roll-zone` and its own non-solid full-roll field with ground-relative height and horizontal guides; changing the lesson or stage never moves the physical drone.
 
 ## Progress persistence and result feedback
 
@@ -272,13 +304,13 @@ uses separate validated envelopes, preserving the original v1 document. Result
 and best-score views remain bound to the result context after changing settings;
 failed writes are visible and malformed history is not automatically overwritten.
 Current L09 attempts use rules 6; L05–L08 stay on rules 5 and earlier scopes
-remain unchanged, including rules 4 for L02–L04. The prior L09 rules-5 document
+remain unchanged, including rules 4 for L02–L04. New L10 uses its own `full-roll` ID at rules 6 without modifying any earlier result. The prior L09 rules-5 document
 remains readable as historical data and is not overwritten or relabeled as a
 rules-6 completion. Current progress loads the per-lesson rule scope. Physics
 context stays version 1; settings, input source and practice/challenge remain
 separate comparison conditions.
 
-The 12 existing demo kinds cover three L00 axis examples and L01–L09.
+The 13 existing demo kinds cover three L00 axis examples and L01–L10.
 Their bounded recordings are generated through the real 240 Hz simulator and
 play through the independent ghost. The L01 demonstration explicitly teaches both takeoff and continuous hover.
 This release does not add Split-S or Orbit demonstration videos.
@@ -293,7 +325,7 @@ live objective/checkpoint/result presentation while viewing, then restores the
 unchanged learner view on exit. No demo progress is saved as learner completion.
 
 Pose, recorded sticks, captions, scene stage and independent progress share the
-same playback clock. L09 starts at 0.5×, with 2 s to read preparation and 0.75 s
+same playback clock. L09 and L10 start at 0.5×. L09 has 2 s to read preparation and 0.75 s
 to observe a real onset before its recorded correction. The L08 demo uses the
 same physical frame field as live practice. All remain labeled as simulated
 pending pilot review; their generated controls never override live practice.

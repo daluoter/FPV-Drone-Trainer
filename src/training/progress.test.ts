@@ -87,17 +87,27 @@ describe('training progress persistence', () => {
     expect(loaded.progress.lessons['basic-recovery']).toMatchObject({ completed: true, attempts: 1, best: { sessionId: 'old-L10:passed', totalCheckpoints: 8 } })
 
     const active = LEARNING_LESSONS.map(({ id }) => ({ id, code: lessonLearningContent(id)?.code, progress: loaded.progress.lessons[id] }))
-    expect(active).toHaveLength(11)
+    expect(active).toHaveLength(12)
     expect(active.some(({ id }) => id === 'hover')).toBe(false)
     expect(active.find(({ id }) => id === 'takeoff')).toMatchObject({ code: 'L01', progress: { completed: true, attempts: 2 } })
     expect(active.find(({ id }) => id === 'straight-line')).toMatchObject({ code: 'L02', progress: { best: { sessionId: 'old-L03:passed' } } })
     expect(active.find(({ id }) => id === 'basic-recovery')).toMatchObject({ code: 'L09', progress: { best: { sessionId: 'old-L10:passed' } } })
+    expect(loaded.progress.lessons['full-roll']).toMatchObject({ completed: false, attempts: 0, best: null })
     expect(keys.map((key) => storage.getItem(key))).toEqual(original)
     const keyboard = new TrainingProgressStore(storage).loadCurrent({ ...recovery, inputSource: 'keyboard' })
     for (const id of ['hover', 'takeoff', 'straight-line', 'basic-recovery']) {
       expect(keyboard.progress.lessons[id]).toMatchObject({ completed: false, attempts: 0, best: null })
     }
     expect(keys.map((key) => storage.getItem(key))).toEqual(original)
+    const recordedRoll = store.recordResult(result({ lessonId: 'full-roll', sessionId: 'full-roll:passed',
+      attemptContext: recovery, completedCheckpoints: 6, totalCheckpoints: 6 }))
+    expect(recordedRoll.saved).toBe(true)
+    const withRoll = new TrainingProgressStore(storage).loadCurrent(recovery)
+    expect(withRoll.progress.lessons['full-roll']).toMatchObject({ completed: true, attempts: 1, best: { sessionId: 'full-roll:passed' } })
+    for (const id of ['hover', 'takeoff', 'straight-line', 'basic-recovery']) {
+      expect(withRoll.progress.lessons[id]).toEqual(loaded.progress.lessons[id])
+    }
+    expect(storage.getItem(keys[0])).toBe(original[0])
   })
 
   it('rejects malformed documents and falls back to empty versioned progress', () => {

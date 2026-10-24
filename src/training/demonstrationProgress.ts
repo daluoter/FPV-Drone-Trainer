@@ -34,6 +34,8 @@ export interface TeachingDemonstrationProgressSnapshot {
   readonly currentStepTitle: string
   readonly complete: boolean
   readonly notice: string | null
+  /** Recorded evaluator observations for instruments which need continuous progress. */
+  readonly metrics?: Readonly<Record<string, number>>
 }
 
 export interface TeachingDemonstrationProgressChapter {
@@ -47,6 +49,7 @@ export interface TeachingDemonstrationProgressFrame {
   readonly completedAtSeconds: readonly (number | null)[]
   readonly complete: boolean
   readonly notice: string | null
+  readonly metrics?: Readonly<Record<string, number>>
 }
 
 /** A bounded, immutable presentation index; it contains no live training state. */
@@ -62,8 +65,9 @@ export interface TeachingDemonstrationProgressTimeline {
 
 const CLOCK_TOLERANCE_SECONDS = 1e-9
 
-function frozenFrame(timeSeconds: number, completedAtSeconds: readonly (number | null)[], complete = false, notice: string | null = null): TeachingDemonstrationProgressFrame {
-  return Object.freeze({ timeSeconds, completedAtSeconds: Object.freeze([...completedAtSeconds]), complete, notice })
+function frozenFrame(timeSeconds: number, completedAtSeconds: readonly (number | null)[], complete = false, notice: string | null = null, metrics?: Readonly<Record<string, number>>): TeachingDemonstrationProgressFrame {
+  return Object.freeze({ timeSeconds, completedAtSeconds: Object.freeze([...completedAtSeconds]), complete, notice,
+    ...(metrics ? { metrics: Object.freeze({ ...metrics }) } : {}) })
 }
 
 function freezeTimeline(timeline: TeachingDemonstrationProgressTimeline): TeachingDemonstrationProgressTimeline {
@@ -174,7 +178,16 @@ export function createDemonstrationProgress(
     const nextIndex = completed.findIndex((value) => value === null)
     if (nextIndex >= 0 && steps[nextIndex].startedAtSeconds === null) steps[nextIndex].startedAtSeconds = time
     complete = evaluation.status === 'success' && nextIndex === -1 && time >= lesson.scoring.minimumActiveSeconds
-    if (changed || complete) frames.push(frozenFrame(time, completed, complete))
+    // A full-roll degree instrument follows each retained observation rather
+    // than guessing progress from captions, elapsed time or the wrapped pose.
+    if (changed || complete || demonstration.kind === 'full-roll') {
+      const metrics = demonstration.kind === 'full-roll' ? {
+        rollProgressDegrees: evaluation.metrics?.rollProgressDegrees ?? 0,
+        rollSignedDegrees: evaluation.metrics?.rollSignedDegrees ?? 0,
+        rollDirection: evaluation.metrics?.rollDirection ?? 0,
+      } : undefined
+      frames.push(frozenFrame(time, completed, complete, null, metrics))
+    }
     if (evaluation.status === 'failure') {
       frames.push(frozenFrame(time, completed, false, '這段示範尚未完成全部課程步驟。'))
       break
@@ -217,5 +230,5 @@ export function demonstrationProgressAt(
     steps: Object.freeze(steps), completedSteps: frame.completedAtSeconds.filter((value) => value !== null).length,
     totalSteps: timeline.steps.length, currentStepIndex,
     currentStepTitle: currentStepIndex === null ? '示範步驟已完成' : timeline.steps[currentStepIndex]?.title ?? '等待示範開始',
-    complete: frame.complete, notice: frame.notice })
+    complete: frame.complete, notice: frame.notice, ...(frame.metrics ? { metrics: frame.metrics } : {}) })
 }

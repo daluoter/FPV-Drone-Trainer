@@ -792,3 +792,128 @@ describe('L10 guided recovery coaching', () => {
     expect(hint).not.toMatch(/保留|已偵測到實際/)
   })
 })
+
+describe('L10 full-roll coaching', () => {
+  const ready = { rollPhase: 3, rollEpisodeValid: 1, rollInterrupted: 0, rollProgressDegrees: 0,
+    rollDirection: 0, rollInverted: 0, rollCompleted: 0, altitudeM: 10, insideRollArea: 1,
+    groundTouching: 0, tiltDegrees: 0, bodyRateDegreesPerSecond: 0, horizontalSpeedMps: 0,
+    verticalSpeedMps: 0, preparationDwellSeconds: 0.1, recoveryDwellSeconds: 0 }
+
+  it('introduces self takeoff, sufficient height, continuous Roll and airborne recovery in order', () => {
+    const route = trainingRouteGuide('full-roll')!
+    expect(route).toMatch(/地面自行起飛.*至少 8 m.*約 10 m.*短暫準備 0.1 秒.*橫滾一圈.*空中恢復控制 0.25 秒/)
+    expect(route).toContain('沿機頭到機尾的軸翻轉')
+    expect(route).toContain('引導練習不限時，挑戰 300 秒')
+    expect(trainingObjective('full-roll', null)?.title).toContain('地面準備')
+    expect(trainingObjective('full-roll', { metrics: { rollPhase: 1 } })?.detail).toContain('完整橫滾會經過倒飛')
+  })
+
+  it('shows actual progress and direction without treating a large bank as a complete roll', () => {
+    const metrics = { ...ready, rollProgressDegrees: 120, rollDirection: -1 }
+    expect(formatTrainingMetrics(metrics, 'full-roll')).toEqual([
+      { key: 'rollProgressDegrees', label: '本圈橫滾進度', value: '120.0 / 360°' },
+      { key: 'rollDirection', label: '橫滾方向', value: '向左' },
+      { key: 'altitudeM', label: '離地高度', value: '10.00 m' },
+    ])
+    const detail = trainingObjective('full-roll', { metrics })!.detail
+    expect(detail).toContain('約 120.0°')
+    expect(detail).toContain('繼續向左橫滾，保持本圈同一方向')
+    expect(detail).not.toContain('已完成本圈橫滾')
+    expect(trainingObjective('full-roll', { metrics: ready })?.detail).toContain('選擇向左或向右 Roll')
+  })
+
+  it('distinguishes the observed inverted halfway point from full-turn recovery', () => {
+    const halfway = { ...ready, rollPhase: 4, rollProgressDegrees: 181, rollDirection: 1, rollInverted: 1 }
+    const detail = trainingObjective('full-roll', { metrics: halfway })!.detail
+    expect(detail).toContain('已觀察到本圈倒飛')
+    expect(detail).toContain('繼續向右完成剩下的橫滾')
+    expect(detail).toContain('倒飛後反向翻回原姿態尚未完成一圈')
+    expect(detail).not.toContain('現在停止旋轉並恢復正飛')
+    const finishedTurn = trainingObjective('full-roll', { metrics: { ...halfway,
+      rollPhase: 5, rollProgressDegrees: 355, rollCompleted: 1, tiltDegrees: 30,
+      bodyRateDegreesPerSecond: 110, recoveryDwellSeconds: 0.1 } })!
+    expect(finishedTurn.detail).toContain('已完成本圈橫滾，現在停止旋轉並恢復正飛')
+    expect(finishedTurn.detail).toContain('目前傾角 30.0°')
+    expect(finishedTurn.detail).toContain('110.0°/s')
+    expect(finishedTurn.detail).toContain('恢復確認 0.10／0.25 s')
+  })
+
+  it('names preparation blockers with measured values and prioritizes the blocked instrument', () => {
+    const low = { ...ready, rollPhase: 2, rollEpisodeValid: 0, altitudeM: 7.2 }
+    expect(trainingObjective('full-roll', { metrics: low })?.detail).toContain('目前離地 7.2 m；先升回至少 8 m')
+    expect(formatTrainingMetrics(low, 'full-roll').map(({ key }) => key)).toEqual(['altitudeM', 'verticalSpeedMps', 'preparationDwellSeconds'])
+    expect(trainingObjective('full-roll', { metrics: { ...low, altitudeM: 10, tiltDegrees: 27 } })?.detail)
+      .toContain('目前傾角 27.0°；先主動帶回 20° 內')
+    expect(trainingObjective('full-roll', { metrics: { ...low, altitudeM: 10, verticalSpeedMps: -4 } })?.detail)
+      .toContain('目前升降速度 -4.0 m/s（上＋／下−）')
+    expect(trainingObjective('full-roll', { metrics: { ...low, altitudeM: 10, preparationDwellSeconds: 0.04 } })?.detail)
+      .toContain('準備確認 0.04／0.10 s')
+  })
+
+  it.each([
+    [{ groundTouching: 1, altitudeM: 0.1 }, '地面停住不能完成空中恢復'],
+    [{ altitudeM: 1.2 }, '低於空中恢復需要的 1.5 m'],
+    [{ insideRollArea: 0, launchDistanceM: 63 }, '距起飛點 63.0 m'],
+    [{ rollEpisodeValid: 0, rollInterrupted: 1 }, '本圈橫滾已中斷'],
+  ])('requires a fresh complete maneuver after an interrupted episode: %j', (changes, reason) => {
+    const objective = trainingObjective('full-roll', { metrics: { ...ready, rollPhase: 5,
+      rollCompleted: 0, rollInverted: 0, ...changes } })!
+    expect(objective.detail).toContain(reason)
+    expect(objective.detail).toContain('重新準備並完成一整圈')
+    expect(objective.detail).not.toContain('已完成本圈橫滾')
+    expect(objective.detail).not.toContain('可以 Disarm')
+  })
+
+  it('continues a freshly prepared maneuver despite historical inverted and upright checkpoints', () => {
+    const objective = trainingObjective('full-roll', { metrics: { ...ready, rollPhase: 5,
+      rollInterrupted: 1, rollProgressDegrees: 0, rollCompleted: 0, rollInverted: 0 } })!
+    expect(objective.detail).toContain('本圈重新開始')
+    expect(objective.detail).toContain('選擇向左或向右 Roll')
+    expect(objective.detail).not.toContain('已完成本圈橫滾')
+  })
+
+  it('only offers disarm after all stages and explains recovery rather than granting mastery', () => {
+    const recovering = { ...ready, rollPhase: 5, rollInverted: 1, rollCompleted: 1,
+      rollProgressDegrees: 357, verticalSpeedMps: -2, recoveryDwellSeconds: 0.15 }
+    expect(trainingHint('full-roll', { status: 'continue', metrics: recovering })).toContain('升降速度 -2.0 m/s')
+    expect(trainingHint('full-roll', { status: 'continue', metrics: recovering })).toContain('−1.5～+3 m/s')
+    expect(formatTrainingMetrics(recovering, 'full-roll')[2]).toEqual({ key: 'recoveryDwellSeconds', label: '正飛恢復確認', value: '0.15 / 0.25 s' })
+    expect(trainingObjective('full-roll', { metrics: recovering })?.detail).not.toContain('可以 Disarm')
+    const done = trainingObjective('full-roll', { metrics: { ...recovering, rollPhase: 6 } })!
+    expect(done.detail).toContain('可以 Disarm')
+    expect(done.detail).not.toMatch(/熟練|完美/)
+  })
+
+  it.each([
+    ['Ground impact latched a crash; reset required.', '本次發生墜毀'],
+    ['Flight disarmed after focus was lost.', '解除解鎖、失去焦點'],
+    ['橫滾停止：姿態與角速度不一致。', '飛行資料無效、中斷或被重設'],
+    ['橫滾挑戰逾時：尚未完成完整橫滾與空中恢復。', '完整橫滾挑戰逾時'],
+  ])('preserves the terminal cause before stale live coaching: %s', (message, reason) => {
+    const text = trainingHint('full-roll', { status: 'failure', message,
+      metrics: { ...ready, rollPhase: 5, rollInterrupted: 1, rollCompleted: 1 } })
+    expect(text).toContain(reason)
+    expect(text).toContain('清空本次步驟')
+    expect(text).not.toMatch(/先前步驟保留|已完成本圈橫滾|可以 Disarm/)
+  })
+})
+
+describe('retained full-roll interruption diagnostics', () => {
+  it.each([
+    [1, {}, '這一圈曾接地'],
+    [2, { interruptionAltitudeM: 1.1 }, '中斷時離地 1.1 m'],
+    [3, { interruptionLaunchDistanceM: 65 }, '中斷時距起飛點 65.0 m'],
+    [4, { interruptionOffAxisDegrees: 123 }, '俯仰／偏航旋轉累積約 123.0°'],
+    [5, {}, '這一圈持續過轉'],
+    [6, {}, '這一圈反向轉過了起始姿態'],
+    [7, { interruptionAltitudeM: 7.7 }, '尚未開始橫滾便降到離地 7.7 m'],
+  ] as const)('keeps the captured cause readable after returning to an otherwise ready position: %s', (reason, captured, expected) => {
+    const detail = trainingObjective('full-roll', { metrics: { rollPhase: 4, rollInterrupted: 1,
+      rollInterruptionReason: reason, rollEpisodeValid: 0, groundTouching: 0, insideRollArea: 1,
+      altitudeM: 10, tiltDegrees: 0, bodyRateDegreesPerSecond: 0, horizontalSpeedMps: 0,
+      verticalSpeedMps: 0, preparationDwellSeconds: 0, ...captured } })!.detail
+    expect(detail).toContain(expected)
+    expect(detail).toContain('重新準備並完成一整圈')
+    expect(detail).not.toContain('已完成本圈橫滾')
+  })
+})

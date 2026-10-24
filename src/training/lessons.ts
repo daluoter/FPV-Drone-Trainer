@@ -6,6 +6,7 @@ import { SQUARE_ROUTE_LESSON } from './squareRoute'
 import { FIGURE_EIGHT_LESSON } from './figureEight'
 import { WIDE_GATE_LESSON } from './wideGate'
 import { BASIC_RECOVERY_LESSON } from './basicRecovery'
+import { FULL_ROLL_LESSON } from './fullRoll'
 import {
   hoverEvaluator,
   orbitEvaluator,
@@ -224,6 +225,7 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
   FIGURE_EIGHT_LESSON,
   WIDE_GATE_LESSON,
   BASIC_RECOVERY_LESSON,
+  FULL_ROLL_LESSON,
 ]
 
 /** Current learning navigation merges hover into the existing takeoff goal. */

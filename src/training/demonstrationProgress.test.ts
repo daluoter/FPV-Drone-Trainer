@@ -6,7 +6,7 @@ import { createTeachingDemonstration } from './demonstrations'
 import { createDemonstrationProgress, demonstrationProgressAt } from './demonstrationProgress'
 import { lessonById } from './lessons'
 
-const COURSE_KINDS = ['takeoff', 'straight-line', 'landing', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery'] as const
+const COURSE_KINDS = ['takeoff', 'straight-line', 'landing', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll'] as const
 
 describe('independent teaching demonstration progress', () => {
   it.each(COURSE_KINDS)('observes all %s checkpoints from the actual recording and exposes chapter seeks', (kind) => {
@@ -26,7 +26,7 @@ describe('independent teaching demonstration progress', () => {
     expect(finish.steps.every((step) => step.startedAtSeconds !== null && step.startedAtSeconds <= step.completedAtSeconds!)).toBe(true)
     const retained = new Set(demonstration.recording.samples.map((sample) => sample.timestampSeconds))
     expect(finish.steps.every((step) => retained.has(step.completedAtSeconds!))).toBe(true)
-    expect(timeline.frames.length).toBeLessThanOrEqual(lesson.checkpoints.length + 2)
+    expect(timeline.frames.length).toBeLessThanOrEqual(kind === 'full-roll' ? demonstration.recording.samples.length + 1 : lesson.checkpoints.length + 2)
     expect(timeline.title).toMatch(/^L\d\d /u)
     expect(Object.isFrozen(timeline)).toBe(true)
     expect(Object.isFrozen(timeline.steps)).toBe(true)
@@ -55,6 +55,25 @@ describe('independent teaching demonstration progress', () => {
     expect(finish.complete).toBe(true)
     expect(finish.totalSteps).toBe(5)
     expect(finish.completedSteps).toBe(5)
+  })
+
+  it('keeps actual full-roll degree observations bounded and synchronized with inversion, completion and backward seeking', () => {
+    const settings = createTuningPreset('beginner')
+    const demo = createTeachingDemonstration(settings, 'full-roll')
+    const timeline = createDemonstrationProgress(demo, settings)
+    const finish = demonstrationProgressAt(timeline, timeline.durationSeconds)
+    expect(finish).toMatchObject({ kind: 'full-roll', complete: true, completedSteps: 6 })
+    expect(finish.metrics?.rollProgressDegrees).toBeGreaterThanOrEqual(340)
+    const inversion = demonstrationProgressAt(timeline, finish.steps[3].completedAtSeconds!)
+    expect(inversion.completedSteps).toBe(4)
+    expect(inversion.metrics?.rollProgressDegrees).toBeGreaterThanOrEqual(140)
+    expect(inversion.metrics?.rollProgressDegrees).toBeLessThan(240)
+    expect(timeline.frames.length).toBeLessThanOrEqual(demo.recording.samples.length + 1)
+    expect(timeline.frames.every((frame) => !frame.metrics || Object.isFrozen(frame.metrics))).toBe(true)
+    const backward = demonstrationProgressAt(timeline, 0)
+    expect(backward.complete).toBe(false)
+    expect(backward.metrics?.rollProgressDegrees).toBe(0)
+    expect(backward.steps.slice(1).every((step) => step.completedAtSeconds === null)).toBe(true)
   })
 
   it('reveals actual L09 onset and recovery in order, including seeking backward from later exercises', () => {
@@ -107,7 +126,7 @@ describe('independent teaching demonstration progress', () => {
     }
   })
 
-  it.each(['takeoff', 'landing', 'wide-gate', 'basic-recovery'] as const)('uses recorded raised-ground anchors for %s and rejects a different settings snapshot', (kind) => {
+  it.each(['takeoff', 'landing', 'wide-gate', 'basic-recovery', 'full-roll'] as const)('uses recorded raised-ground anchors for %s and rejects a different settings snapshot', (kind) => {
     const defaults = createTuningPreset('standard')
     const settings = { ...defaults, drone: { ...defaults.drone, ground: { ...defaults.drone.ground, heightM: 10 }, spawnPositionM: { x: 6, y: 25, z: -3 } } }
     const demo = createTeachingDemonstration(settings, kind)

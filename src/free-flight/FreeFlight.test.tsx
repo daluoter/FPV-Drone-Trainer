@@ -59,6 +59,55 @@ function attemptUnload(): Event {
 }
 
 describe('Free Flight native navigation confirmation', () => {
+  it('keeps the L10 full-roll movie, measured degree HUD and live progress separate from the L00 axis demonstration', () => {
+    window.localStorage.clear()
+    render(<App />)
+    const canvas = screen.getByLabelText('Free Flight 3D scene')
+    fireEvent.change(screen.getByLabelText('選擇課程'), { target: { value: 'full-roll' } })
+    expect(screen.getByRole('group', { name: '橫滾練習數值' })).toHaveTextContent('即時')
+    expect(screen.getByTestId('roll-progress')).toHaveTextContent('0°')
+    expect(frames.renderer!.scene.getObjectByName('full-roll-field')?.visible).toBe(true)
+    expect(frames.runtime!.simulation.getStaticObstacles()).toHaveLength(0)
+    const liveSteps = screen.getByRole('list', { name: '本課步驟' }).textContent
+    const stored = () => Object.fromEntries(Object.entries(window.localStorage).filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.')))
+    const before = stored()
+    fireEvent.click(screen.getByRole('button', { name: 'L10 橫滾示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    expect(screen.getByRole('button', { name: '0.5×' })).toHaveAttribute('aria-pressed', 'true')
+    const progress = screen.getByRole('region', { name: '示範進度' })
+    expect(progress).toHaveTextContent('L10 完整橫滾 Roll')
+    const chapters = within(progress).getAllByRole('button')
+    expect(chapters).toHaveLength(6)
+    // The next chapter starts on the retained frame where actual inversion
+    // was observed, rather than inferring it from a caption or timed input.
+    fireEvent.click(chapters[4])
+    expect(frames.runtime!.getReplayPlayback()!.isPlaying()).toBe(false)
+    expect(Number.parseFloat(screen.getByTestId('roll-tilt').textContent!)).toBeGreaterThan(120)
+    expect(Number.parseFloat(screen.getByTestId('roll-progress').textContent!)).toBeGreaterThan(140)
+    const held = screen.getByRole('group', { name: '橫滾練習數值' }).textContent
+    frame(400)
+    expect(screen.getByRole('group', { name: '橫滾練習數值' }).textContent).toBe(held)
+    fireEvent.change(screen.getByRole('slider'), { target: { value: frames.runtime!.getReplayPlayback()!.durationSeconds } })
+    expect(progress).toHaveTextContent('6 / 6 個示範步驟完成')
+    expect(Number.parseFloat(screen.getByTestId('roll-progress').textContent!)).toBeGreaterThanOrEqual(340)
+    expect(Number.parseFloat(screen.getByTestId('roll-tilt').textContent!)).toBeLessThanOrEqual(25)
+    fireEvent.change(screen.getByRole('slider'), { target: { value: 0 } })
+    expect(screen.getByTestId('roll-progress')).toHaveTextContent('0°')
+    expect(progress).not.toHaveTextContent('6 / 6 個示範步驟完成')
+    expect(stored()).toEqual(before)
+    fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
+    expect(screen.getByRole('list', { name: '本課步驟' }).textContent).toBe(liveSteps)
+    expect(screen.getByTestId('roll-progress')).toHaveTextContent('0°')
+    fireEvent.click(screen.getByRole('button', { name: /^橫滾 Roll$/ }))
+    expect(screen.queryByRole('group', { name: '橫滾練習數值' })).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '示範進度' })).toHaveTextContent('L00')
+    fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
+    expect(screen.getByLabelText('選擇課程')).toHaveValue('full-roll')
+    expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
+    expect(stored()).toEqual(before)
+    window.localStorage.clear()
+  })
+
   it('clears failed replacement metadata before opening an ordinary live-flight replay', () => {
     const settings = createDefaultTuningSettings()
     const props = { poller: createBrowserGamepadPoller(), profile: null }

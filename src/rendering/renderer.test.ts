@@ -309,4 +309,45 @@ describe('FlightRenderer lifecycle and failure contract', () => {
     }
   })
 
+  it('retains full-roll stage and ground-relative guides across reconfiguration on the same canvas', () => {
+    const rendererStub = createRendererStub()
+    const canvas = document.createElement('canvas')
+    const renderer = new FlightRenderer(canvas, { rendererFactory: () => rendererStub })
+    try {
+      renderer.setLessonTarget('full-roll')
+      renderer.setFullRollStage(3)
+      const previous = renderer.flightScene
+      const disposePrevious = vi.spyOn(previous, 'dispose')
+      renderer.reconfigureScene({ ...DEFAULT_DRONE_CONFIG,
+        ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 30, z: -3 } })
+      const field = renderer.scene.getObjectByName('full-roll-field')!
+      const level = renderer.scene.getObjectByName('roll-level-reference') as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      expect(field.visible).toBe(true)
+      expect(level.material.color.getHex()).toBe(0xffc978)
+      expect(renderer.flightScene.getReference('roll-zone')?.positionM).toEqual({ x: 6, y: 15, z: -3 })
+      expect(renderer.scene.getObjectByName('wide-gate-field')?.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('basic-recovery-field')?.visible).toBe(false)
+      expect(renderer.canvas).toBe(canvas)
+      expect(renderer.renderer).toBe(rendererStub)
+      expect(disposePrevious).toHaveBeenCalledOnce()
+      renderer.setFullRollStage(6)
+      expect(level.material.color.getHex()).toBe(0xb8f36b)
+      renderer.setFullRollStage(null)
+      renderer.reconfigureScene(DEFAULT_DRONE_CONFIG)
+      expect(renderer.scene.getObjectByName('roll-stage-guidance')?.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('full-roll-field')?.visible).toBe(true)
+      renderer.setFullRollStage(2)
+      const nextLevel = renderer.scene.getObjectByName('roll-level-reference') as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      expect(nextLevel.material.color.getHex()).toBe(0x45d7f7)
+      renderer.render(createInitialDroneState(DEFAULT_DRONE_CONFIG))
+      expect(renderer.getStatus()).toEqual({ kind: 'ready' })
+      expect(rendererStub.render).toHaveBeenCalledOnce()
+      renderer.setLessonTarget('wide-gate')
+      expect(renderer.scene.getObjectByName('full-roll-field')?.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('wide-gate-field')?.visible).toBe(true)
+    } finally {
+      renderer.dispose()
+    }
+  })
+
 })
