@@ -8,7 +8,7 @@ import type { TeachingDemonstrationProgressSnapshot } from './demonstrationProgr
 /** A playback UI fixture, not evidence of completing a recovery maneuver. */
 function snapshot(completedSteps = 5): TeachingDemonstrationProgressSnapshot {
   return {
-    kind: 'basic-recovery', lessonId: 'basic-recovery', title: 'L10 基礎失誤恢復', mode: 'lesson-checkpoints',
+    kind: 'basic-recovery', lessonId: 'basic-recovery', title: 'L09 基礎失誤恢復', mode: 'lesson-checkpoints',
     steps: BASIC_RECOVERY_LESSON.checkpoints.map((checkpoint, index) => ({ id: checkpoint.id, title: checkpoint.title,
       status: index < completedSteps ? 'completed' : index === completedSteps ? 'current' : 'pending',
       startedAtSeconds: index * 2, completedAtSeconds: index < completedSteps ? index * 2 + 1 : null })),

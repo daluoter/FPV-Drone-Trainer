@@ -23,23 +23,25 @@ const LEARNING_CONTENT: Readonly<Record<string, LessonLearningContent>> = {
   'direction-control': DIRECTION_CONTROL_LEARNING_CONTENT,
   takeoff: {
     code: 'L01',
-    title: '穩定起飛',
+    title: '起飛與定點懸停',
     level: '入門',
     prerequisiteIds: ['intro'],
-    objectives: ['從起飛墊受控離地。', '在墊上方 2 公尺附近穩住 1.5 秒。'],
+    objectives: ['從起飛墊受控離地，再減少升降與水平漂移。', '在墊上方 2 公尺附近定點懸停，連續穩住 1.5 秒。'],
     steps: [
       '先完成 L00 操作認識，確認油門與姿態控制方向。',
       '重設課程後保持低油門；倒數結束、確認起飛區後再解鎖。',
       '緩慢加油門垂直離地，避免同時大幅推動方向軸。',
       '接近目標高度時提早減少上升速度，以小幅修正維持水平位置。',
-      '讓高度、漂移、速度與姿態同時穩定，連續維持 1.5 秒。',
+      '先減少水平漂移，再用小量油門修正高度，讓速度與姿態穩定。',
+      '在起飛墊上方定點懸停，連續穩住 1.5 秒後，才算完成起飛與懸停。',
     ],
     commonMistakes: [
       '把油門推得太快，接近目標才急收，造成高度來回震盪。',
       '用大幅傾斜修正位置，忽略了側移速度還未消失。',
-      '只碰到目標高度便停止修正；測驗需要連續穩定停留。',
+      '只碰到目標高度或短暫穿過目標區便停止修正；需要定點懸停並連續穩住。',
     ],
   },
+  // Historical standalone hover metadata; the active course is now L01 takeoff.
   hover: {
     code: 'L02',
     title: '定點懸停',
@@ -64,7 +66,7 @@ const LEARNING_CONTENT: Readonly<Record<string, LessonLearningContent>> = {
   'wide-gate': WIDE_GATE_LEARNING_CONTENT,
   'basic-recovery': BASIC_RECOVERY_LEARNING_CONTENT,
   'split-s': {
-    code: 'L13',
+    code: 'L12',
     title: 'Split-S 翻轉下降',
     level: '特技',
     prerequisiteIds: ['coordinated-turn'],
@@ -82,7 +84,7 @@ const LEARNING_CONTENT: Readonly<Record<string, LessonLearningContent>> = {
     ],
   },
   orbit: {
-    code: 'L14',
+    code: 'L13',
     title: '定點環繞／刷鍋',
     level: '特技',
     prerequisiteIds: ['coordinated-turn'],

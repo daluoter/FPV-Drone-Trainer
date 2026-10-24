@@ -192,7 +192,7 @@ export const FIGURE_EIGHT_LESSON: LessonDefinition = {
 }
 
 export const FIGURE_EIGHT_LEARNING_CONTENT: LessonLearningContent = {
-  code: 'L08', title: '八字航線', level: '基礎航線', prerequisiteIds: ['square-route'],
+  code: 'L07', title: '八字航線', level: '基礎航線', prerequisiteIds: ['square-route'],
   objectives: ['把左轉與右轉串接成完整八字航線。', '依序完成左圈、中央換向及右圈，辨認重複經過的中央目標。'],
   steps: ['從地面自行起飛，建議高度約三公尺；先向前飛入中央入口。', '用小量傾斜、偏航與前進串接左圈前段、外側和回程目標，油門修正高度。', '完成左圈後通過中央換向點，再由左轉切換為右轉，依序飛完右圈。', '最後飛回中央的空中終點即可完成，不要求降落、停穩或精準速度。', '中央入口、換向和終點位置相同，但必須依序完成左右兩圈；漏點可補飛，未墜毀接地可就地再次起飛。'],
   commonMistakes: ['提早飛回中央或直接切到另一圈，漏掉目前亮起目標；依序補飛即可，不必重做已完成步驟。', '返回中央後仍持續向同一側轉；先看下一個目標，再小量反向修正傾斜與偏航。'],

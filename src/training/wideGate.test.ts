@@ -306,6 +306,6 @@ describe('ground-start ordered wide-gate lesson', () => {
     expect(expired.status).toBe('failure')
     expect(expired.message).toContain('逾時')
     expect(WIDE_GATE_LESSON.scoring.minimumActiveSeconds).toBe(0)
-    expect(WIDE_GATE_LEARNING_CONTENT).toMatchObject({ code: 'L09', prerequisiteIds: ['figure-eight'] })
+    expect(WIDE_GATE_LEARNING_CONTENT).toMatchObject({ code: 'L08', prerequisiteIds: ['figure-eight'] })
   })
 })

@@ -63,7 +63,7 @@ describe('Free Flight native navigation confirmation', () => {
     const settings = createDefaultTuningSettings()
     const props = { poller: createBrowserGamepadPoller(), profile: null }
     const { rerender } = render(<FreeFlight {...props} settings={settings} />)
-    fireEvent.click(screen.getByRole('button', { name: 'L01 起飛示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'L01 起飛與懸停示範' }))
     expect(screen.getByRole('region', { name: '示範進度' })).toBeInTheDocument()
     const unsupported = { ...settings, controller: { ...settings.controller,
       rateLimitsDegPerSec: { ...settings.controller.rateLimitsDegPerSec, roll: 1 } } }
@@ -112,10 +112,10 @@ describe('Free Flight native navigation confirmation', () => {
     expect(within(liveSteps).getAllByRole('listitem').every((item) => !item.classList.contains('is-complete'))).toBe(true)
     const stored = () => Object.fromEntries(Object.entries(window.localStorage).filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.')))
     const before = stored()
-    fireEvent.click(screen.getByRole('button', { name: 'L10 恢復示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'L09 恢復示範' }))
     fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
     const progress = screen.getByRole('region', { name: '示範進度' })
-    expect(progress).toHaveTextContent('L10 基礎失誤恢復')
+    expect(progress).toHaveTextContent('L09 基礎失誤恢復')
     expect(screen.queryByRole('list', { name: '本課步驟' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '0.5×' })).toHaveAttribute('aria-pressed', 'true')
     for (const [title, current] of [['產生小幅下沉', '5 / 8'], ['建立前進或側移', '7 / 8']] as const) {
@@ -135,10 +135,10 @@ describe('Free Flight native navigation confirmation', () => {
     expect(screen.queryByRole('region', { name: '示範進度' })).not.toBeInTheDocument()
     expect(within(screen.getByRole('list', { name: '本課步驟' })).getAllByRole('listitem').every((item) => !item.classList.contains('is-complete'))).toBe(true)
     expect(stored()).toEqual(before)
-    // A different movie still owns its own steps while L10 remains selected.
-    fireEvent.click(screen.getByRole('button', { name: 'L03 直線示範' }))
+    // A different movie still owns its own steps while L09 remains selected.
+    fireEvent.click(screen.getByRole('button', { name: 'L02 直線示範' }))
     fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
-    expect(screen.getByRole('region', { name: '示範進度' })).toHaveTextContent('L03')
+    expect(screen.getByRole('region', { name: '示範進度' })).toHaveTextContent('L02')
     expect(screen.getByLabelText('選擇課程')).toHaveValue('basic-recovery')
     fireEvent.change(screen.getByRole('slider'), { target: { value: frames.runtime!.getReplayPlayback()!.durationSeconds } })
     expect(screen.getByRole('region', { name: '示範進度' })).toHaveTextContent('5 / 5 個示範步驟完成')
@@ -149,21 +149,21 @@ describe('Free Flight native navigation confirmation', () => {
   })
 
   const routeLessons = [
-    { lessonId: 'direction-control', code: 'L05', prefix: 'direction', total: 9,
+    { lessonId: 'direction-control', code: 'L04', prefix: 'direction', total: 9,
       targets: ['direction-right', 'direction-left', 'direction-forward', 'direction-back', 'direction-yaw', 'direction-turned-forward', 'direction-turned-right'],
-      button: 'L05 方向示範', group: 'direction-control-targets', completion: '已完成側移、前後移動與換向後方向感' },
-    { lessonId: 'coordinated-turn', code: 'L06', prefix: 'turn', total: 8,
+      button: 'L04 方向示範', group: 'direction-control-targets', completion: '已完成側移、前後移動與換向後方向感' },
+    { lessonId: 'coordinated-turn', code: 'L05', prefix: 'turn', total: 8,
       targets: ['turn-right-entry', 'turn-right-apex', 'turn-right-exit', 'turn-left-entry', 'turn-left-apex', 'turn-left-exit'],
-      button: 'L06 轉彎示範', group: 'coordinated-turn-targets', completion: '已完成右轉與左轉協調航線' },
-    { lessonId: 'square-route', code: 'L07', prefix: 'square', total: 10,
+      button: 'L05 轉彎示範', group: 'coordinated-turn-targets', completion: '已完成右轉與左轉協調航線' },
+    { lessonId: 'square-route', code: 'L06', prefix: 'square', total: 10,
       targets: ['square-leg-1', 'square-corner-1', 'square-leg-2', 'square-corner-2', 'square-leg-3', 'square-corner-3', 'square-leg-4', 'square-finish'],
-      button: 'L07 方形示範', group: 'square-route-targets', completion: '已完成四段方形航線並回到起點上方' },
-    { lessonId: 'figure-eight', code: 'L08', prefix: 'eight', total: 11,
+      button: 'L06 方形示範', group: 'square-route-targets', completion: '已完成四段方形航線並回到起點上方' },
+    { lessonId: 'figure-eight', code: 'L07', prefix: 'eight', total: 11,
       targets: ['eight-entry', 'eight-left-top', 'eight-left-outer', 'eight-left-bottom', 'eight-crossing', 'eight-right-top', 'eight-right-outer', 'eight-right-bottom', 'eight-finish'],
-      button: 'L08 八字示範', group: 'figure-eight-targets', completion: '已完成左右八字航線並回到中央終點' },
-    { lessonId: 'wide-gate', code: 'L09', prefix: 'gate', total: 5,
+      button: 'L07 八字示範', group: 'figure-eight-targets', completion: '已完成左右八字航線並回到中央終點' },
+    { lessonId: 'wide-gate', code: 'L08', prefix: 'gate', total: 5,
       targets: ['wide-gate-1', 'wide-gate-2', 'wide-gate-3'],
-      button: 'L09 穿門示範', group: 'wide-gate-field', completion: '已依序穿過三道寬門且未碰撞門框' },
+      button: 'L08 穿門示範', group: 'wide-gate-field', completion: '已依序穿過三道寬門且未碰撞門框' },
   ] as const
 
   it.each(routeLessons)('switches the active $code scene goal with actual progress while preserving the canvas', ({ lessonId, prefix, total, targets }) => {
@@ -223,7 +223,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(scene.scene.getObjectByName(group)!.visible).toBe(false)
   })
 
-  it('keeps visible L09 frames aligned with live colliders through Reset, Arm, replay and course changes', () => {
+  it('keeps visible L08 frames aligned with live colliders through Reset, Arm, replay and course changes', () => {
     const settings = createDefaultTuningSettings()
     const props = { poller: createBrowserGamepadPoller(), profile: null, settings }
     const selected = createTrainingMachineState({ initialLessonId: 'wide-gate' })
@@ -248,7 +248,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(colliders()).toHaveLength(12)
     const before = frames.runtime!.getTelemetry().state
     const savedEnvironment = colliders()
-    fireEvent.click(screen.getByRole('button', { name: 'L09 穿門示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'L08 穿門示範' }))
     fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
     fireEvent.change(screen.getByRole('slider'), { target: { value: 20 } })
     expect(colliders()).toEqual(savedEnvironment)
@@ -292,7 +292,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(screen.getByRole('button', { name: /^Arm$/ })).toBeEnabled()
   })
 
-  it('shows L10 stages and actual live motion while clearing the preceding gate field on the same canvas', () => {
+  it('shows L09 stages and actual live motion while clearing the preceding gate field on the same canvas', () => {
     const props = { poller: createBrowserGamepadPoller(), profile: null, settings: createDefaultTuningSettings() }
     const { rerender } = render(<FreeFlight {...props} trainingState={createTrainingMachineState({ initialLessonId: 'wide-gate' })} />)
     const canvas = screen.getByLabelText('Free Flight 3D scene')
@@ -323,14 +323,14 @@ describe('Free Flight native navigation confirmation', () => {
     expect(frames.runtime!.simulation.getStaticObstacles()).toHaveLength(0)
   })
 
-  it('seeks L10 motion instruments and stage guidance with real recorded physics without scoring live training', () => {
+  it('seeks L09 motion instruments and stage guidance with real recorded physics without scoring live training', () => {
     const onFixedStep = vi.fn()
     const selected = createTrainingMachineState({ initialLessonId: 'basic-recovery' })
     render(<FreeFlight poller={createBrowserGamepadPoller()} profile={null} settings={createDefaultTuningSettings()}
       trainingState={selected} onFixedStep={onFixedStep} />)
     const liveBefore = frames.runtime!.getTelemetry().state
     const storedBefore = { ...window.localStorage }
-    fireEvent.click(screen.getByRole('button', { name: 'L10 恢復示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'L09 恢復示範' }))
     fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
     const playback = frames.runtime!.getReplayPlayback()!
     const onset = playback.recording.samples.find((sample) => measureBasicRecoveryMotion(sample).tiltDegrees >= 15)!
@@ -489,7 +489,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(within(hud).getByTestId('flight-position-x')).toHaveTextContent('X 左右')
     expect(within(hud).getByTestId('flight-position-y')).toHaveTextContent('Y 上下')
     expect(hud).toHaveTextContent('Z 前後')
-    fireEvent.click(screen.getByRole('button', { name: 'L03 直線示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'L02 直線示範' }))
     fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
     fireEvent.change(screen.getByRole('slider'), { target: { value: frames.runtime!.getReplayPlayback()!.getState().durationSeconds } })
     expect(within(hud).getByText('回放高度')).toBeInTheDocument()

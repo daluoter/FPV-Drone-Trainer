@@ -235,7 +235,7 @@ export const COORDINATED_TURN_LESSON: LessonDefinition = {
 }
 
 export const COORDINATED_TURN_LEARNING_CONTENT: LessonLearningContent = {
-  code: 'L06', title: '協調轉彎', level: '基礎航線', prerequisiteIds: ['direction-control'],
+  code: 'L05', title: '協調轉彎', level: '基礎航線', prerequisiteIds: ['direction-control'],
   objectives: ['依序完成右轉及左轉的入口、彎中與出口。', '理解轉機頭與改變飛行路線的差別，練習多軸小量配合。'],
   steps: ['從地面自行加油門起飛，建議高度約三公尺；先朝右轉入口移動。', '入彎後用小量 Roll 建立傾斜，配合 Yaw 讓機頭朝向下一個目標，並以 Pitch 與油門保持前進及高度。', '依序飛入右轉的入口、彎中與出口，再接左轉的三個目標。', '出口需要實際移動方向相對入口朝指定方向改變至少 25°，只原地偏航不算；不用精準速度或停穩。', '漏點可補飛，未墜毀接地可就地再次起飛；已完成的目標會保留。'],
   commonMistakes: ['只有機頭轉向，但機體仍沿原方向滑行；觀察目標相對位置，再小量配合 Roll 與 Pitch 修正路線。', '大幅傾斜後忘記維持高度；縮小輸入並以油門修正，Acro 回中不會自動回平。'],

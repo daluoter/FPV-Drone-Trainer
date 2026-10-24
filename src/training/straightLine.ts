@@ -225,7 +225,7 @@ export const STRAIGHT_LINE_LESSON: LessonDefinition = {
 }
 
 export const STRAIGHT_LINE_LEARNING_CONTENT: LessonLearningContent = {
-  code: 'L03', title: '起飛與直線穿圈', level: '入門', prerequisiteIds: ['hover'],
+  code: 'L02', title: '起飛與直線穿圈', level: '入門', prerequisiteIds: ['takeoff'],
   objectives: ['從地面自行起飛，依序穿過三個圈圈。', '通過綠色終點圈即完成，不要求減速或停穩。'],
   steps: [
     '從地面自行起飛到起點圈附近，建議高度約三公尺；不需要先懸停。',

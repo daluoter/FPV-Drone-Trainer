@@ -25,6 +25,7 @@ import { FIGURE_EIGHT_TARGET_IDS } from '../training/figureEight'
 import { createTrainingFieldAnchors } from '../training/field'
 import { createWideGates, WIDE_GATE_IDS } from '../world/wideGates'
 import { measureBasicRecoveryMotion } from '../training/basicRecovery'
+import { lessonLearningContent } from '../training/catalog'
 import DemonstrationProgress from '../training/TeachingDemonstrationProgress'
 import { createDemonstrationProgress, demonstrationProgressAt, type TeachingDemonstrationProgressSnapshot } from '../training/demonstrationProgress'
 import type { TrainingMachineState, TrainingSample, TrainingSceneReference, TrainingSetupRequest } from '../training/types'
@@ -585,9 +586,9 @@ export default function FreeFlight({
         </div>
       </div>
 
-      <div className="school-demo-bar school-demo-toolbar" aria-label="L00 四軸與起飛示範">
+      <div className="school-demo-bar school-demo-toolbar" aria-label="四軸與課程示範">
         <strong>L00 看懂四軸</strong>
-        {([['roll', '橫滾 Roll'], ['pitch', '俯仰 Pitch'], ['yaw', '偏航 Yaw'], ['takeoff', 'L01 起飛示範'], ['straight-line', 'L03 直線示範'], ['landing', 'L04 降落示範'], ['direction-control', 'L05 方向示範'], ['coordinated-turn', 'L06 轉彎示範'], ['square-route', 'L07 方形示範'], ['figure-eight', 'L08 八字示範'], ['wide-gate', 'L09 穿門示範'], ['basic-recovery', 'L10 恢復示範']] as const).map(([kind, label]) => <button className="lab-button lab-button-small" type="button" key={kind} disabled={trainingSettingsLocked || Boolean(telemetry?.armed) || renderingState !== 'ready'} onClick={() => startDemonstration(kind)}>{label}</button>)}
+        {([['roll', '橫滾 Roll'], ['pitch', '俯仰 Pitch'], ['yaw', '偏航 Yaw'], ['takeoff', '起飛與懸停示範'], ['straight-line', '直線示範'], ['landing', '降落示範'], ['direction-control', '方向示範'], ['coordinated-turn', '轉彎示範'], ['square-route', '方形示範'], ['figure-eight', '八字示範'], ['wide-gate', '穿門示範'], ['basic-recovery', '恢復示範']] as const).map(([kind, label]) => <button className="lab-button lab-button-small" type="button" key={kind} disabled={trainingSettingsLocked || Boolean(telemetry?.armed) || renderingState !== 'ready'} onClick={() => startDemonstration(kind)}>{lessonLearningContent(kind) ? `${lessonLearningContent(kind)?.code} ${label}` : label}</button>)}
         <span>左桿：油門／偏航 · 右桿：橫滾／俯仰</span>
       </div>
       {fullscreenError && <p role="status">{fullscreenError}</p>}

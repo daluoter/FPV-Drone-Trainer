@@ -138,15 +138,15 @@ function evaluateTakeoff(sample: TrainingSample, context: TrainingEvaluationCont
   if (settled && dwell >= TAKEOFF_SETTLED_DWELL_SECONDS && context.elapsedSeconds >= 3) {
     return {
       status: 'success', metrics, checkpointIds, score,
-      message: '已從起飛墊離地，並在目標高度連續穩住。',
+      message: '已從起飛墊離地，並在目標高度連續定點懸停 1.5 秒。',
     }
   }
   return {
     status: 'continue', metrics, checkpointIds, score,
     hint: !ready ? '先保持水平、確認起飛墊位置，再緩慢加油門。'
       : !liftoff && !lifted ? '緩慢增加油門，垂直離地；避免同時大幅推動其他軸。'
-        : settled ? '保持小幅修正，在目標高度穩住 1.5 秒。'
-          : '靠近起飛墊上方 2 公尺的目標高度，先減少上升或下降速度。',
+        : settled ? '保持小幅修正，在目標高度連續定點懸停 1.5 秒。'
+          : '靠近起飛墊上方 2 公尺的目標高度，先減少升降與漂移，再以小幅修正定點懸停。',
   }
 }
 

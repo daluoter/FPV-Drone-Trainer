@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_LESSONS } from './lessons'
+import { DEFAULT_LESSONS, LEARNING_LESSONS, TRAINING_LESSONS, lessonById } from './lessons'
 import { lessonLearningContent } from './catalog'
 
 
 describe('lesson catalog', () => {
-  it('keeps existing lesson IDs stable and adds L10 after the approved beginner lessons', () => {
+  it('keeps existing lesson IDs and the historical hover definition stable', () => {
     expect(DEFAULT_LESSONS).toHaveLength(12)
     expect(DEFAULT_LESSONS.map((lesson) => lesson.id)).toEqual([
       'hover',
@@ -26,7 +26,7 @@ describe('lesson catalog', () => {
       '協調轉彎',
       'Split-S',
       'Orbit / 刷鍋',
-      '穩定起飛',
+      '起飛與定點懸停',
       '起飛、前往降落區與降落',
       'Straight Line Through Rings',
       '側移與方向感',
@@ -53,8 +53,8 @@ describe('lesson catalog', () => {
   })
 
   it('offers learning content in prerequisite order without requiring completion to select a lesson', () => {
-    const ordered = [...DEFAULT_LESSONS].sort((left, right) => left.priority - right.priority)
-    expect(ordered.map((lesson) => lessonLearningContent(lesson.id)?.code)).toEqual(['L01', 'L02', 'L03', 'L04', 'L05', 'L06', 'L07', 'L08', 'L09', 'L10', 'L13', 'L14'])
+    const ordered = [...LEARNING_LESSONS].sort((left, right) => left.priority - right.priority)
+    expect(ordered.map((lesson) => lessonLearningContent(lesson.id)?.code)).toEqual(['L01', 'L02', 'L03', 'L04', 'L05', 'L06', 'L07', 'L08', 'L09', 'L12', 'L13'])
     expect(lessonLearningContent('takeoff')?.prerequisiteIds).toEqual(['intro'])
     expect(lessonLearningContent('hover')?.prerequisiteIds).toEqual(['takeoff'])
     expect(lessonLearningContent('direction-control')?.prerequisiteIds).toEqual(['landing'])
@@ -68,6 +68,23 @@ describe('lesson catalog', () => {
       const content = lessonLearningContent(lesson.id)
       return content && content.steps.length > 0 && content.commonMistakes.length > 0
     })).toBe(true)
+  })
+
+  it('merges hover into L01 navigation without changing stable lesson identities or takeoff criteria', () => {
+    const ordered = [...LEARNING_LESSONS].sort((left, right) => left.priority - right.priority)
+    expect(ordered.map((lesson) => lesson.id)).toEqual([
+      'takeoff', 'straight-line', 'landing', 'direction-control', 'coordinated-turn',
+      'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'split-s', 'orbit',
+    ])
+    expect(TRAINING_LESSONS).toBe(LEARNING_LESSONS)
+    expect(LEARNING_LESSONS.every((lesson) => lessonById(lesson.id) === lesson)).toBe(true)
+    expect(lessonById('hover')).toBe(DEFAULT_LESSONS.find((lesson) => lesson.id === 'hover'))
+    expect(LEARNING_LESSONS.some((lesson) => lesson.id === 'hover')).toBe(false)
+    const takeoff = lessonById('takeoff')!
+    expect(takeoff.checkpoints.map((checkpoint) => checkpoint.id)).toEqual(['takeoff-ready', 'takeoff-liftoff', 'takeoff-settle'])
+    expect(takeoff.checkpoints[2]?.title).toBe('定點懸停 1.5 秒')
+    expect(takeoff.scoring.minimumActiveSeconds).toBe(3)
+    expect(takeoff.scoring.minimumPassingScore).toBe(70)
   })
 
   it('keeps the Split-S request elevated and every setup disarmed/reset-only', () => {

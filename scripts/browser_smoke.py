@@ -104,7 +104,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if response is None or response.status != 200:
                 raise AssertionError("The production entry page did not return HTTP 200.")
             expect(page).to_have_title("FPV Drone Trainer")
-            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.23.6")
+            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.24.1")
             report["release"] = page.get_by_test_id("app-release").inner_text()
 
             asset_urls = page.locator("script[src], link[rel='stylesheet'][href]").evaluate_all(
@@ -118,6 +118,44 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 if asset.netloc != expected_origin or not asset.path.startswith(f"{BASE_PATH}assets/"):
                     raise AssertionError(f"Asset escaped the Pages project path: {asset.path}")
             checks.append("production entry and project-path assets")
+
+            # A retired last-opened lesson must resume in the merged L01 while
+            # preserving the saved knowledge/mode and original preference data.
+            # Use an isolated context: no authored flight result is injected.
+            legacy_context = browser.new_context(viewport={"width": 1280, "height": 720})
+            legacy_context.set_default_timeout(20_000)
+            try:
+                legacy_page = legacy_context.new_page()
+                legacy_page.on("pageerror", lambda error: errors.append(f"Legacy-selection page error: {error}"))
+                legacy_page.on("response", record_response)
+                legacy_page.on("requestfailed", record_failure)
+                legacy_page.on("console", record_console)
+                legacy_page.goto(url, wait_until="networkidle")
+                legacy_preferences = json.dumps({
+                    "schemaVersion": 1, "introCompleted": True,
+                    "lastLessonId": "hover", "mode": "challenge",
+                }, separators=(",", ":"))
+                legacy_page.evaluate(
+                    "raw => localStorage.setItem('fpv-drone-trainer.learning.v1', raw)",
+                    legacy_preferences,
+                )
+                prior_legacy_progress = training_progress(legacy_page)
+                legacy_page.reload(wait_until="networkidle")
+                expect(legacy_page.locator("#school-lesson")).to_have_value("takeoff")
+                expect(legacy_page.locator("#school-mode")).to_have_value("challenge")
+                expect(legacy_page.locator("#school-open-intro")).to_have_text("L00 觀念複習 ✓")
+                expect(legacy_page.locator("#training").get_by_role("heading", name="起飛與定點懸停", exact=True)).to_be_visible()
+                if legacy_page.evaluate("localStorage.getItem('fpv-drone-trainer.learning.v1')") != legacy_preferences:
+                    raise AssertionError("Redirecting the retired hover selection overwrote the original saved preferences.")
+                if training_progress(legacy_page) != prior_legacy_progress:
+                    raise AssertionError("Redirecting the retired hover selection modified training results.")
+                report["legacy_hover_selection"] = {
+                    "selected": "takeoff", "mode": "challenge", "intro_completed": True,
+                    "original_preferences_preserved": True,
+                }
+            finally:
+                legacy_context.close()
+            checks.append("retired hover selection resumes merged L01 without rewriting preferences, knowledge or results")
 
             flight = page.locator("#free-flight")
             canvas = flight.locator("canvas")
@@ -200,10 +238,18 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(mode).to_have_value("practice")
             expect(lesson).to_have_value("takeoff")
             expect(lesson.locator("option:checked")).to_contain_text("L01")
-            expect(lesson.locator("option")).to_have_count(12)
-            expect(lesson.locator("option[value='landing']")).to_contain_text("L04")
-            expect(lesson.locator("option[value='straight-line']")).to_contain_text("L03")
-            expect(lesson.locator("option[value='direction-control']")).to_contain_text("L05")
+            expect(lesson.locator("option")).to_have_count(11)
+            expect(lesson.locator("option[value='hover']")).to_have_count(0)
+            active_codes = lesson.locator("option").evaluate_all(
+                "options => options.map(option => option.textContent.trim().match(/^L\\d{2}/)?.[0])"
+            )
+            if active_codes != ["L01", "L02", "L03", "L04", "L05", "L06", "L07", "L08", "L09", "L12", "L13"]:
+                raise AssertionError(f"Active course numbers do not match the merged curriculum: {active_codes}")
+            expect(training.get_by_role("heading", name="起飛與定點懸停", exact=True)).to_be_visible()
+            expect(training.get_by_role("list", name="本課步驟", exact=True)).to_contain_text("懸停")
+            expect(lesson.locator("option[value='landing']")).to_contain_text("L03")
+            expect(lesson.locator("option[value='straight-line']")).to_contain_text("L02")
+            expect(lesson.locator("option[value='direction-control']")).to_contain_text("L04")
             progress_before_waiting = training_progress(page)
             training.get_by_role("button", name="開始課程", exact=True).click()
             expect(phase).to_have_text("倒數準備")
@@ -239,7 +285,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             checks.append("L01 countdown, untimed arm wait, keyboard reset and explicit training stop")
 
             progress_before_demo = training_progress(page)
-            flight.get_by_role("button", name="L01 起飛示範", exact=True).click()
+            flight.get_by_role("button", name="L01 起飛與懸停示範", exact=True).click()
             expect(arm).to_be_disabled()
             expect(source).to_be_disabled()
             expect(lesson).to_be_disabled()
@@ -258,8 +304,10 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 raise AssertionError("The paused demonstration clock kept advancing.")
 
             timeline.press("End")
-            expect(cue).to_contain_text("連續穩住")
+            expect(cue).to_contain_text("懸停")
             demonstration_snapshot("L01", 3, complete=True)
+            expect(demo_progress).to_contain_text("起飛與定點懸停")
+            expect(demo_progress.get_by_role("list", name="示範步驟", exact=True).get_by_role("listitem").last).to_contain_text("懸停")
             expect(position_hud).to_contain_text("回放高度")
             end_altitude = float(altitude.inner_text().split()[0])
             if not 2.3 <= end_altitude <= 2.7:
@@ -270,6 +318,8 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 raise AssertionError("Paused replay position HUD kept changing.")
             if screenshot:
                 flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "replay-position-hud.png"))
+                page.locator(".free-flight-layout").evaluate("layout => window.scrollTo({top: layout.getBoundingClientRect().top + window.scrollY - 8, behavior: 'instant'})")
+                page.screenshot(path=str(artifact_dir / "l01-takeoff-hover-demo.png"))
             if abs(float(timeline.input_value()) - float(timeline.get_attribute("max"))) > 0.02:
                 raise AssertionError("Seeking did not reach the end of the demonstration.")
             dots = demonstration_sticks.locator(".mode2-stick-dot").evaluate_all(
@@ -356,7 +406,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
             if training_progress(page) != stored_attempts:
                 raise AssertionError("Changing learning mode modified stored flight results.")
-            checks.append("default practice mode, twelve lessons and persisted practice/challenge isolation")
+            checks.append("default practice mode, eleven active lessons and persisted practice/challenge isolation")
 
             # Answer the actual radios/form. Wrong answers must not unlock the
             # next step; knowledge completion is separate from flight progress.
@@ -433,8 +483,8 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             lesson.select_option("landing")
             prior_landing_steps = training.get_by_role("list", name="本課步驟", exact=True).get_by_role("listitem").all_text_contents()
             for demo_name, first_cue, final_cue in (
-                ("L04 降落示範", "從地面起飛區開始", "沒有墜毀就完成"),
-                ("L03 直線示範", "從地面起飛區開始", "依序穿過藍、金、綠三圈就完成"),
+                ("L03 降落示範", "從地面起飛區開始", "沒有墜毀就完成"),
+                ("L02 直線示範", "從地面起飛區開始", "依序穿過藍、金、綠三圈就完成"),
             ):
                 before_demo = training_progress(page)
                 flight.get_by_role("button", name=demo_name, exact=True).click()
@@ -461,28 +511,71 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 expect(demo_progress).to_have_count(0)
                 if training_progress(page) != before_demo:
                     raise AssertionError(f"{demo_name} modified flight progress.")
-            checks.append("L03/L04 demonstration cue synchronization and progress isolation")
+            checks.append("L02/L03 demonstration cue synchronization and progress isolation")
 
             lesson.select_option("direction-control")
             expect(training.locator(".school-route-guide")).to_contain_text("左右")
             before_direction_demo = training_progress(page)
-            flight.get_by_role("button", name="L05 方向示範", exact=True).click()
+            flight.get_by_role("button", name="L04 方向示範", exact=True).click()
             expect(arm).to_be_disabled()
             expect(lesson).to_be_disabled()
             flight.get_by_role("button", name="Pause", exact=True).click()
             timeline.press("Home")
-            demonstration_snapshot("L05", 9)
+            demonstration_snapshot("L04", 9)
             expect(cue).to_contain_text("從地面自行起飛")
             expect(altitude).to_have_text("0.0 m")
             timeline.press("End")
-            demonstration_snapshot("L05", 9, complete=True)
+            demonstration_snapshot("L04", 9, complete=True)
             expect(cue).to_contain_text("已完成側移、前後移動與換向後方向感")
             expect(altitude).to_have_text("3.0 m")
             if float(flight.get_by_test_id("flight-position-z").inner_text().split()[0]) < 3:
-                raise AssertionError("L05 ghost did not complete the body-right move after its heading change.")
+                raise AssertionError("L04 ghost did not complete the body-right move after its heading change.")
             paused_direction_position = position_hud.inner_text()
             page.wait_for_timeout(200)
             if position_hud.inner_text() != paused_direction_position:
+                raise AssertionError("L04 paused position kept advancing.")
+            if screenshot:
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l04-demonstration-fpv.png"))
+                flight.get_by_role("button", name="Chase", exact=True).click()
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l04-demonstration-chase.png"))
+                flight.get_by_role("button", name="FPV", exact=True).click()
+            timeline.press("Home")
+            demonstration_snapshot("L04", 9)
+            expect(altitude).to_have_text("0.0 m")
+            flight.get_by_role("button", name="結束示範", exact=True).click()
+            expect(disarm).to_be_disabled()
+            expect(arm).to_be_enabled()
+            if training_progress(page) != before_direction_demo:
+                raise AssertionError("L04 demonstration wrote a flight result.")
+            page.reload(wait_until="networkidle")
+            expect(lesson).to_have_value("direction-control")
+            expect(page.locator("#school-open-intro")).to_have_text("L00 觀念複習 ✓")
+            source.select_option("keyboard")
+            checks.append("L04 recorded direction demo, ghost seek and pause, progress isolation and lesson reload")
+
+            lesson.select_option("coordinated-turn")
+            expect(training.locator(".school-route-guide")).to_contain_text("右轉入口")
+            expect(training.locator(".school-route-guide")).to_contain_text("左轉入口")
+            before_turn_demo = training_progress(page)
+            flight.get_by_role("button", name="L05 轉彎示範", exact=True).click()
+            expect(arm).to_be_disabled()
+            expect(lesson).to_be_disabled()
+            flight.get_by_role("button", name="Pause", exact=True).click()
+            timeline.press("Home")
+            demonstration_snapshot("L05", 8)
+            expect(cue).to_contain_text("地面")
+            expect(altitude).to_have_text("0.0 m")
+            timeline.press("End")
+            demonstration_snapshot("L05", 8, complete=True)
+            expect(cue).to_contain_text("已完成右轉與左轉協調航線")
+            expect(altitude).to_have_text("3.0 m")
+            if float(flight.get_by_test_id("flight-position-right").inner_text().split()[0]) < 14:
+                raise AssertionError("L05 ghost did not reach the final left-turn exit X position.")
+            if float(flight.get_by_test_id("flight-position-z").inner_text().split()[0]) > -16:
+                raise AssertionError("L05 ghost did not reach the final left-turn exit Z position.")
+            paused_turn_position = position_hud.inner_text()
+            page.wait_for_timeout(200)
+            if position_hud.inner_text() != paused_turn_position:
                 raise AssertionError("L05 paused position kept advancing.")
             if screenshot:
                 flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l05-demonstration-fpv.png"))
@@ -490,56 +583,13 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l05-demonstration-chase.png"))
                 flight.get_by_role("button", name="FPV", exact=True).click()
             timeline.press("Home")
-            demonstration_snapshot("L05", 9)
-            expect(altitude).to_have_text("0.0 m")
-            flight.get_by_role("button", name="結束示範", exact=True).click()
-            expect(disarm).to_be_disabled()
-            expect(arm).to_be_enabled()
-            if training_progress(page) != before_direction_demo:
-                raise AssertionError("L05 demonstration wrote a flight result.")
-            page.reload(wait_until="networkidle")
-            expect(lesson).to_have_value("direction-control")
-            expect(page.locator("#school-open-intro")).to_have_text("L00 觀念複習 ✓")
-            source.select_option("keyboard")
-            checks.append("L05 recorded direction demo, ghost seek and pause, progress isolation and lesson reload")
-
-            lesson.select_option("coordinated-turn")
-            expect(training.locator(".school-route-guide")).to_contain_text("右轉入口")
-            expect(training.locator(".school-route-guide")).to_contain_text("左轉入口")
-            before_turn_demo = training_progress(page)
-            flight.get_by_role("button", name="L06 轉彎示範", exact=True).click()
-            expect(arm).to_be_disabled()
-            expect(lesson).to_be_disabled()
-            flight.get_by_role("button", name="Pause", exact=True).click()
-            timeline.press("Home")
-            demonstration_snapshot("L06", 8)
-            expect(cue).to_contain_text("地面")
-            expect(altitude).to_have_text("0.0 m")
-            timeline.press("End")
-            demonstration_snapshot("L06", 8, complete=True)
-            expect(cue).to_contain_text("已完成右轉與左轉協調航線")
-            expect(altitude).to_have_text("3.0 m")
-            if float(flight.get_by_test_id("flight-position-right").inner_text().split()[0]) < 14:
-                raise AssertionError("L06 ghost did not reach the final left-turn exit X position.")
-            if float(flight.get_by_test_id("flight-position-z").inner_text().split()[0]) > -16:
-                raise AssertionError("L06 ghost did not reach the final left-turn exit Z position.")
-            paused_turn_position = position_hud.inner_text()
-            page.wait_for_timeout(200)
-            if position_hud.inner_text() != paused_turn_position:
-                raise AssertionError("L06 paused position kept advancing.")
-            if screenshot:
-                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l06-demonstration-fpv.png"))
-                flight.get_by_role("button", name="Chase", exact=True).click()
-                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l06-demonstration-chase.png"))
-                flight.get_by_role("button", name="FPV", exact=True).click()
-            timeline.press("Home")
-            demonstration_snapshot("L06", 8)
+            demonstration_snapshot("L05", 8)
             expect(altitude).to_have_text("0.0 m")
             flight.get_by_role("button", name="結束示範", exact=True).click()
             expect(disarm).to_be_disabled()
             expect(arm).to_be_enabled()
             if training_progress(page) != before_turn_demo:
-                raise AssertionError("L06 demonstration wrote a flight result.")
+                raise AssertionError("L05 demonstration wrote a flight result.")
             page.reload(wait_until="networkidle")
             expect(lesson).to_have_value("coordinated-turn")
             expect(page.locator("#school-open-intro")).to_have_text("L00 觀念複習 ✓")
@@ -548,30 +598,79 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
             lesson.select_option("coordinated-turn")
             expect(training.locator(".school-progress")).to_contain_text("已練 0 次")
-            checks.append("L06 right/left recorded turn demo, native seek/pause, progress isolation and current-rule lesson reload")
+            checks.append("L05 right/left recorded turn demo, native seek/pause, progress isolation and current-rule lesson reload")
 
             lesson.select_option("square-route")
             expect(training.get_by_role("heading", name="方形航線", exact=True)).to_be_visible()
             expect(training.locator(".school-route-guide")).to_contain_text("起飛")
             before_square_demo = training_progress(page)
-            flight.get_by_role("button", name="L07 方形示範", exact=True).click()
+            flight.get_by_role("button", name="L06 方形示範", exact=True).click()
             expect(arm).to_be_disabled()
             expect(lesson).to_be_disabled()
             flight.get_by_role("button", name="Pause", exact=True).click()
             timeline.press("Home")
-            demonstration_snapshot("L07", 10)
+            demonstration_snapshot("L06", 10)
             expect(cue).to_contain_text("地面")
             expect(altitude).to_have_text("0.0 m")
             timeline.press("End")
-            demonstration_snapshot("L07", 10, complete=True)
+            demonstration_snapshot("L06", 10, complete=True)
             expect(cue).to_contain_text("已完成四段方形航線並回到起點上方")
             expect(altitude).to_have_text("3.0 m")
             for coordinate in ("right", "z"):
                 if abs(float(flight.get_by_test_id(f"flight-position-{coordinate}").inner_text().split()[0])) > .6:
-                    raise AssertionError("L07 ghost did not return above its supported launch point.")
+                    raise AssertionError("L06 ghost did not return above its supported launch point.")
             paused_square_position = position_hud.inner_text()
             page.wait_for_timeout(200)
             if position_hud.inner_text() != paused_square_position:
+                raise AssertionError("L06 paused position kept advancing.")
+            if screenshot:
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l06-demonstration-fpv.png"))
+                flight.get_by_role("button", name="Chase", exact=True).click()
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l06-demonstration-chase.png"))
+                flight.get_by_role("button", name="Free / debug", exact=True).click()
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l06-demonstration-free.png"))
+                flight.get_by_role("button", name="FPV", exact=True).click()
+            timeline.press("Home")
+            demonstration_snapshot("L06", 10)
+            expect(altitude).to_have_text("0.0 m")
+            flight.get_by_role("button", name="結束示範", exact=True).click()
+            expect(disarm).to_be_disabled()
+            expect(arm).to_be_enabled()
+            if training_progress(page) != before_square_demo:
+                raise AssertionError("L06 demonstration wrote a flight result.")
+            page.reload(wait_until="networkidle")
+            expect(lesson).to_have_value("square-route")
+            expect(page.locator("#school-open-intro")).to_have_text("L00 觀念複習 ✓")
+            source.select_option("keyboard")
+            lesson.select_option("takeoff")
+            expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
+            lesson.select_option("square-route")
+            expect(training.locator(".school-progress")).to_contain_text("已練 0 次")
+            checks.append("L06 four-leg square demo, native seek/pause, return-to-launch position, progress isolation and lesson reload")
+
+            lesson.select_option("figure-eight")
+            expect(training.get_by_role("heading", name="八字航線", exact=True)).to_be_visible()
+            expect(training.locator(".school-route-guide")).to_contain_text("中央")
+            before_eight_demo = training_progress(page)
+            flight.get_by_role("button", name="L07 八字示範", exact=True).click()
+            expect(arm).to_be_disabled()
+            expect(lesson).to_be_disabled()
+            flight.get_by_role("button", name="Pause", exact=True).click()
+            timeline.press("Home")
+            demonstration_snapshot("L07", 11)
+            expect(cue).to_contain_text("地面")
+            expect(altitude).to_have_text("0.0 m")
+            timeline.press("End")
+            demonstration_snapshot("L07", 11, complete=True)
+            expect(cue).to_contain_text("已完成左右八字航線並回到中央終點")
+            expect(altitude).to_have_text("3.0 m")
+            if abs(float(flight.get_by_test_id("flight-position-right").inner_text().split()[0])) > .6:
+                raise AssertionError("L07 ghost did not return to the central X position.")
+            if abs(float(flight.get_by_test_id("flight-position-z").inner_text().split()[0]) + 6) > .6:
+                raise AssertionError("L07 ghost did not return to the centre six metres ahead of launch.")
+            paused_eight_position = position_hud.inner_text()
+            page.wait_for_timeout(200)
+            if position_hud.inner_text() != paused_eight_position:
                 raise AssertionError("L07 paused position kept advancing.")
             if screenshot:
                 flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l07-demonstration-fpv.png"))
@@ -581,46 +680,48 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l07-demonstration-free.png"))
                 flight.get_by_role("button", name="FPV", exact=True).click()
             timeline.press("Home")
-            demonstration_snapshot("L07", 10)
+            demonstration_snapshot("L07", 11)
             expect(altitude).to_have_text("0.0 m")
             flight.get_by_role("button", name="結束示範", exact=True).click()
             expect(disarm).to_be_disabled()
             expect(arm).to_be_enabled()
-            if training_progress(page) != before_square_demo:
+            if training_progress(page) != before_eight_demo:
                 raise AssertionError("L07 demonstration wrote a flight result.")
             page.reload(wait_until="networkidle")
-            expect(lesson).to_have_value("square-route")
+            expect(lesson).to_have_value("figure-eight")
             expect(page.locator("#school-open-intro")).to_have_text("L00 觀念複習 ✓")
             source.select_option("keyboard")
             lesson.select_option("takeoff")
             expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
-            lesson.select_option("square-route")
-            expect(training.locator(".school-progress")).to_contain_text("已練 0 次")
-            checks.append("L07 four-leg square demo, native seek/pause, return-to-launch position, progress isolation and lesson reload")
-
             lesson.select_option("figure-eight")
-            expect(training.get_by_role("heading", name="八字航線", exact=True)).to_be_visible()
-            expect(training.locator(".school-route-guide")).to_contain_text("中央")
-            before_eight_demo = training_progress(page)
-            flight.get_by_role("button", name="L08 八字示範", exact=True).click()
+            expect(training.locator(".school-progress")).to_contain_text("已練 0 次")
+            checks.append("L07 left/right figure-eight demo, native seek/pause, central finish position, progress isolation and lesson reload")
+
+            lesson.select_option("wide-gate")
+            expect(training.get_by_role("heading", name="寬門穿越", exact=True)).to_be_visible()
+            expect(training.locator(".school-route-guide")).to_contain_text("門")
+            before_gate_demo = training_progress(page)
+            flight.get_by_role("button", name="L08 穿門示範", exact=True).click()
             expect(arm).to_be_disabled()
             expect(lesson).to_be_disabled()
             flight.get_by_role("button", name="Pause", exact=True).click()
             timeline.press("Home")
-            demonstration_snapshot("L08", 11)
+            demonstration_snapshot("L08", 5)
             expect(cue).to_contain_text("地面")
             expect(altitude).to_have_text("0.0 m")
+            if screenshot:
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l08-demonstration-start.png"))
             timeline.press("End")
-            demonstration_snapshot("L08", 11, complete=True)
-            expect(cue).to_contain_text("已完成左右八字航線並回到中央終點")
+            demonstration_snapshot("L08", 5, complete=True)
+            expect(cue).to_contain_text("已依序穿過三道寬門且未碰撞門框")
             expect(altitude).to_have_text("3.0 m")
             if abs(float(flight.get_by_test_id("flight-position-right").inner_text().split()[0])) > .6:
-                raise AssertionError("L08 ghost did not return to the central X position.")
-            if abs(float(flight.get_by_test_id("flight-position-z").inner_text().split()[0]) + 6) > .6:
-                raise AssertionError("L08 ghost did not return to the centre six metres ahead of launch.")
-            paused_eight_position = position_hud.inner_text()
+                raise AssertionError("L08 ghost did not remain near the gate centre line.")
+            if float(flight.get_by_test_id("flight-position-z").inner_text().split()[0]) >= -24:
+                raise AssertionError("L08 ghost did not pass beyond the third gate plane.")
+            paused_gate_position = position_hud.inner_text()
             page.wait_for_timeout(200)
-            if position_hud.inner_text() != paused_eight_position:
+            if position_hud.inner_text() != paused_gate_position:
                 raise AssertionError("L08 paused position kept advancing.")
             if screenshot:
                 flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l08-demonstration-fpv.png"))
@@ -630,64 +731,13 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l08-demonstration-free.png"))
                 flight.get_by_role("button", name="FPV", exact=True).click()
             timeline.press("Home")
-            demonstration_snapshot("L08", 11)
-            expect(altitude).to_have_text("0.0 m")
-            flight.get_by_role("button", name="結束示範", exact=True).click()
-            expect(disarm).to_be_disabled()
-            expect(arm).to_be_enabled()
-            if training_progress(page) != before_eight_demo:
-                raise AssertionError("L08 demonstration wrote a flight result.")
-            page.reload(wait_until="networkidle")
-            expect(lesson).to_have_value("figure-eight")
-            expect(page.locator("#school-open-intro")).to_have_text("L00 觀念複習 ✓")
-            source.select_option("keyboard")
-            lesson.select_option("takeoff")
-            expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
-            lesson.select_option("figure-eight")
-            expect(training.locator(".school-progress")).to_contain_text("已練 0 次")
-            checks.append("L08 left/right figure-eight demo, native seek/pause, central finish position, progress isolation and lesson reload")
-
-            lesson.select_option("wide-gate")
-            expect(training.get_by_role("heading", name="寬門穿越", exact=True)).to_be_visible()
-            expect(training.locator(".school-route-guide")).to_contain_text("門")
-            before_gate_demo = training_progress(page)
-            flight.get_by_role("button", name="L09 穿門示範", exact=True).click()
-            expect(arm).to_be_disabled()
-            expect(lesson).to_be_disabled()
-            flight.get_by_role("button", name="Pause", exact=True).click()
-            timeline.press("Home")
-            demonstration_snapshot("L09", 5)
-            expect(cue).to_contain_text("地面")
-            expect(altitude).to_have_text("0.0 m")
-            if screenshot:
-                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l09-demonstration-start.png"))
-            timeline.press("End")
-            demonstration_snapshot("L09", 5, complete=True)
-            expect(cue).to_contain_text("已依序穿過三道寬門且未碰撞門框")
-            expect(altitude).to_have_text("3.0 m")
-            if abs(float(flight.get_by_test_id("flight-position-right").inner_text().split()[0])) > .6:
-                raise AssertionError("L09 ghost did not remain near the gate centre line.")
-            if float(flight.get_by_test_id("flight-position-z").inner_text().split()[0]) >= -24:
-                raise AssertionError("L09 ghost did not pass beyond the third gate plane.")
-            paused_gate_position = position_hud.inner_text()
-            page.wait_for_timeout(200)
-            if position_hud.inner_text() != paused_gate_position:
-                raise AssertionError("L09 paused position kept advancing.")
-            if screenshot:
-                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l09-demonstration-fpv.png"))
-                flight.get_by_role("button", name="Chase", exact=True).click()
-                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l09-demonstration-chase.png"))
-                flight.get_by_role("button", name="Free / debug", exact=True).click()
-                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l09-demonstration-free.png"))
-                flight.get_by_role("button", name="FPV", exact=True).click()
-            timeline.press("Home")
-            demonstration_snapshot("L09", 5)
+            demonstration_snapshot("L08", 5)
             expect(altitude).to_have_text("0.0 m")
             flight.get_by_role("button", name="結束示範", exact=True).click()
             expect(disarm).to_be_disabled()
             expect(arm).to_be_enabled()
             if training_progress(page) != before_gate_demo:
-                raise AssertionError("L09 demonstration wrote a flight result.")
+                raise AssertionError("L08 demonstration wrote a flight result.")
             page.reload(wait_until="networkidle")
             expect(lesson).to_have_value("wide-gate")
             expect(page.locator("#school-open-intro")).to_have_text("L00 觀念複習 ✓")
@@ -696,7 +746,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
             lesson.select_option("wide-gate")
             expect(training.locator(".school-progress")).to_contain_text("已練 0 次")
-            checks.append("L09 physical-frame demo, native seek/pause, beyond-third-gate finish, progress isolation and lesson reload")
+            checks.append("L08 physical-frame demo, native seek/pause, beyond-third-gate finish, progress isolation and lesson reload")
 
             lesson.select_option("basic-recovery")
             expect(training.get_by_role("heading", name="基礎失誤恢復", exact=True)).to_be_visible()
@@ -718,7 +768,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                     expect(field).to_be_visible()
                     match = re.match(r"^[+-]?\d+(?:\.\d+)?", field.inner_text())
                     if not match:
-                        raise AssertionError(f"L10 motion readout is not numeric: {key}.")
+                        raise AssertionError(f"L09 motion readout is not numeric: {key}.")
                     values[key] = float(match.group())
                 return values
 
@@ -726,8 +776,8 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(flight.get_by_role("checkbox", name="Developer HUD", exact=True)).not_to_be_checked()
             prior_panel_scroll = training.evaluate("panel => { panel.scrollTop = panel.scrollHeight; return panel.scrollTop; }")
             if prior_panel_scroll <= 0:
-                raise AssertionError("L10 sidebar scroll regression did not start from a scrolled course panel.")
-            flight.get_by_role("button", name="L10 恢復示範", exact=True).click()
+                raise AssertionError("L09 sidebar scroll regression did not start from a scrolled course panel.")
+            flight.get_by_role("button", name="L09 恢復示範", exact=True).click()
             page.wait_for_function("document.querySelector('#training').scrollTop === 0")
             heading_bounds = demo_progress.locator(".school-demonstration-heading").bounding_box()
             panel_bounds = training.bounding_box()
@@ -738,44 +788,44 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(lesson).to_be_disabled()
             flight.get_by_role("button", name="Pause", exact=True).click()
             timeline.press("Home")
-            demonstration_snapshot("L10", 8)
+            demonstration_snapshot("L09", 8)
             expect(cue).to_contain_text("地面")
             expect(altitude).to_have_text("0.0 m")
             expect(motion_hud).to_contain_text("回放")
             home_motion = recovery_motion()
             if any(abs(value) > .05 for value in home_motion.values()):
-                raise AssertionError(f"L10 demo did not start from a supported resting pose: {home_motion}")
+                raise AssertionError(f"L09 demo did not start from a supported resting pose: {home_motion}")
             if screenshot:
-                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l10-demonstration-start.png"))
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l09-demonstration-start.png"))
             # Seek through the actual range control. The readouts must follow
             # the recorded ghost, including observable motion away from rest.
             recovery_samples = []
             for fraction in (.15, .35, .55, .75):
                 bounds = timeline.bounding_box()
                 if not bounds:
-                    raise AssertionError("L10 replay timeline has no bounds.")
+                    raise AssertionError("L09 replay timeline has no bounds.")
                 timeline.click(position={"x": bounds["width"] * fraction, "y": bounds["height"] / 2})
                 recovery_samples.append({"time_seconds": float(timeline.input_value()), **recovery_motion()})
             if not any(abs(sample[key]) > .05 for sample in recovery_samples for key in home_motion):
-                raise AssertionError("L10 replay motion HUD did not change with the recorded ghost.")
-            report["l10_motion_samples"] = recovery_samples
+                raise AssertionError("L09 replay motion HUD did not change with the recorded ghost.")
+            report["l09_motion_samples"] = recovery_samples
             timeline.press("End")
-            demonstration_snapshot("L10", 8, complete=True)
+            demonstration_snapshot("L09", 8, complete=True)
             expect(cue).to_contain_text("已完成傾斜、下沉與漂移恢復")
             recovery_end_altitude = float(altitude.inner_text().split()[0])
             if not 3 <= recovery_end_altitude <= 5:
-                raise AssertionError(f"L10 demo did not finish airborne near the practice height: {recovery_end_altitude}")
+                raise AssertionError(f"L09 demo did not finish airborne near the practice height: {recovery_end_altitude}")
             paused_recovery_position = position_hud.inner_text()
             paused_recovery_motion = recovery_motion()
             page.wait_for_timeout(200)
             if position_hud.inner_text() != paused_recovery_position or recovery_motion() != paused_recovery_motion:
-                raise AssertionError("L10 paused ghost position or motion readouts kept advancing.")
+                raise AssertionError("L09 paused ghost position or motion readouts kept advancing.")
             if screenshot:
-                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l10-demonstration-fpv.png"))
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l09-demonstration-fpv.png"))
                 flight.get_by_role("button", name="Chase", exact=True).click()
-                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l10-demonstration-chase.png"))
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l09-demonstration-chase.png"))
                 flight.get_by_role("button", name="Free / debug", exact=True).click()
-                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l10-demonstration-free.png"))
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l09-demonstration-free.png"))
                 flight.get_by_role("button", name="FPV", exact=True).click()
             # The confusing steps 5–8 have their own chapter controls. Rewind
             # to a chapter, remain paused there, then continue the real ghost.
@@ -787,22 +837,22 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 chapter_time = float(timeline.input_value())
                 page.wait_for_timeout(200)
                 if abs(float(timeline.input_value()) - chapter_time) > .02:
-                    raise AssertionError("L10 chapter seek did not leave the demonstration paused.")
+                    raise AssertionError("L09 chapter seek did not leave the demonstration paused.")
                 if screenshot:
                     page.locator(".free-flight-layout").evaluate("layout => window.scrollTo({top: layout.getBoundingClientRect().top + window.scrollY - 8, behavior: 'instant'})")
-                    page.screenshot(path=str(artifact_dir / f"l10-demo-step-{completed + 1}.png"))
+                    page.screenshot(path=str(artifact_dir / f"l09-demo-step-{completed + 1}.png"))
             if screenshot:
                 page.set_viewport_size({"width": 375, "height": 720})
                 demo_progress.scroll_into_view_if_needed()
-                page.screenshot(path=str(artifact_dir / "l10-demo-progress-375.png"), full_page=True)
+                page.screenshot(path=str(artifact_dir / "l09-demo-progress-375.png"), full_page=True)
                 page.set_viewport_size({"width": 1280, "height": 720})
             timeline.press("End")
-            demonstration_snapshot("L10", 8, complete=True)
+            demonstration_snapshot("L09", 8, complete=True)
             timeline.press("Home")
-            demonstration_snapshot("L10", 8)
+            demonstration_snapshot("L09", 8)
             expect(altitude).to_have_text("0.0 m")
             if recovery_motion() != home_motion:
-                raise AssertionError("L10 Home seek did not restore the recorded initial motion.")
+                raise AssertionError("L09 Home seek did not restore the recorded initial motion.")
             flight.get_by_role("button", name="結束示範", exact=True).click()
             expect(disarm).to_be_disabled()
             expect(arm).to_be_enabled()
@@ -814,7 +864,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 raise AssertionError("Exiting a demonstration did not restore the learner's sidebar reading position.")
             report["demonstration_sidebar_scroll"] = {"before": prior_panel_scroll, "during": 0, "after": restored_panel_scroll}
             if training_progress(page) != before_recovery_demo:
-                raise AssertionError("L10 demonstration wrote a flight result.")
+                raise AssertionError("L09 demonstration wrote a flight result.")
             page.reload(wait_until="networkidle")
             expect(lesson).to_have_value("basic-recovery")
             expect(page.locator("#school-open-intro")).to_have_text("L00 觀念複習 ✓")
@@ -823,7 +873,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
             lesson.select_option("basic-recovery")
             expect(training.locator(".school-progress")).to_contain_text("已練 0 次")
-            checks.append("L10 eased recovery demo, half-speed, independent chapter5/7 seek/pause, ghost motion HUD, progress isolation and lesson reload")
+            checks.append("L09 eased recovery demo, half-speed, independent chapter5/7 seek/pause, ghost motion HUD, progress isolation and lesson reload")
             checks.append("all available demonstrations have independent seekable progress, including L00 actions and cross-lesson playback without overwriting live checkpoints")
             checks.append("scrolled course sidebar reveals demonstration progress at start and restores learner reading position on exit")
 
@@ -862,7 +912,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 expect(phase).to_have_text("準備選課")
                 expect(source).to_be_enabled()
             hud.uncheck()
-            checks.append("L03/L04/L05/L06/L07/L08/L09/L10 actual ground start, safe low-throttle arm and visible stage guidance")
+            checks.append("L02/L03/L04/L05/L06/L07/L08/L09 actual ground start, safe low-throttle arm and visible stage guidance")
 
             fullscreen = flight.locator(".school-fullscreen")
             fullscreen.click()
@@ -937,22 +987,22 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                     raise AssertionError(f"Position HUD overlaps safe banner at {width}x{height}.")
                 motion_bounds = motion_hud.bounding_box()
                 if not motion_bounds:
-                    raise AssertionError(f"L10 motion HUD has no layout bounds at {width}x{height}.")
+                    raise AssertionError(f"L09 motion HUD has no layout bounds at {width}x{height}.")
                 if (motion_bounds['x'] < viewport_bounds['x']
                         or motion_bounds['x'] + motion_bounds['width'] > viewport_bounds['x'] + viewport_bounds['width']
                         or motion_bounds['y'] < viewport_bounds['y']
                         or motion_bounds['y'] + motion_bounds['height'] > viewport_bounds['y'] + viewport_bounds['height']):
-                    raise AssertionError(f"L10 motion HUD overflows viewport at {width}x{height}.")
+                    raise AssertionError(f"L09 motion HUD overflows viewport at {width}x{height}.")
                 for other, label in ((hud_bounds, "position HUD"), (banner_bounds, "safe banner")):
                     overlap_x = min(motion_bounds['x'] + motion_bounds['width'], other['x'] + other['width']) - max(motion_bounds['x'], other['x'])
                     overlap_y = min(motion_bounds['y'] + motion_bounds['height'], other['y'] + other['height']) - max(motion_bounds['y'], other['y'])
                     if overlap_x > 0 and overlap_y > 0:
-                        raise AssertionError(f"L10 motion HUD overlaps {label} at {width}x{height}.")
+                        raise AssertionError(f"L09 motion HUD overlaps {label} at {width}x{height}.")
                 report["position_hud_layouts"][f"{width}x{height}"] = {"hud": hud_bounds, "safe_banner": banner_bounds, "recovery_motion": motion_bounds}
                 if screenshot and width == 375:
                     flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "position-hud-375.png"))
             page.set_viewport_size({"width": 1280, "height": 720})
-            checks.append("position and L10 motion HUDs fit desktop, short desktop and mobile without overlapping each other or safe banner")
+            checks.append("position and L09 motion HUDs fit desktop, short desktop and mobile without overlapping each other or safe banner")
 
             if screenshot:
                 page.evaluate("window.scrollTo({top: 0, behavior: 'instant'})")

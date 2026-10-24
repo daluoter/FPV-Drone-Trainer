@@ -9,6 +9,8 @@ import {
 } from './progress'
 import type { TrainingResult, TrainingStorageLike } from './types'
 import { fingerprintTrainingSettings, trainingAttemptContextKey, type TrainingAttemptContext } from './attempt'
+import { lessonLearningContent } from './catalog'
+import { LEARNING_LESSONS } from './lessons'
 
 class MemoryStorage implements TrainingStorageLike {
   private readonly values = new Map<string, string>()
@@ -59,6 +61,45 @@ function context(overrides: Partial<TrainingAttemptContext> = {}): TrainingAttem
 }
 
 describe('training progress persistence', () => {
+  it('keeps stable-ID progress and raw scopes intact after merging hover into L01 and renumbering courses', () => {
+    const storage = new MemoryStorage()
+    const store = new TrainingProgressStore(storage)
+    const baseline = context({ rulesVersion: 4, mode: 'practice' })
+    const recovery = { ...baseline, rulesVersion: 6 } as const
+    expect(store.recordResult(result({ lessonId: 'hover', sessionId: 'old-hover:passed', attemptContext: baseline })).saved).toBe(true)
+    expect(store.loadCurrent(baseline).progress.lessons.takeoff).toMatchObject({ completed: false, attempts: 0, best: null })
+
+    for (const attempt of [
+      result({ lessonId: 'takeoff', sessionId: 'takeoff:retry', outcome: 'FAILED', attemptContext: baseline }),
+      result({ lessonId: 'takeoff', sessionId: 'takeoff:hover-passed', attemptContext: baseline }),
+      result({ lessonId: 'straight-line', sessionId: 'old-L03:passed', attemptContext: baseline, completedCheckpoints: 5, totalCheckpoints: 5 }),
+      result({ lessonId: 'basic-recovery', sessionId: 'old-L10:passed', attemptContext: recovery, completedCheckpoints: 8, totalCheckpoints: 8 }),
+    ]) {
+      expect(store.recordResult(attempt, '2026-10-23T15:00:00.000Z').saved).toBe(true)
+    }
+    const keys = [trainingAttemptContextKey(baseline), trainingAttemptContextKey(recovery)]
+    const original = keys.map((key) => storage.getItem(key))
+    const loaded = new TrainingProgressStore(storage).loadCurrent(recovery)
+    expect(loaded.errors).toEqual([])
+    expect(loaded.progress.lessons.hover).toMatchObject({ completed: true, attempts: 1, best: { sessionId: 'old-hover:passed' } })
+    expect(loaded.progress.lessons.takeoff).toMatchObject({ completed: true, attempts: 2, best: { sessionId: 'takeoff:hover-passed' } })
+    expect(loaded.progress.lessons['straight-line']).toMatchObject({ completed: true, attempts: 1, best: { sessionId: 'old-L03:passed', totalCheckpoints: 5 } })
+    expect(loaded.progress.lessons['basic-recovery']).toMatchObject({ completed: true, attempts: 1, best: { sessionId: 'old-L10:passed', totalCheckpoints: 8 } })
+
+    const active = LEARNING_LESSONS.map(({ id }) => ({ id, code: lessonLearningContent(id)?.code, progress: loaded.progress.lessons[id] }))
+    expect(active).toHaveLength(11)
+    expect(active.some(({ id }) => id === 'hover')).toBe(false)
+    expect(active.find(({ id }) => id === 'takeoff')).toMatchObject({ code: 'L01', progress: { completed: true, attempts: 2 } })
+    expect(active.find(({ id }) => id === 'straight-line')).toMatchObject({ code: 'L02', progress: { best: { sessionId: 'old-L03:passed' } } })
+    expect(active.find(({ id }) => id === 'basic-recovery')).toMatchObject({ code: 'L09', progress: { best: { sessionId: 'old-L10:passed' } } })
+    expect(keys.map((key) => storage.getItem(key))).toEqual(original)
+    const keyboard = new TrainingProgressStore(storage).loadCurrent({ ...recovery, inputSource: 'keyboard' })
+    for (const id of ['hover', 'takeoff', 'straight-line', 'basic-recovery']) {
+      expect(keyboard.progress.lessons[id]).toMatchObject({ completed: false, attempts: 0, best: null })
+    }
+    expect(keys.map((key) => storage.getItem(key))).toEqual(original)
+  })
+
   it('rejects malformed documents and falls back to empty versioned progress', () => {
     const storage = new MemoryStorage()
     storage.setItem(TRAINING_PROGRESS_STORAGE_KEY, '{not-json')

@@ -1,14 +1,22 @@
 # Training system
 
-The catalog includes beginner flight lessons **L01–L10**: takeoff, hover,
-straight-line rings, landing, direction control, coordinated turns, square route,
-figure eight, wide gates and basic recovery. L00 knowledge completion is tracked separately.
-The original four stable lesson IDs remain unchanged, including the retained
-Split-S and Orbit / 刷鍋 lessons. See [the learning contracts](LEARNING_CONTRACT.md)
-for the current beginner workflow and [the roadmap](LEARNING_ROADMAP.md) for
-remaining work. L09 passed the user's latest manual review of the preceding
-`2026.10.23.4` / `265f818` delivery; exact local build, browser and hardware were
-not supplied. L10 was delivered in `2026.10.23.5`; learner feedback requested easier goals and clearer demo progress. Release `2026.10.23.6` revises it under rules 6 and still awaits manual acceptance.
+Release **2026.10.24.1** presents beginner lessons **L01–L09**: combined
+takeoff/stationary hover, straight-line rings, landing, direction control,
+coordinated turns, square route, figure eight, wide gates and basic recovery.
+L00 knowledge completion is separate; retained Split-S and Orbit are L12/L13.
+The learning menu has 11 flight lessons. `LEARNING_LESSONS` excludes the retired
+standalone `hover` entry, while the registry and evaluator remain available for
+historical compatibility. The `takeoff` ID retains its existing 1.5-second
+settled-hover condition, so the merge changes teaching labels and navigation
+without changing criteria or rule scopes. Saved `hover` selection opens L01;
+old Hover records are kept and are not credited as new L01 results.
+
+The user accepted basic recovery in `2026.10.23.6` / `b30806e`, under its old
+number L10. It is now L09 and retains rules 6. Earlier approvals carry forward
+with the stable lesson IDs. Exact local build, browser and hardware details
+were not supplied. See [the numbering table](LEARNING_CONTRACT.md#課程編號與合併相容性)
+and [the roadmap](LEARNING_ROADMAP.md). The next planned course is L10 Roll;
+it is not implemented in this merge.
 
 The evaluator result is based on finite fixed-step drone state and geometry. A
 stick sequence cannot pass a lesson. Synthetic fixture success is deterministic
@@ -32,7 +40,7 @@ is observational. Training never rotates the Three.js drone, writes a motor
 command, or changes physics. A lesson setup is a request with
 `requiresDisarmed: true` and `resetSimulation: true`; `FreeFlight` honors it
 through `FlightRuntime.resetForTraining` during COUNTDOWN. ACTIVE evaluator
-callbacks cannot teleport or reset the player. L09 setup additionally supplies
+callbacks cannot teleport or reset the player. L08 setup additionally supplies
 the shared static gate boxes. The runtime validates and copies them while
 disarmed; the simulation, rather than the evaluator or renderer, owns contact
 and crash decisions. Free Flight and other lessons clear the static field.
@@ -104,7 +112,7 @@ custom tests may omit it, but shipped evaluators never pass without
 
 ## Geometric lessons
 
-### Takeoff
+### L01 Takeoff and stationary hover
 
 The target is two metres above the `takeoff-pad` reference, which is the spawn
 anchor (default world Y=0.5), not the physical pad surface. The prototype evaluator
@@ -113,9 +121,11 @@ flight near the target. It rejects crash/disarm, inconsistent position jumps,
 telemetry gaps and excessive drift/speed/tilt. Thresholds require human trial
 calibration. The amber presentation target matches the reference-relative height.
 
-### Hover
+### Historical standalone Hover
 
-The hover target is the elevated `hover-zone` reference above the takeoff pad.
+The retired `hover` definition remains for historical evaluator/data compatibility;
+it is not a separate choice in the learning menu. Its target is the elevated
+`hover-zone` reference above the takeoff pad.
 The evaluator requires a contiguous in-zone dwell (horizontal radius and
 altitude tolerance), bounded horizontal/vertical velocity, and realistic tilt
 limits. It records altitude error, horizontal drift, speed, tilt, contiguous
@@ -124,18 +134,18 @@ dwell; elapsed time or input movement alone cannot pass it.
 
 ### Coordinated Turn
 
-L06 starts on the supported ground, then orders right entry/apex/exit followed
+L05 starts on the supported ground, then orders right entry/apex/exit followed
 by left entry/apex/exit. Continuous segments can enter the 1.8 m target spheres
 with a further 0.1 m edge tolerance. Heading has a 70° allowance, and each exit
 needs at least 25° of measured trajectory-direction change in the requested
 direction. An exact roll/yaw stick sequence or yaw in place cannot replace
 motion. Missed targets and non-crash ground returns retain checkpoints; there
 is no extra speed, dwell or corridor-reset requirement. Practice is untimed;
-challenge allows 180 seconds. See [the L06 guide](L06_COORDINATED_TURN.md).
+challenge allows 180 seconds. See [the L05 guide](L05_COORDINATED_TURN.md).
 
 ### Wide gates
 
-L09 (`wide-gate`, rules 5) has five checkpoints: actual launch-ground contact,
+L08 (`wide-gate`, rules 5) has five checkpoints: actual launch-ground contact,
 manual liftoff, then ordered forward crossings of `wide-gate-1`, `wide-gate-2`
 and `wide-gate-3`. The shared layout places 4 × 4 m clear openings 8 / 16 / 24 m
 ahead of launch, centered at configured ground + 3 m. A crossing is the actual
@@ -154,11 +164,11 @@ Frame contact latches a physical crash with its gate/member ID and ends the
 attempt. Crash, disarm, focus loss, reset and invalid/discontinuous samples
 remain terminal. Practice has no timeout; challenge allows 240 seconds. All
 three frames remain visible and physical after passing; only the current
-guidance overlay advances. See [the L09 guide](L09_WIDE_GATE.md).
+guidance overlay advances. See [the L08 guide](L08_WIDE_GATE.md).
 
 ### Basic recovery
 
-L10 (`basic-recovery`, rules 6) keeps eight ordered checkpoints: launch ground,
+L09 (`basic-recovery`, rules 6) keeps eight ordered checkpoints: launch ground,
 manual takeoff to at least 3 m, tilt onset / recovery, descent onset / recovery,
 and drift onset / braking. Recommended height is now 4 m. The learner deliberately
 creates each deviation from a visible prompt; actual quaternion attitude and
@@ -186,9 +196,10 @@ Crash, disarm, focus loss, reset and invalid/discontinuous samples stay terminal
 Practice is untimed; challenge allows 300 s.
 
 The wider ranges reduce all-axis hover demands, especially between steps 4 and 5.
-They remain prototype thresholds pending learner and pilot calibration. No fixed
+The user has accepted this recovery functionality; the ranges remain prototype
+thresholds pending broader learner and pilot calibration. No fixed
 XYZ return, heading target or long hover dwell is imposed. The motion HUD reads
-live state or the paused ghost as appropriate. See [the L10 guide](L10_BASIC_RECOVERY.md).
+live state or the paused ghost as appropriate. See [the L09 guide](L09_BASIC_RECOVERY.md).
 
 ### Split-S
 
@@ -219,13 +230,13 @@ velocity-consistency error.
 
 `FlightScene.sceneReferences` exposes immutable renderer-independent snapshots
 for the launch, landing area, beginner-route targets and retained advanced
-references. L09 appends `wide-gate-1` through `wide-gate-3`, with opening size
+references. L08 appends `wide-gate-1` through `wide-gate-3`, with opening size
 `{ x: 4, y: 4, z: 0.35 }`, without reordering earlier IDs. Evaluators use copied
-positions/dimensions and never mutate Three.js objects. L09's frame meshes use
+positions/dimensions and never mutate Three.js objects. L08's frame meshes use
 the exact shared collider boxes; the opening outline and arrow are guidance
 only. `setWideGateTarget(id | null)` toggles those overlays without removing
 passed physical frames. Other lesson targets, the Split-S reference and orbit
-tower remain visual guides without static collision. L10 appends `recovery-zone`
+tower remain visual guides without static collision. L09 appends `recovery-zone`
 at launch X/Z and ground + 4 m, with a 40 m horizontal practice radius. The
 `basic-recovery-field` is a visual practice boundary and height guide; it does
 not add collision or move the drone. Stage changes preserve the scene and canvas.
@@ -260,17 +271,17 @@ input source, challenge/practice label and assistance state. Contextual progress
 uses separate validated envelopes, preserving the original v1 document. Result
 and best-score views remain bound to the result context after changing settings;
 failed writes are visible and malformed history is not automatically overwritten.
-Current L10 attempts use rules 6; L06–L09 stay on rules 5 and earlier scopes
-remain unchanged, including rules 4 for L03–L05. The prior L10 rules-5 document
+Current L09 attempts use rules 6; L05–L08 stay on rules 5 and earlier scopes
+remain unchanged, including rules 4 for L02–L04. The prior L09 rules-5 document
 remains readable as historical data and is not overwritten or relabeled as a
 rules-6 completion. Current progress loads the per-lesson rule scope. Physics
 context stays version 1; settings, input source and practice/challenge remain
 separate comparison conditions.
 
-The 12 existing demo kinds cover three L00 axis examples, L01 and L03–L10.
+The 12 existing demo kinds cover three L00 axis examples and L01–L09.
 Their bounded recordings are generated through the real 240 Hz simulator and
-play through the independent ghost. This release does not add L02, Split-S or
-Orbit demonstration videos.
+play through the independent ghost. The L01 demonstration explicitly teaches both takeoff and continuous hover.
+This release does not add Split-S or Orbit demonstration videos.
 
 `createDemonstrationProgress` observes each retained course recording once with
 its own checkpoint/evaluator state, outside the live session and progress store.
@@ -282,8 +293,8 @@ live objective/checkpoint/result presentation while viewing, then restores the
 unchanged learner view on exit. No demo progress is saved as learner completion.
 
 Pose, recorded sticks, captions, scene stage and independent progress share the
-same playback clock. L10 starts at 0.5×, with 2 s to read preparation and 0.75 s
-to observe a real onset before its recorded correction. The L09 demo uses the
+same playback clock. L09 starts at 0.5×, with 2 s to read preparation and 0.75 s
+to observe a real onset before its recorded correction. The L08 demo uses the
 same physical frame field as live practice. All remain labeled as simulated
 pending pilot review; their generated controls never override live practice.
 

@@ -158,7 +158,7 @@ export const WIDE_GATE_LESSON: LessonDefinition = {
 }
 
 export const WIDE_GATE_LEARNING_CONTENT: LessonLearningContent = {
-  code: 'L09', title: '寬門穿越', level: '基礎航線', prerequisiteIds: ['figure-eight'],
+  code: 'L08', title: '寬門穿越', level: '基礎航線', prerequisiteIds: ['figure-eight'],
   objectives: ['在實際門框碰撞下，依序穿過三道寬門。', '理解漏門可補飛、碰框需重設的差別。'],
   steps: ['從實際地面自行起飛，建議高度約三公尺，先對準第一道門。', '三道門位於起飛點前方 8、16、24 m；開口寬四公尺、高四公尺，中心高度約三公尺。', '朝路線前方穿過目前門的開口，機身與槳都需避開門框；不要求精準速度或停穩。', '漏門可繞回該門前重新朝前穿過；未墜毀接地可就地再次起飛，已通過的門保留。', '碰到門框會墜毀並指出部位，重試會清空本次步驟；看見完成結果後再 Disarm。'],
   commonMistakes: ['只讓畫面中心穿過門，但機身或槳仍靠近框架；接近時提早對準開口中央。', '從門外繞到後方或反向穿門，不等於朝前穿過開口；繞回目前門前再試。'],

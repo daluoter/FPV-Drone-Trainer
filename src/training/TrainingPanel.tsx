@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 
-import { DEFAULT_LESSONS } from './lessons'
+import { LEARNING_LESSONS } from './lessons'
 import { lessonLearningContent } from './catalog'
 import { formatTrainingMetrics, trainingHint, trainingObjective, trainingRouteGuide } from './feedback'
 import { summarizeTrainingResult } from './resultFeedback'
@@ -30,7 +30,7 @@ const PHASE_LABELS: Record<TrainingMachineState['phase'], string> = {
   ACTIVE: '練習進行中', SUCCESS: '完成', FAILED: '練習結束', RESULT: '練習結果',
 }
 
-export default function TrainingPanel({ mode = 'challenge', lessons = DEFAULT_LESSONS, state, progress, progressNotice, playbackActive = false, demonstrationProgress = null, onSeekDemonstrationStep, onSelectLesson, onStart, onRetry, onReset }: TrainingPanelProps) {
+export default function TrainingPanel({ mode = 'challenge', lessons = LEARNING_LESSONS, state, progress, progressNotice, playbackActive = false, demonstrationProgress = null, onSeekDemonstrationStep, onSelectLesson, onStart, onRetry, onReset }: TrainingPanelProps) {
   const selected = lessons.find((lesson) => lesson.id === state.lessonId) ?? null
   const content = selected ? lessonLearningContent(selected.id) : null
   const locked = ['COUNTDOWN', 'WAITING_FOR_ARM', 'ACTIVE'].includes(state.phase)

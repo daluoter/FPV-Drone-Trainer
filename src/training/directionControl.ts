@@ -267,7 +267,7 @@ export const DIRECTION_CONTROL_LESSON: LessonDefinition = {
 }
 
 export const DIRECTION_CONTROL_LEARNING_CONTENT: LessonLearningContent = {
-  code: 'L05', title: '側移與方向感', level: '入門', prerequisiteIds: ['landing'],
+  code: 'L04', title: '側移與方向感', level: '入門', prerequisiteIds: ['landing'],
   objectives: ['學會保持朝向的左右與前後移動。', '理解偏航後，機身前方與右側會跟著改變。'],
   steps: [
     '從起飛區地面自行加油門離地，建議高度約三公尺。',

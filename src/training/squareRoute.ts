@@ -191,7 +191,7 @@ export const SQUARE_ROUTE_LESSON: LessonDefinition = {
 }
 
 export const SQUARE_ROUTE_LEARNING_CONTENT: LessonLearningContent = {
-  code: 'L07', title: '方形航線', level: '基礎航線', prerequisiteIds: ['coordinated-turn'],
+  code: 'L06', title: '方形航線', level: '基礎航線', prerequisiteIds: ['coordinated-turn'],
   objectives: ['把直線與轉彎串成完整四邊航線。', '依序通過目標，最後返回起點上方。'],
   steps: ['從地面自行起飛，建議高度約三公尺；先向前飛入第一邊目標。', '直線段小量保持前進與高度，接近轉角時看向下一邊，以 Roll、Yaw 配合帶入右轉。', '沿第一、第二、第三、第四邊的目標依序飛行，不用貼住地面虛線或精準停穩。', '最後飛回起點上方的空中目標即可完成，不要求降落，也不必轉回初始朝向。', '漏點可繞回目前亮起目標補飛；未墜毀接地可就地再起飛，已完成步驟保留。'],
   commonMistakes: ['提早切角或直接飛回起點，漏掉目前應通過的目標；依亮起的目前目標補飛即可。', '轉彎後仍以原場地方向判斷前方；目標方向提示依目前機頭計算，固定 XYZ 不隨機頭改變。'],

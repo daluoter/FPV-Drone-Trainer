@@ -57,7 +57,7 @@ describe('independent teaching demonstration progress', () => {
     expect(finish.completedSteps).toBe(5)
   })
 
-  it('reveals actual L10 onset and recovery in order, including seeking backward from later exercises', () => {
+  it('reveals actual L09 onset and recovery in order, including seeking backward from later exercises', () => {
     const settings = createTuningPreset('beginner')
     const demo = createTeachingDemonstration(settings, 'basic-recovery')
     const timeline = createDemonstrationProgress(demo, settings)

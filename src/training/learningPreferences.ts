@@ -20,6 +20,10 @@ function valid(value: unknown): value is LearningPreferences {
     && typeof entry.lastLessonId === 'string' && /^[a-z][a-z-]{0,63}$/.test(entry.lastLessonId)
     && (entry.mode === 'practice' || entry.mode === 'challenge')
 }
+/** Retired navigation aliases never rewrite a historical flight result. */
+function currentLessonId(lessonId: string): string {
+  return lessonId === 'hover' ? 'takeoff' : lessonId
+}
 export function loadLearningPreferences(target = storage()): { preferences: LearningPreferences; loaded: boolean; error: string | null } {
   const fallback = { ...DEFAULT_LEARNING_PREFERENCES }
   if (!target) return { preferences: fallback, loaded: false, error: '無法使用本機學習紀錄；本次仍可練習。' }
@@ -28,7 +32,7 @@ export function loadLearningPreferences(target = storage()): { preferences: Lear
     if (raw === null) return { preferences: fallback, loaded: false, error: null }
     const parsed: unknown = JSON.parse(raw)
     if (!valid(parsed)) return { preferences: fallback, loaded: false, error: '學習偏好暫時無法讀取，原始資料仍保留。' }
-    return { preferences: { schemaVersion: 1, introCompleted: parsed.introCompleted, lastLessonId: parsed.lastLessonId, mode: parsed.mode }, loaded: true, error: null }
+    return { preferences: { schemaVersion: 1, introCompleted: parsed.introCompleted, lastLessonId: currentLessonId(parsed.lastLessonId), mode: parsed.mode }, loaded: true, error: null }
   } catch { return { preferences: fallback, loaded: false, error: '學習偏好讀取失敗，原始資料仍保留。' } }
 }
 export function saveLearningPreferences(preferences: LearningPreferences, target = storage()): { saved: boolean; error: string | null } {
@@ -37,7 +41,7 @@ export function saveLearningPreferences(preferences: LearningPreferences, target
   if (existing.error) return { saved: false, error: existing.error }
   try {
     if (!target) return { saved: false, error: '本次學習偏好未能保存。' }
-    target.setItem(LEARNING_PREFERENCES_KEY, JSON.stringify(preferences))
+    target.setItem(LEARNING_PREFERENCES_KEY, JSON.stringify({ ...preferences, lastLessonId: currentLessonId(preferences.lastLessonId) }))
     return { saved: true, error: null }
   } catch { return { saved: false, error: '本次學習偏好未能保存；可繼續練習。' } }
 }

@@ -241,7 +241,7 @@ const HINT_TRANSLATIONS: Readonly<Record<string, string>> = {
 }
 
 const LESSON_HINTS: Readonly<Record<string, string>> = {
-  takeoff: '緩推油門，留在起飛區上方；接近目標高度時改用小量修正。',
+  takeoff: '緩推油門，留在起飛區上方；接近目標高度時減少升降與漂移，以小量修正連續定點懸停 1.5 秒。',
   landing: `先從地面起飛，再前往正前方 ${LANDING_ZONE_DISTANCE_M} m 的藍色降落區；在區內接地且沒有墜毀即可完成。`,
   'straight-line': '先自行起飛，再依序穿過藍色、金色與綠色三個圓環；穿過綠色終點環即可完成。',
   'direction-control': '從地面自行起飛，依亮起目標練左右、前後移動，再向右偏航換向；方向提示以目前機頭為準。',

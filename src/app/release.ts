@@ -1,2 +1,2 @@
 /** Visible release identifier shared by development and production previews. */
-export const APP_RELEASE = '2026.10.23.6'
+export const APP_RELEASE = '2026.10.24.1'

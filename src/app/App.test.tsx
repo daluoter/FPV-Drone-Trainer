@@ -1,17 +1,35 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import App from './App'
-import { DEFAULT_LEARNING_PREFERENCES, saveLearningPreferences } from '../training/learningPreferences'
+import { DEFAULT_LEARNING_PREFERENCES, LEARNING_PREFERENCES_KEY, saveLearningPreferences } from '../training/learningPreferences'
 
 describe('beginner flight school', () => {
   beforeEach(() => window.localStorage.clear())
-  it('starts with a clear first lesson and preserves all existing lessons', () => {
+  it('offers merged takeoff and hover once, followed by the renumbered courses', () => {
     render(<App />)
     expect(screen.getByRole('heading', { level: 1, name: '小幅操作，一步步學會飛。' })).toBeInTheDocument()
     expect(screen.getByLabelText('選擇課程')).toHaveValue('takeoff')
-    expect(within(screen.getByLabelText('選擇課程')).getAllByRole('option')).toHaveLength(12)
+    const choices = within(screen.getByLabelText('選擇課程')).getAllByRole('option')
+    expect(choices.map((option) => option.textContent?.split(' · ')[0])).toEqual([
+      'L01', 'L02', 'L03', 'L04', 'L05', 'L06', 'L07', 'L08', 'L09', 'L12', 'L13',
+    ])
+    expect(choices[0]).toHaveTextContent('起飛與定點懸停')
+    expect(choices.some((option) => (option as HTMLOptionElement).value === 'hover')).toBe(false)
     expect(screen.getByText(/機體不會自動回平或煞停/)).toBeInTheDocument()
     expect(screen.getByLabelText('操控設定')).toHaveValue('beginner')
+  })
+
+  it('resumes the retired hover selection at merged L01 without rewriting history or granting completion', () => {
+    const original = JSON.stringify({ ...DEFAULT_LEARNING_PREFERENCES, lastLessonId: 'hover', mode: 'challenge', introCompleted: true })
+    window.localStorage.setItem(LEARNING_PREFERENCES_KEY, original)
+    render(<App />)
+    expect(screen.getByLabelText('選擇課程')).toHaveValue('takeoff')
+    expect(screen.getByRole('heading', { name: '起飛與定點懸停' })).toBeInTheDocument()
+    expect(screen.getByLabelText('學習方式')).toHaveValue('challenge')
+    expect(screen.getByRole('button', { name: 'L00 觀念複習 ✓' })).toBeInTheDocument()
+    expect(screen.getByRole('list', { name: '本課步驟' }).querySelectorAll('.is-complete')).toHaveLength(0)
+    expect(window.localStorage.getItem(LEARNING_PREFERENCES_KEY)).toBe(original)
+    expect(Object.keys(window.localStorage).filter((key) => key.startsWith('fpv-drone-trainer.training-progress.'))).toEqual([])
   })
 
   it('keeps the same canvas while changing workspace and opens calibration on request', () => {

@@ -63,7 +63,7 @@ describe('training recovery feedback', () => {
     expect(screen.queryByRole('region', { name: '最近重練原因' })).not.toBeInTheDocument()
   })
 
-  it('replaces live L10 four-step progress with the demo progress and restores the same live attempt on exit', () => {
+  it('replaces live L09 four-step progress with the demo progress and restores the same live attempt on exit', () => {
     const ready = createTrainingMachineState({ initialLessonId: 'basic-recovery' })
     const state: TrainingMachineState = { ...ready, phase: 'FAILED', checkpoints: Object.fromEntries(
       BASIC_RECOVERY_LESSON.checkpoints.slice(0, 4).map(({ id }) => [id, { id, completed: true, completedAtSeconds: 4, metrics: {} }]),
@@ -82,7 +82,7 @@ describe('training recovery feedback', () => {
     expect(live.querySelectorAll('.is-complete')).toHaveLength(4)
     expect(screen.getByText('4 / 8 個步驟完成')).toBeInTheDocument()
     const demo: TeachingDemonstrationProgressSnapshot = {
-      kind: 'basic-recovery', lessonId: 'basic-recovery', title: 'L10 基礎失誤恢復', mode: 'lesson-checkpoints',
+      kind: 'basic-recovery', lessonId: 'basic-recovery', title: 'L09 基礎失誤恢復', mode: 'lesson-checkpoints',
       steps: BASIC_RECOVERY_LESSON.checkpoints.map(({ id, title }, index) => ({ id, title,
         status: index < 5 ? 'completed' : index === 5 ? 'current' : 'pending',
         startedAtSeconds: index * 2, completedAtSeconds: index < 5 ? index * 2 + 1 : null })),
@@ -114,12 +114,12 @@ describe('training recovery feedback', () => {
     const ready = createTrainingMachineState({ initialLessonId: 'basic-recovery' })
     const props = { state: ready, progress: createDefaultTrainingProgress(), onSelectLesson: vi.fn(), onStart: vi.fn(), onRetry: vi.fn(), onReset: vi.fn() }
     const demo: TeachingDemonstrationProgressSnapshot = {
-      kind: 'takeoff', lessonId: 'takeoff', title: 'L01 穩定起飛示範', mode: 'lesson-checkpoints',
+      kind: 'takeoff', lessonId: 'takeoff', title: 'L01 起飛與定點懸停示範', mode: 'lesson-checkpoints',
       steps: [{ id: 'takeoff-ready', title: '起飛前準備', status: 'current', startedAtSeconds: 0, completedAtSeconds: null }],
       completedSteps: 0, totalSteps: 1, currentStepIndex: 0, currentStepTitle: '起飛前準備', complete: false, notice: null,
     }
     const { rerender } = render(<TrainingPanel {...props} playbackActive demonstrationProgress={demo} />)
-    expect(screen.getByRole('heading', { name: 'L01 穩定起飛示範' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'L01 起飛與定點懸停示範' })).toBeInTheDocument()
     expect(screen.getByLabelText('選擇課程')).toHaveValue('basic-recovery')
     expect(screen.getByLabelText('選擇課程')).toBeDisabled()
     expect(screen.getByRole('button', { name: '開始課程' })).toBeDisabled()

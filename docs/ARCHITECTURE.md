@@ -2,9 +2,18 @@
 
 ## Current scope
 
-The application implements the controller boundary, canonical Actual Rates, a modular SI angular-rate PID loop, deterministic controller-to-simulation runtime, the Free Flight presentation seam, bounded tuning, beginner lessons through L10, the retained Split-S/Orbit evaluators, and bounded replay. The application-owned poller is sampled by the runtime's requestAnimationFrame owner; React receives throttled telemetry only. The direct Three.js scene contains ground/grid, a takeoff pad, lesson guidance, L09 physical gate frames, an L10 visual recovery area, bounded training path, a live quad, and an independent replay ghost, with rigid FPV, chase and free/debug cameras. The explicit RC arm handoff consumes the Controller Lab's verified profile/session and checks current neutral/low throttle only at arm time. Developer keyboard input is opt-in and follows the same normalized RC/rates/PID path. Tuning edits a copied, validated versioned configuration and reaches flight only through an explicit disarmed reset/reconfiguration boundary. Training consumes one per-fixed-step sample hook, carries explicit armed telemetry, uses O(1) incremental evaluator state with a fixed-capacity decimated/ring path snapshot, and never mutates physics. Replay records only compact decimated fields from armed fixed-step samples, retains one bounded in-memory last flight, and interpolates an immutable ghost without writing the live `DroneState`.
+The application implements the controller boundary, canonical Actual Rates, a modular SI angular-rate PID loop, deterministic controller-to-simulation runtime, the Free Flight presentation seam, bounded tuning, beginner lessons through L09, the retained Split-S/Orbit evaluators, and bounded replay. The application-owned poller is sampled by the runtime's requestAnimationFrame owner; React receives throttled telemetry only. The direct Three.js scene contains ground/grid, a takeoff pad, lesson guidance, L08 physical gate frames, an L09 visual recovery area, bounded training path, a live quad, and an independent replay ghost, with rigid FPV, chase and free/debug cameras. The explicit RC arm handoff consumes the Controller Lab's verified profile/session and checks current neutral/low throttle only at arm time. Developer keyboard input is opt-in and follows the same normalized RC/rates/PID path. Tuning edits a copied, validated versioned configuration and reaches flight only through an explicit disarmed reset/reconfiguration boundary. Training consumes one per-fixed-step sample hook, carries explicit armed telemetry, uses O(1) incremental evaluator state with a fixed-capacity decimated/ring path snapshot, and never mutates physics. Replay records only compact decimated fields from armed fixed-step samples, retains one bounded in-memory last flight, and interpolates an immutable ghost without writing the live `DroneState`.
 
 The phase contract is tracked in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Each later phase must preserve the boundaries below and pass the phase gate before the next seam is started.
+
+Release `2026.10.24.1` merges takeoff and hover in the learning navigation. L01
+(`takeoff`) retains its existing liftoff and 1.5-second settled-hover evaluator;
+the later display numbers shift down by one. `LEARNING_LESSONS` provides the 11
+active choices, while the registry retains the old `hover` definition for
+historical data and evaluator compatibility. A saved `hover` selection resolves
+to `takeoff` without rewriting the source preferences document. Lesson IDs,
+checkpoint IDs, rule scopes and stored results do not depend on display numbers.
+The accepted recovery lesson is now L09; the next planned course is L10 Roll.
 
 ## Runtime boundaries
 
@@ -37,7 +46,7 @@ Config domain persists versioned settings and controller profiles locally.
 - **Training** evaluates state, geometry, trajectory, and timing windows through a pure `TrainingSession`/evaluator contract. The runtime sends one immutable observational sample per fixed step; a stick sequence alone cannot pass a lesson. Lesson setup can request a disarmed runtime reset but cannot apply physics or scene transforms.
 - **Replay** stores compact immutable decimated samples from actual armed fixed-step callbacks in a bounded ring. Playback owns a relative clock and independent `ReplayGhostState`; shortest-path quaternion interpolation, trajectory drawing, and camera presentation never mutate the player simulation. Entering replay disarms and aborts an active lesson; exit resets timestamps/controller memory and requires explicit rearm. Replay is in-memory only and is not training input.
 - **Config/tuning** validates complete versioned local settings and rejects corrupt or incompatible data. A settings apply replaces the fixed-step runtime only after disarming and resetting controller/input state.
-- **Shared world geometry** describes L09 gate openings and frame boxes in `src/world/wideGates.ts`, independently of React and Three.js. Lesson setup supplies validated copied boxes to the runtime at a disarmed boundary. Rendering consumes the same boxes without owning collision decisions; the evaluator observes post-physics samples and ordered opening crossings.
+- **Shared world geometry** describes L08 gate openings and frame boxes in `src/world/wideGates.ts`, independently of React and Three.js. Lesson setup supplies validated copied boxes to the runtime at a disarmed boundary. Rendering consumes the same boxes without owning collision decisions; the evaluator observes post-physics samples and ordered opening crossings.
 
 ## Data contracts
 
@@ -68,21 +77,21 @@ The authoritative orientation will be a normalized quaternion. Euler angles may 
 
 Invalid timestep, non-finite state, invalid mass, or an unusable quaternion is a simulation warning and a safe reset condition—not a value to silently propagate.
 
-## L09 physical environment
+## L08 physical environment
 
 `createWideGates` defines three 4 × 4 m clear openings, centered at configured ground + 3 m and 8 / 16 / 24 m ahead of the supported launch X/Z. Every gate has separate left/right posts and top/bottom bars. `DroneSimulation` owns a bounded immutable static-box collection; the runtime rejects replacement while armed. The fixed-step solver sweeps a conservative all-orientation full-drone envelope along each COM segment and latches the earliest frame contact before publishing the observational sample. Crash state, zeroed motors and an explicit collider ID therefore originate in physics, independently of the lesson evaluator.
 
-The UI applies this field only when L09 is selected and synchronizes it again at the arm boundary; Free Flight and other lessons use an empty static obstacle field. Lesson reset/setup, configuration changes and playback preserve the disarmed transition rules. Ground-contact behavior remains shared across lessons. These bounds do not add collisions to the legacy Split-S gate, orbit tower or other teaching references.
+The UI applies this field only when L08 is selected and synchronizes it again at the arm boundary; Free Flight and other lessons use an empty static obstacle field. Lesson reset/setup, configuration changes and playback preserve the disarmed transition rules. Ground-contact behavior remains shared across lessons. These bounds do not add collisions to the legacy Split-S gate, orbit tower or other teaching references.
 
-The renderer appends `wide-gate-1` through `wide-gate-3` references without changing earlier IDs or order. `wide-gate-field` keeps every physical frame visible during L09, including passed gates and after completion. `setWideGateTarget(id | null)` changes only the named guidance overlay; a null target never removes an obstacle. Reconfiguration retains the selected lesson and guidance on the same canvas. Replay uses the independent ghost and cannot score a gate crossing or create mastery evidence.
+The renderer appends `wide-gate-1` through `wide-gate-3` references without changing earlier IDs or order. `wide-gate-field` keeps every physical frame visible during L08, including passed gates and after completion. `setWideGateTarget(id | null)` changes only the named guidance overlay; a null target never removes an obstacle. Reconfiguration retains the selected lesson and guidance on the same canvas. Replay uses the independent ghost and cannot score a gate crossing or create mastery evidence.
 
-## L10 observational recovery practice
+## L09 observational recovery practice
 
-L10 (`basic-recovery`) starts at the supported ground launch and keeps normal Acro control throughout the live exercise. The learner follows prompts to produce a small tilt, descent or horizontal drift; the evaluator waits for the corresponding actual state before accepting its recovery. No scripted live stick override, disturbance force, direct pose edit, automatic leveling or altitude controller is added.
+L09 (`basic-recovery`) starts at the supported ground launch and keeps normal Acro control throughout the live exercise. The learner follows prompts to produce a small tilt, descent or horizontal drift; the evaluator waits for the corresponding actual state before accepting its recovery. No scripted live stick override, disturbance force, direct pose edit, automatic leveling or altitude controller is added.
 
 The pure evaluator computes tilt from the authoritative quaternion, rotation rate from body angular velocity, and vertical / horizontal speeds from world velocity. It keeps bounded incremental preparation, onset-validity and recovery-dwell metrics. Each new exercise first needs a short settled preparation above the ground; a recovery then needs 0.25 seconds of consecutive valid airborne samples. Preparation is specific to the next exercise rather than requiring a full all-axis hover. Contact or low height invalidates the current onset and dwell. Earlier completed exercises remain; this exercise must be prepared and induced again. Leaving the broad practice area resets preparation / dwell but retains an already valid onset, so recovery can continue after returning. No fixed XYZ return or heading target is imposed.
 
-The `basic-recovery-field` scene group and appended `recovery-zone` reference are visual guides around the launch, with a recommended 4 m height and a 40 m horizontal radius. They add no static colliders. Stage presentation and the live / replay motion HUD consume snapshots; the existing runtime remains the sole animation-loop and physics owner. A simulated teaching recording uses actual RC inputs through the solver, then plays as an independent ghost without awarding progress. See [the L10 guide](L10_BASIC_RECOVERY.md) and [the training contract](LEARNING_CONTRACT.md).
+The `basic-recovery-field` scene group and appended `recovery-zone` reference are visual guides around the launch, with a recommended 4 m height and a 40 m horizontal radius. They add no static colliders. Stage presentation and the live / replay motion HUD consume snapshots; the existing runtime remains the sole animation-loop and physics owner. A simulated teaching recording uses actual RC inputs through the solver, then plays as an independent ghost without awarding progress. See [the L09 guide](L09_BASIC_RECOVERY.md) and [the training contract](LEARNING_CONTRACT.md).
 
 ## Independent demonstration progress
 
@@ -95,10 +104,10 @@ chapter seek pauses at the recorded start and seeking backward restores earlier
 checkmarks. The React demo view temporarily replaces live objective/checkpoint/
 result presentation; exiting restores the unchanged learner state.
 
-L10's generated recording adds reading and actual-onset observation intervals and
+L09's generated recording adds reading and actual-onset observation intervals and
 opens at 0.5×. These are recorded control choices and presentation settings, not
-live flight assistance. Rules 6 isolates eased L10 results from historical rules 5;
-L06–L09 and earlier course scopes remain unchanged.
+live flight assistance. Rules 6 isolates eased L09 results from historical rules 5;
+L05–L08 and earlier course scopes remain unchanged.
 
 ## Safety boundary
 

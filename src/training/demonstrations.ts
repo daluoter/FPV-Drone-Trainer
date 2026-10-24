@@ -13,6 +13,7 @@ import { recordSquareDemonstration } from './squareDemonstration'
 import { recordEightDemonstration } from './eightDemonstration'
 import { recordGateDemonstration } from './gateDemonstration'
 import { recordRecoveryDemonstration } from './recoveryDemonstration'
+import { lessonLearningContent } from './catalog'
 
 export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'roll' | 'pitch' | 'yaw'
 
@@ -47,6 +48,13 @@ const AXIS_RATE_DEGREES_PER_SECOND = 15
 const MAXIMUM_RECORDED_SAMPLES = 2_100
 const ROUTE_FORWARD_START_SECONDS = 7.5
 const LANDING_DESCENT_START_SECONDS = 20
+
+/** Keep learner-facing movie numbers and names aligned with the current course catalog. */
+function courseDemonstrationTitle(kind: Exclude<TeachingDemonstrationKind, 'roll' | 'pitch' | 'yaw'>, detail: string): string {
+  const content = lessonLearningContent(kind)
+  if (!content) throw new RangeError('此示範沒有對應的課程內容。')
+  return `${content.code} ${content.title}：${detail}`
+}
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value))
@@ -132,8 +140,8 @@ function cuesFor(kind: TeachingDemonstrationKind): readonly TeachingCue[] {
     { timeSeconds: 0, text: '先確認機身水平，緩慢建立推力。這是模擬錄製，尚待真人飛手驗證。' },
     { timeSeconds: 0.5, text: '增加油門讓機體平穩上升，保持其他三軸接近中央。' },
     { timeSeconds: 2.5, text: '接近目標前減少上升速度；油門控制推力，不是直接設定高度。' },
-    { timeSeconds: 5, text: '在目標高度附近小幅補油，觀察機體是否仍有升降速度。' },
-    { timeSeconds: 8, text: '連續穩住後完成起飛練習；實際操作仍需自己持續修正。' },
+    { timeSeconds: 5, text: '減少水平漂移，用小量油門修正高度；在目標高度附近定點懸停，連續穩住 1.5 秒。' },
+    { timeSeconds: 8, text: '連續穩住 1.5 秒後完成起飛與定點懸停；實際操作仍需自己持續修正。' },
   ])
   if (kind === 'landing') return freeze([
     { timeSeconds: 0, text: '從地面起飛區開始，緩慢增加油門起飛；降落區在前方八公尺的藍色標記。' },
@@ -184,7 +192,7 @@ export function createTeachingDemonstration(
       schemaVersion: 1, kind, lessonId: 'basic-recovery',
       rulesVersion: trainingRulesVersionForLesson(kind), physicsVersion: 1,
       presetId: identifyTuningPreset(settings), settingsFingerprint: fingerprintTrainingSettings(settings),
-      title: 'L10 基礎失誤恢復：傾斜、下沉與漂移修正',
+      title: courseDemonstrationTitle(kind, '傾斜、下沉與漂移修正'),
       description: '模擬示範，尚待真人飛手驗證。以實際 RC 操作製造小偏差，再觀察真實姿態與速度恢復；真人練習全程自行操控，觀看不計入通關。',
       source: 'simulated', recording, cues,
     })
@@ -195,7 +203,7 @@ export function createTeachingDemonstration(
       schemaVersion: 1, kind, lessonId: 'wide-gate',
       rulesVersion: trainingRulesVersionForLesson(kind), physicsVersion: 1,
       presetId: identifyTuningPreset(settings), settingsFingerprint: fingerprintTrainingSettings(settings),
-      title: 'L09 寬門穿越：對準開口、依序穿門與避免碰框',
+      title: courseDemonstrationTitle(kind, '對準開口、依序穿門與避免碰框'),
       description: '模擬示範，尚待真人飛手驗證。門框碰撞使用實際物理；畫面、搖桿、字幕與目標共用同一時間軸，示範不會計入通關。',
       source: 'simulated', recording, cues,
     })
@@ -206,7 +214,7 @@ export function createTeachingDemonstration(
       schemaVersion: 1, kind, lessonId: 'figure-eight',
       rulesVersion: trainingRulesVersionForLesson(kind), physicsVersion: 1,
       presetId: identifyTuningPreset(settings), settingsFingerprint: fingerprintTrainingSettings(settings),
-      title: 'L08 八字航線：左圈、中央換向與右圈',
+      title: courseDemonstrationTitle(kind, '左圈、中央換向與右圈'),
       description: '模擬示範，尚待真人飛手驗證。畫面、搖桿、字幕與目標共用同一時間軸；示範不會計入通關。',
       source: 'simulated', recording, cues,
     })
@@ -217,7 +225,7 @@ export function createTeachingDemonstration(
       schemaVersion: 1, kind, lessonId: 'square-route',
       rulesVersion: trainingRulesVersionForLesson(kind), physicsVersion: 1,
       presetId: identifyTuningPreset(settings), settingsFingerprint: fingerprintTrainingSettings(settings),
-      title: 'L07 方形航線：四段直線、轉彎與回到起點',
+      title: courseDemonstrationTitle(kind, '四段直線、轉彎與回到起點'),
       description: '模擬示範，尚待真人飛手驗證。畫面、搖桿、字幕與目標共用同一時間軸；示範不會計入通關。',
       source: 'simulated', recording, cues,
     })
@@ -228,7 +236,7 @@ export function createTeachingDemonstration(
       schemaVersion: 1, kind, lessonId: 'coordinated-turn',
       rulesVersion: trainingRulesVersionForLesson(kind), physicsVersion: 1,
       presetId: identifyTuningPreset(settings), settingsFingerprint: fingerprintTrainingSettings(settings),
-      title: 'L06 協調轉彎：右轉、左轉與出彎回正',
+      title: courseDemonstrationTitle(kind, '右轉、左轉與出彎回正'),
       description: '模擬示範，尚待真人飛手驗證。畫面、搖桿、字幕與目標共用同一時間軸；示範不會計入通關。',
       source: 'simulated', recording, cues,
     })
@@ -239,7 +247,7 @@ export function createTeachingDemonstration(
       schemaVersion: 1, kind, lessonId: 'direction-control',
       rulesVersion: CURRENT_TRAINING_RULES_VERSION, physicsVersion: 1,
       presetId: identifyTuningPreset(settings), settingsFingerprint: fingerprintTrainingSettings(settings),
-      title: 'L05 側移與方向感：左右、前後、換向後再移動',
+      title: courseDemonstrationTitle(kind, '左右、前後、換向後再移動'),
       description: '模擬示範，尚待真人飛手驗證。畫面、搖桿、字幕與目標共用同一時間軸；示範不會計入通關。',
       source: 'simulated', recording, cues,
     })
@@ -278,9 +286,9 @@ export function createTeachingDemonstration(
     recorder.record({ timestampSeconds: step.state.timeSeconds, state: step.state, normalizedInput: input, armed: step.telemetry.armed, telemetry: step.telemetry })
   }
   const recording = recorder.endFlight()
-  const title = kind === 'takeoff' ? '油門與起飛示範'
-    : kind === 'landing' ? '起飛到降落：前往藍色降落區、減速與平穩接地'
-    : kind === 'straight-line' ? '直線穿圈：依序飛過藍、金、綠三圈'
+  const title = kind === 'takeoff' ? courseDemonstrationTitle(kind, '垂直離地、減速與連續懸停')
+    : kind === 'landing' ? courseDemonstrationTitle(kind, '前往藍色降落區、減速與平穩接地')
+    : kind === 'straight-line' ? courseDemonstrationTitle(kind, '依序飛過藍、金、綠三圈')
         : kind === 'roll' ? '橫滾 Roll：推桿、回中與反向修正'
       : kind === 'pitch' ? '俯仰 Pitch：推桿、回中與反向修正'
         : '偏航 Yaw：推桿、回中與反向修正'

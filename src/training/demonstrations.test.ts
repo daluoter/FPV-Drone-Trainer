@@ -72,7 +72,7 @@ function referencesFor(settings: TuningSettings): readonly TrainingSceneReferenc
 }
 
 describe('bounded simulation teaching recordings', () => {
-  it.each(['beginner', 'standard', 'raised-field'] as const)('records actual L10 onset and recovery in all eight stages with %s settings', (preset) => {
+  it.each(['beginner', 'standard', 'raised-field'] as const)('records actual L09 onset and recovery in all eight stages with %s settings', (preset) => {
     const defaults = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
     const settings = preset === 'raised-field' ? {
       ...defaults, drone: { ...defaults.drone, ground: { ...defaults.drone.ground, heightM: 10 }, spawnPositionM: { x: 6, y: 25, z: -3 } },
@@ -165,7 +165,7 @@ describe('bounded simulation teaching recordings', () => {
     expect(JSON.stringify(settings)).toBe(before)
   })
 
-  it('keeps L10 recovery stages and measured ghost data synchronized while paused, slowed and seeked', () => {
+  it('keeps L09 recovery stages and measured ghost data synchronized while paused, slowed and seeked', () => {
     const demo = createTeachingDemonstration(createTuningPreset('beginner'), 'basic-recovery')
     const player = new ReplayPlayback(demo.recording)
     expect(teachingTargetAt(demo, 0)).toBe('recovery-zone')
@@ -198,7 +198,7 @@ describe('bounded simulation teaching recordings', () => {
   })
 
 
-  it.each(['beginner', 'standard', 'raised-field'] as const)('flies through all three solid L09 openings with %s settings', (preset) => {
+  it.each(['beginner', 'standard', 'raised-field'] as const)('flies through all three solid L08 openings with %s settings', (preset) => {
     const defaults = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
     const settings = preset === 'raised-field' ? {
       ...defaults, drone: { ...defaults.drone, ground: { ...defaults.drone.ground, heightM: 10 }, spawnPositionM: { x: 6, y: 25, z: -3 } },
@@ -279,7 +279,7 @@ describe('bounded simulation teaching recordings', () => {
     expect(JSON.stringify(settings)).toBe(before)
   })
 
-  it('installs all twelve L09 frame colliders and rejects an actual blocked opening', () => {
+  it('installs all twelve L08 frame colliders and rejects an actual blocked opening', () => {
     const settings = createTuningPreset('beginner')
     const { launch } = createTrainingFieldAnchors(settings.drone)
     const gates = createWideGates(launch, settings.drone.ground.heightM)
@@ -310,7 +310,7 @@ describe('bounded simulation teaching recordings', () => {
     }
   })
 
-  it('keeps L09 cues on the paused or seeked retained playback timeline', () => {
+  it('keeps L08 cues on the paused or seeked retained playback timeline', () => {
     const demo = createTeachingDemonstration(createTuningPreset('beginner'), 'wide-gate')
     const player = new ReplayPlayback(demo.recording)
     expect(teachingTargetAt(demo, 0)).toBe('wide-gate-1')
@@ -336,7 +336,7 @@ describe('bounded simulation teaching recordings', () => {
     expect(teachingTargetAt(demo, player.currentTime)).toBe('wide-gate-1')
   })
 
-  it.each(['beginner', 'standard', 'raised-field'] as const)('flies both opposite L08 loops with %s settings', (preset) => {
+  it.each(['beginner', 'standard', 'raised-field'] as const)('flies both opposite L07 loops with %s settings', (preset) => {
     const defaults = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
     const settings = preset === 'raised-field' ? {
       ...defaults, drone: { ...defaults.drone, ground: { ...defaults.drone.ground, heightM: 10 }, spawnPositionM: { x: 6, y: 25, z: -3 } },
@@ -417,7 +417,7 @@ describe('bounded simulation teaching recordings', () => {
     expect(JSON.stringify(settings)).toBe(before)
   })
 
-  it('keeps all three L08 central visits distinct on a paused or seeked playback clock', () => {
+  it('keeps all three L07 central visits distinct on a paused or seeked playback clock', () => {
     const demo = createTeachingDemonstration(createTuningPreset('beginner'), 'figure-eight')
     const player = new ReplayPlayback(demo.recording)
     expect(teachingTargetAt(demo, 0)).toBe('eight-entry')
@@ -448,7 +448,7 @@ describe('bounded simulation teaching recordings', () => {
     expect(teachingTargetAt(demo, player.currentTime)).toBe('eight-entry')
   })
 
-  it.each(['beginner', 'standard', 'raised-field'] as const)('flies all four L07 physical route legs with %s settings', (preset) => {
+  it.each(['beginner', 'standard', 'raised-field'] as const)('flies all four L06 physical route legs with %s settings', (preset) => {
     const defaults = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
     const settings = preset === 'raised-field' ? {
       ...defaults, drone: { ...defaults.drone, ground: { ...defaults.drone.ground, heightM: 10 }, spawnPositionM: { x: 6, y: 25, z: -3 } },
@@ -519,7 +519,7 @@ describe('bounded simulation teaching recordings', () => {
     expect(JSON.stringify(settings)).toBe(before)
   })
 
-  it('keeps L07 leg goals and captions synchronized through paused seeking and return to start', () => {
+  it('keeps L06 leg goals and captions synchronized through paused seeking and return to start', () => {
     const demo = createTeachingDemonstration(createTuningPreset('beginner'), 'square-route')
     const player = new ReplayPlayback(demo.recording)
     expect(teachingTargetAt(demo, 0)).toBe('square-leg-1')
@@ -547,7 +547,7 @@ describe('bounded simulation teaching recordings', () => {
     expect(teachingTargetAt(demo, player.currentTime)).toBe('square-leg-1')
   })
 
-  it.each(['beginner', 'standard', 'raised-field'] as const)('flies both complete L06 physical turns with %s settings', (preset) => {
+  it.each(['beginner', 'standard', 'raised-field'] as const)('flies both complete L05 physical turns with %s settings', (preset) => {
     const defaults = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
     const settings = preset === 'raised-field' ? {
       ...defaults, drone: { ...defaults.drone, ground: { ...defaults.drone.ground, heightM: 10 }, spawnPositionM: { x: 6, y: 25, z: -3 } },
@@ -611,7 +611,7 @@ describe('bounded simulation teaching recordings', () => {
     expect(JSON.stringify(settings)).toBe(before)
   })
 
-  it('keeps L06 right/left goals, captions and recorded poses on one paused or seeked clock', () => {
+  it('keeps L05 right/left goals, captions and recorded poses on one paused or seeked clock', () => {
     const demo = createTeachingDemonstration(createTuningPreset('beginner'), 'coordinated-turn')
     const player = new ReplayPlayback(demo.recording)
     expect(teachingTargetAt(demo, 0)).toBe('turn-right-entry')
@@ -639,7 +639,7 @@ describe('bounded simulation teaching recordings', () => {
     expect(teachingTargetAt(demo, player.currentTime)).toBe('turn-right-entry')
   })
 
-  it.each(['beginner', 'standard', 'raised-field'] as const)('flies the complete L05 physical example with %s settings', (preset) => {
+  it.each(['beginner', 'standard', 'raised-field'] as const)('flies the complete L04 physical example with %s settings', (preset) => {
     const defaults = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
     const settings = preset === 'raised-field' ? {
       ...defaults, drone: { ...defaults.drone, ground: { ...defaults.drone.ground, heightM: 10 }, spawnPositionM: { x: 6, y: 25, z: -3 } },
@@ -680,7 +680,7 @@ describe('bounded simulation teaching recordings', () => {
     expect(JSON.stringify(settings)).toBe(before)
   })
 
-  it('keeps L05 active targets synchronized with captions, ghost seek, and paused clocks', () => {
+  it('keeps L04 active targets synchronized with captions, ghost seek, and paused clocks', () => {
     const demo = createTeachingDemonstration(createTuningPreset('beginner'), 'direction-control')
     const player = new ReplayPlayback(demo.recording)
     const yawCue = demo.cues.find((cue) => cue.targetReferenceId === 'direction-yaw')!
@@ -845,9 +845,15 @@ describe('bounded simulation teaching recordings', () => {
     expect(settings.drone.spawnPositionM.y).toBe(spawnHeight)
   })
 
-  it('flies an actual generated takeoff whose recorded geometry passes the takeoff checkpoints', () => {
-    const settings = createTuningPreset('beginner')
+  it.each(['beginner', 'standard', 'raised-field'] as const)('flies a complete L01 takeoff and sustained hover using actual recorded geometry with %s settings', (preset) => {
+    const defaults = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
+    const settings = preset === 'raised-field' ? {
+      ...defaults,
+      drone: { ...defaults.drone, ground: { ...defaults.drone.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 5, z: -3 } },
+    } : defaults
     const demo = createTeachingDemonstration(settings, 'takeoff')
+    expect(demo.title).toBe('L01 起飛與定點懸停：垂直離地、減速與連續懸停')
+    expect(teachingCueAt(demo, 5)).toContain('定點懸停，連續穩住 1.5 秒')
     const lesson = DEFAULT_LESSONS.find((candidate) => candidate.id === 'takeoff')
     if (!lesson) throw new Error('takeoff lesson missing')
     const checkpoints: Record<string, TrainingCheckpointState> = Object.fromEntries(lesson.checkpoints.map((checkpoint) => [
@@ -874,11 +880,15 @@ describe('bounded simulation teaching recordings', () => {
         elapsedSeconds: pose.timestampSeconds,
         trajectory: [],
         checkpoints,
-        sceneReferences: [{ id: 'takeoff-pad', kind: 'pad', positionM: settings.drone.spawnPositionM }],
+        sceneReferences: referencesFor(settings),
         previousSample,
         previousEvaluation,
       })
       expect(evaluation.status, evaluation.message).not.toBe('failure')
+      if ((evaluation.metrics?.contiguousDwellSeconds ?? 0) < 1.5) {
+        expect(evaluation.checkpointIds).not.toContain('takeoff-settle')
+        expect(evaluation.status).not.toBe('success')
+      }
       for (const id of evaluation.checkpointIds ?? []) {
         checkpoints[id] = { id, completed: true, completedAtSeconds: pose.timestampSeconds, metrics: evaluation.metrics ?? {} }
       }
@@ -891,6 +901,7 @@ describe('bounded simulation teaching recordings', () => {
     }
     expect(success).toBe(true)
     expect(Object.values(checkpoints).every((checkpoint) => checkpoint.completed)).toBe(true)
+    expect(checkpoints['takeoff-settle']?.metrics?.contiguousDwellSeconds).toBeGreaterThanOrEqual(1.5)
   })
 
   it('uses the same relative playback clock for pose, input and captions after pause, speed and seek', () => {

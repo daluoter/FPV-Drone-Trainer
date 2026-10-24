@@ -4,7 +4,7 @@ import { createBrowserGamepadPoller } from '../controller'
 import ControllerLab, { type ControllerLabFlightHandoff } from '../controller/ControllerLab'
 import FreeFlight from '../free-flight/FreeFlight'
 import {
-  DEFAULT_LESSONS,
+  LEARNING_LESSONS,
   TrainingPanel,
   TrainingProgressStore,
   TrainingSession,
@@ -56,10 +56,10 @@ export default function App() {
   const initialProgressLoad = useMemo(() => progressStore.load(), [progressStore])
   const trainingSessionRef = useRef<TrainingSession | null>(null)
   if (trainingSessionRef.current === null) {
-    trainingSessionRef.current = new TrainingSession({ lessons: DEFAULT_LESSONS, initialLessonId: DEFAULT_LESSONS.some((lesson) => lesson.id === initialLearning.preferences.lastLessonId) ? initialLearning.preferences.lastLessonId : 'takeoff' })
+    trainingSessionRef.current = new TrainingSession({ lessons: LEARNING_LESSONS, initialLessonId: LEARNING_LESSONS.some((lesson) => lesson.id === initialLearning.preferences.lastLessonId) ? initialLearning.preferences.lastLessonId : 'takeoff' })
   }
   const [trainingState, setTrainingState] = useState<TrainingMachineState>(
-    () => trainingSessionRef.current?.getState() ?? new TrainingSession({ lessons: DEFAULT_LESSONS }).getState(),
+    () => trainingSessionRef.current?.getState() ?? new TrainingSession({ lessons: LEARNING_LESSONS }).getState(),
   )
   const [progressRevision, setProgressRevision] = useState(0)
   const [persistenceNotice, setPersistenceNotice] = useState<string | null>(null)

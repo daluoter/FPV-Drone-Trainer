@@ -225,7 +225,7 @@ export const LANDING_LESSON: LessonDefinition = {
 }
 
 export const LANDING_LEARNING_CONTENT: LessonLearningContent = {
-  code: 'L04', title: '起飛與藍色區降落', level: '入門', prerequisiteIds: ['straight-line'],
+  code: 'L03', title: '起飛與藍色區降落', level: '入門', prerequisiteIds: ['straight-line'],
   objectives: [`自行起飛並找到前方 ${LANDING_TARGET_DISTANCE_M} m 的藍色降落區。`, '在區內接地且未墜毀即可完成。'],
   steps: [
     '從起飛區地面自行加油門離地；課程不會把你放在半空中。',
