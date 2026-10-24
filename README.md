@@ -4,7 +4,7 @@ A browser-based FPV flight school and freestyle trick trainer focused on trustwo
 
 > **Status: beginner-school release 2026.10.24.2.** L10 **完整橫滾 Roll** adds a ground-start full 360° roll followed by controlled airborne recovery, with a synchronized physics demonstration and independent playback progress. L01 merging, renumbering and saved-record preservation were manually accepted in the `2026.10.24.1` / `d518897` delivery context; the accepted recovery lesson is L09. The user accepted L10 in the `2026.10.24.2` / `f1c8745` delivery context; L11 Flip remains planned. See [local update instructions](docs/DEVELOPMENT.md#confirm-the-updated-local-screen), [the L10 guide](docs/L10_FULL_ROLL.md), [the numbering table](docs/LEARNING_CONTRACT.md#課程編號與合併相容性), and [validation records](docs/LEARNING_VALIDATION.md).
 
-The [freestyle curriculum proposal](docs/FREESTYLE_CURRICULUM.md) expands the planned course catalog through L21, including backward flight, Power Loop, gravity gate and wall ride, with placeholders for techniques awaiting definition. It changes documentation only; the current menu and saved results remain unchanged.
+The [freestyle curriculum proposal](docs/FREESTYLE_CURRICULUM.md) expands the planned course catalog through L23. Power Loop follows Flip, with separate placeholders for 倒刷鍋 after Orbit and 俯仰倒帶 after 橫滾倒帶, alongside backward flight, gravity gate and wall ride. It changes documentation only; the current menu and saved results remain unchanged.
 
 ## Implemented
 
