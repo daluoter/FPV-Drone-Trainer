@@ -13,7 +13,7 @@ active choices, while the registry retains the old `hover` definition for
 historical data and evaluator compatibility. A saved `hover` selection resolves
 to `takeoff` without rewriting the source preferences document. Lesson IDs,
 checkpoint IDs, rule scopes and stored results do not depend on display numbers.
-The accepted recovery lesson is now L09. Release `2026.10.24.2` adds L10 (`full-roll`) as the twelfth active choice; the registry also retains historical Hover. The user accepted the L01 merge, navigation and record preservation in the `.1` delivery context. New L10 awaits separate learner acceptance; L11 Flip is next in the planned order.
+The accepted recovery lesson is now L09. Release `2026.10.24.2` adds L10 (`full-roll`) as the twelfth active choice; the registry also retains historical Hover. The user accepted the L01 merge, navigation and record preservation in the `.1` delivery context. The user accepted L10 in the `2026.10.24.2` / `f1c8745` delivery context; L11 Flip is next in the planned order.
 
 ## Runtime boundaries
 

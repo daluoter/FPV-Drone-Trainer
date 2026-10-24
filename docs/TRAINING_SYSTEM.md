@@ -15,7 +15,7 @@ The user accepted basic recovery in `2026.10.23.6` / `b30806e`, under its old
 number L10. It is now L09 and retains rules 6. Earlier approvals carry forward
 with the stable lesson IDs. Exact local build, browser and hardware details
 were not supplied. See [the numbering table](LEARNING_CONTRACT.md#課程編號與合併相容性)
-and [the roadmap](LEARNING_ROADMAP.md). The user also accepted the L01 merge, renumbering and record preservation in the `.1` delivery context. New L10 (`full-roll`) uses rules 6 under a new ID and awaits learner acceptance. The next planned course is L11 Flip.
+and [the roadmap](LEARNING_ROADMAP.md). The user also accepted the L01 merge, renumbering and record preservation in the `.1` delivery context. L10 (`full-roll`) uses rules 6 under a new ID and was accepted by the user in the `2026.10.24.2` / `f1c8745` delivery context. The next planned course is L11 Flip.
 
 The evaluator result is based on finite fixed-step drone state and geometry. A
 stick sequence cannot pass a lesson. Synthetic fixture success is deterministic
@@ -231,7 +231,7 @@ The real-RC simulated demonstration uses the same evaluator, starts on the
 ground and opens at 0.5×. It has its own chapter progress; replay cannot count
 as a learner result. The live/replay roll HUD shows current episode progress,
 signed roll rate (right positive) and actual tilt alongside altitude/XYZ. New
-L10 still awaits learner acceptance. See [the L10 guide](L10_FULL_ROLL.md).
+The user accepted L10 in the `2026.10.24.2` / `f1c8745` delivery context. See [the L10 guide](L10_FULL_ROLL.md).
 
 ### Split-S
 
