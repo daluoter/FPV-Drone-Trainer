@@ -1,10 +1,10 @@
 # Training system
 
-The **2026.10.24.3** batch adds **L11 前後翻轉** to lessons L01–L10. Its `full-flip` evaluator observes a real full pitch turn in either direction and subsequent airborne recovery. Course names are Chinese only; retained `split-s` and `orbit` entries are labelled **L13 翻轉下降** and **L14 正刷鍋**, preserving their existing rules and records. Their earlier prototypes remain; this batch does not add their complete teaching packages.
+Release **2026.10.25.1** splits the accepted combined 前後翻轉 course into **L11 前翻** (`front-flip`) and **L12 後翻** (`back-flip`). Both use rules 6 and six observational phases, but completion requires the course’s own measured direction. Course names stay Chinese; retained `split-s` / `orbit` entries display as **L14 翻轉下降** / **L15 正刷鍋**, preserving rules and records. Their earlier prototypes remain; this batch does not add their complete teaching packages.
 
-The learning menu has 13 flight lessons, while the registry retains historical `hover`. `LEARNING_LESSONS` excludes that retired standalone entry. L01 `takeoff` retains its existing 1.5-second settled-hover condition. Saved `hover` selection opens L01; old Hover results remain historical and are not credited as new L01 completions. Display numbers do not serve as storage keys.
+The learning menu has 14 courses; the registry has 16 definitions including historical `hover` and `full-flip`. `LEARNING_LESSONS` excludes both historical entries. L01 `takeoff` retains its 1.5-second settled-hover condition. Saved `hover` / `full-flip` selection opens `takeoff` / `front-flip`, without changing raw preferences during reading or crediting old results to replacements. Display numbers are not storage keys.
 
-The user accepted basic recovery in `2026.10.23.6` / `b30806e` under its old number L10 (now L09), the L01 merge/navigation/record work in the `.1` delivery context, and L10 完整橫滾 in `2026.10.24.2` / `f1c8745`. Those approvals remain. L11 automated and browser checks passed; user acceptance and common transmitter/pilot calibration remain pending. See [the numbering table](LEARNING_CONTRACT.md#課程編號與合併相容性), [the roadmap](LEARNING_ROADMAP.md) and [the L11 guide](L11_FULL_FLIP.md).
+The user accepted original combined L11 in `2026.10.24.3` / `92517a8`, after earlier L01–L10 approvals. These approvals remain under their original IDs and rules. New split-course automated and browser checks passed; user acceptance and common hardware/pilot calibration remain pending. See [compatibility](LEARNING_CONTRACT.md#課程編號與合併相容性), [the roadmap](LEARNING_ROADMAP.md), and [the two-course guide](L11_FULL_FLIP.md).
 
 The evaluator result is based on finite fixed-step drone state and geometry. A
 stick sequence cannot pass a lesson. Synthetic fixture success is deterministic
@@ -222,15 +222,15 @@ as a learner result. The live/replay roll HUD shows current episode progress,
 signed roll rate (right positive) and actual tilt alongside altitude/XYZ.
 The user accepted L10 in the `2026.10.24.2` / `f1c8745` delivery context. See [the L10 guide](L10_FULL_ROLL.md).
 
-### 前後翻轉
+### 前翻與後翻
 
-L11 (`full-flip`, rules 6) has ground, manual takeoff, preparation, inversion, full-turn and recovery checkpoints. Suggested height is 10 m, preparation starts at 8 m or higher inside an 80 m horizontal radius. Preparation takes 0.1 s with tilt ≤25°, body rate ≤120°/s, horizontal speed ≤8 m/s and vertical speed within ±3.5 m/s.
+L11 (`front-flip`) and L12 (`back-flip`), each rules 6, have ground, manual takeoff, preparation, inversion, full-turn and recovery checkpoints. Suggested height is 10 m; preparation requires at least 8 m inside an 80 m horizontal radius. Preparation takes 0.1 s with tilt ≤25°, body rate ≤120°/s, horizontal speed ≤8 m/s and vertical speed within ±3.5 m/s.
 
-The evaluator accumulates signed net actual quaternion rotation about the body pitch axis and cross-checks the measured angular rate, including cumulative episode consistency. Forward is positive (`-body X`); backward is negative. Either direction may pass. The same valid episode must show inversion (tilt ≥150°), 340–380° of directed net rotation and return to tilt ≤30°. Half-turn rocking, yaw spins, rolls, rate-only traces, pose-only changes, antipodal quaternion signs, discontinuous time/path and overrotation cannot create completion.
+The shared evaluator accumulates signed net actual quaternion rotation about the body pitch axis and cross-checks actual angular rate, including cumulative episode consistency. Forward is positive (`-body X`), backward negative. The lesson ID supplies `flipRequiredDirection`: +1 for `front-flip`, -1 for `back-flip`, 0 only for historical `full-flip`. A wrong-direction start invalidates the current episode, retains the triggering direction snapshot and asks for fresh preparation. A complete opposite-direction turn cannot pass the course. The same valid episode must show inversion (tilt ≥150°), 340–380° in the required direction and return to tilt ≤30°. Half-turn rocking, yaw/roll turns, rate-only or pose-only traces, q/-q representation changes and discontinuities cannot create completion.
 
-Recovery remains airborne at least 1.5 m high, tilt ≤30°, body rate ≤120°/s, horizontal speed ≤8 m/s and vertical speed −2.5 to +4 m/s for 0.2 consecutive seconds. Contact/low altitude, leaving the area, off-axis motion, reversal or excessive rotation invalidates the current episode. Earlier checkpoint milestones may remain, but a new preparation/inversion/full turn is required. Crash, disarm, reset or invalid/discontinuous samples end the attempt. Practice is untimed; challenge allows 300 s.
+Recovery requires at least 1.5 m altitude, tilt ≤30°, body rate ≤120°/s, horizontal speed ≤8 m/s and vertical speed -2.5 to +4 m/s for 0.2 s. Ground, low height, leaving the practice area, off-axis rotation, excess rotation, reversal or wrong direction clears current-episode proof. Retained checkpoint milestones cannot replace a fresh required-direction full turn after interruption. Practice is untimed, challenge 300 s. Success does not require landing, original heading or return-to-origin.
 
-Forward and backward teaching recordings use kinds `full-flip` and `back-flip`, both bound to lesson `full-flip`. Both start on the ground, use actual controller/physics samples and open at 0.5×. Their own checkpoint timelines and per-sample degree metrics drive replay instruments and chapters without writing learner results. The live/replay instruments show turn progress, signed pitch rate (forward positive) and actual tilt beside altitude/XYZ. See [the L11 guide](L11_FULL_FLIP.md).
+Displayed teaching kinds `front-flip` / `back-flip` bind to their respective lesson IDs. The internal legacy `full-flip` kind and lesson remain for compatibility, outside the displayed lesson/demo menu. Actual controller/physics recordings start from supported ground and open at 0.5×, with independent checkpoint timelines and measured degree/direction metrics. Playback never writes learner results. Live/replay instruments show turn progress, signed pitch rate and actual tilt beside altitude/XYZ. See [the guide](L11_FULL_FLIP.md).
 
 ### 翻轉下降
 
@@ -270,7 +270,7 @@ passed physical frames. Other lesson targets, the `split-s` reference and orbit
 tower remain visual guides without static collision. L09 appends `recovery-zone`
 at launch X/Z and ground + 4 m, with a 40 m horizontal practice radius. The
 `basic-recovery-field` is a visual practice boundary and height guide; it does
-not add collision or move the drone. Stage changes preserve the scene and canvas. L10 appends `roll-zone` and its own non-solid full-roll field with ground-relative height and horizontal guides; changing the lesson or stage never moves the physical drone. L11 appends `flip-zone` after `roll-zone` and a separate non-solid `full-flip-field`, with ground-relative preparation/target height, world-fixed horizontal and forward/backward references. `setFullFlipStage` changes stage colours without writing flight state.
+not add collision or move the drone. Stage changes preserve the scene and canvas. L10 appends `roll-zone` and its own non-solid full-roll field with ground-relative height and horizontal guides; changing the lesson or stage never moves the physical drone. The shared L11/L12 scene appends `flip-zone` after `roll-zone` and a separate non-solid `full-flip-field`, with ground-relative preparation/target height, world-fixed horizontal and forward/backward references. `setFullFlipStage` changes stage colours without writing flight state.
 
 ## Progress persistence and result feedback
 
@@ -303,16 +303,16 @@ uses separate validated envelopes, preserving the original v1 document. Result
 and best-score views remain bound to the result context after changing settings;
 failed writes are visible and malformed history is not automatically overwritten.
 Current L09 attempts use rules 6; L05–L08 stay on rules 5 and earlier scopes
-remain unchanged, including rules 4 for L02–L04. L10 uses `full-roll` and new L11 uses `full-flip`, each at rules 6 without modifying any earlier result. The prior L09 rules-5 document
+remain unchanged, including rules 4 for L02–L04. L10 uses `full-roll`; L11 / L12 use `front-flip` / `back-flip`, each at rules 6 without modifying earlier results. Historical `full-flip` remains under its original scope and does not complete either new course. The prior L09 rules-5 document
 remains readable as historical data and is not overwritten or relabeled as a
 rules-6 completion. Current progress loads the per-lesson rule scope. Physics
 context stays version 1; settings, input source and practice/challenge remain
 separate comparison conditions.
 
-The 15 demo kinds cover three L00 axis examples, L01–L10 and the two L11 directions.
+The 15 displayed demonstrations cover three L00 axis examples, L01–L10, L11 前翻 and L12 後翻.
 Their bounded recordings are generated through the real 240 Hz simulator and
 play through the independent ghost. The L01 demonstration explicitly teaches both takeoff and continuous hover.
-This release does not add demonstrations for L13 翻轉下降 or L14 正刷鍋.
+This release does not add demonstrations for L14 翻轉下降 or L15 正刷鍋.
 
 `createDemonstrationProgress` observes each retained course recording once with
 its own checkpoint/evaluator state, outside the live session and progress store.

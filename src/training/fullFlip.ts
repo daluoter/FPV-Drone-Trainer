@@ -28,6 +28,11 @@ export const FULL_FLIP_PHASE_IDS = Object.freeze([
 
 const DEGREES = 180 / Math.PI
 
+/** Direction is fixed by the selected lesson, never by saved progress or input. */
+export function fullFlipRequiredDirection(lessonId: string): -1 | 0 | 1 {
+  return lessonId === 'front-flip' ? 1 : lessonId === 'back-flip' ? -1 : 0
+}
+
 /** Direct measured-state instruments. Front flips are positive: body -X.
  * Pilot-positive pitch/body +X is nose-up, so back flips are negative here. */
 export function measureFullFlipMotion(state: Pick<DroneState, 'orientation' | 'velocityMps' | 'angularVelocityBodyRadPerSec'>) {
@@ -65,7 +70,7 @@ function emptyEpisode(): Record<string, number> {
     preparationQualifying: 0, preparationDwellSeconds: 0,
     recoveryQualifying: 0, recoveryDwellSeconds: 0,
     flipInterruptionReason: 0, interruptionAltitudeM: 0, interruptionFlipProgressDegrees: 0,
-    interruptionLaunchDistanceM: 0, interruptionOffAxisDegrees: 0,
+    interruptionLaunchDistanceM: 0, interruptionOffAxisDegrees: 0, interruptionFlipDirection: 0,
   }
 }
 
@@ -78,9 +83,16 @@ function exerciseHint(phase: number, metrics: Readonly<Record<string, number>>):
   if (phase === 0) return '請先在起飛區實際接地開始，不能從高空跳過自行起飛。'
   if (phase === 1) return '自行起飛至至少 8 m，建議約 10 m，為翻滾掉高保留餘裕。'
   if (metrics.insideFlipArea < 0.5) return '已離開起飛點周圍 80 m 練習區；本次翻轉證據已中斷，回區後重新準備並完成一整圈。'
-  if (metrics.flipEpisodeValid < 0.5) return `${metrics.flipInterrupted > 0.5 ? '本次翻轉已中斷，先前步驟保留；需重新準備並完整翻一圈。' : ''}先升至至少 8 m，帶回 25° 內、減緩旋轉與漂移，短暫準備 0.1 秒。`
+  if (metrics.flipEpisodeValid < 0.5) {
+    const required = metrics.flipRequiredDirection > 0 ? '前翻' : metrics.flipRequiredDirection < 0 ? '後翻' : null
+    const wrongDirection = metrics.flipInterruptionReason === 8 && required
+      ? `本課指定${required}；剛才向${metrics.interruptionFlipDirection < 0 ? '後' : '前'}翻轉，方向不符。本圈已中斷，先前步驟保留；請重新準備再完成${required}一圈。`
+      : metrics.flipInterrupted > 0.5 ? '本次翻轉已中斷，先前步驟保留；需重新準備並完整翻一圈。' : ''
+    return `${wrongDirection}先升至至少 8 m，帶回 25° 內、減緩旋轉與漂移，短暫準備 0.1 秒。`
+  }
   if (metrics.flipCompleted > 0.5) return '已觀察到完整一圈；回中減緩旋轉，再修到 30° 內。保持至少 1.5 m 高度，減緩下降與漂移，確認 0.2 秒。'
-  const direction = metrics.flipDirection < 0 ? '後翻' : metrics.flipDirection > 0 ? '前翻' : '選擇前翻或後翻'
+  const direction = metrics.flipRequiredDirection < 0 || metrics.flipRequiredDirection === 0 && metrics.flipDirection < 0
+    ? '後翻' : metrics.flipRequiredDirection > 0 || metrics.flipDirection > 0 ? '前翻' : '選擇前翻或後翻'
   return metrics.flipInverted > 0.5
     ? `已通過倒置；繼續${direction}完成同一圈，接近正飛時提早回中減緩旋轉。`
     : `準備完成；${direction}，沿同一俯仰方向完整翻一圈。可先適量加油爬升；倒置時適度收油，不以橫滾或偏航代替。`
@@ -113,7 +125,7 @@ function evaluateFullFlip(sample: TrainingSample, context: TrainingEvaluationCon
   const metrics: Record<string, number> = {
     ...episode, ...motion, flipPhase: phase, altitudeM, groundClearanceM: clearance,
     launchDistanceM, groundTouching: contact.touching ? 1 : 0, insideFlipArea: inside ? 1 : 0,
-    targetAltitudeM: FULL_FLIP_TARGET_HEIGHT_M,
+    targetAltitudeM: FULL_FLIP_TARGET_HEIGHT_M, flipRequiredDirection: fullFlipRequiredDirection(context.lesson.id),
   }
   const previous = context.previousFlightSample ?? context.previousSample
   let delta = 0
@@ -159,15 +171,23 @@ function evaluateFullFlip(sample: TrainingSample, context: TrainingEvaluationCon
       : { status: 'continue', checkpointIds: [id], metrics, hint: exerciseHint(phase, metrics) }
   }
   // Reasons: 1 ground, 2 low, 3 outside, 4 off-axis, 5 overrotation,
-  // 6 reversing past the starting orientation, 7 lost pre-flip height.
+  // 6 reversing past the starting orientation, 7 lost pre-flip height,
+  // 8 rotating opposite to this directional lesson's required turn.
   const interrupt = (reason: number): TrainingEvaluation => {
     const interruption = { flipInterrupted: 1, flipInterruptionReason: reason,
       interruptionAltitudeM: altitudeM, interruptionFlipProgressDegrees: metrics.flipProgressDegrees,
-      interruptionLaunchDistanceM: launchDistanceM, interruptionOffAxisDegrees: metrics.flipOffAxisDegrees }
+      interruptionLaunchDistanceM: launchDistanceM, interruptionOffAxisDegrees: metrics.flipOffAxisDegrees,
+      interruptionFlipDirection: metrics.flipDirection }
     Object.assign(metrics, emptyEpisode(), interruption)
     return continuing()
   }
-  if (phase >= 6) return { status: 'success', score: 100, metrics, message: '已完成完整翻轉與恢復。', hint: exerciseHint(phase, metrics) }
+  if (phase >= 6) {
+    if (metrics.flipRequiredDirection !== 0 && (metrics.flipDirection !== metrics.flipRequiredDirection
+      || metrics.flipEpisodeValid < 0.5 || metrics.flipCompleted < 0.5 || metrics.flipInverted < 0.5)) {
+      return terminal('翻轉練習停止：尚未取得本課指定方向的完整一圈與恢復證據，請重新開始。', metrics)
+    }
+    return { status: 'success', score: 100, metrics, message: '已完成完整翻轉與恢復。', hint: exerciseHint(phase, metrics) }
+  }
   if (phase === 0) return contact.touching && launchDistanceM <= 1.9 ? advance() : continuing()
   if (phase === 1) return airborne && inside && altitudeM >= FULL_FLIP_MIN_PREPARATION_HEIGHT_M ? advance() : continuing()
   if (!airborne) return interrupt(contact.touching ? 1 : 2)
@@ -203,6 +223,7 @@ function evaluateFullFlip(sample: TrainingSample, context: TrainingEvaluationCon
   if (metrics.flipDirection === 0 && Math.abs(metrics.flipSignedDegrees) >= 10) metrics.flipDirection = Math.sign(metrics.flipSignedDegrees)
   const directed = metrics.flipSignedDegrees * (metrics.flipDirection || 1)
   metrics.flipProgressDegrees = Math.min(360, Math.abs(metrics.flipSignedDegrees))
+  if (metrics.flipRequiredDirection !== 0 && metrics.flipDirection !== 0 && metrics.flipDirection !== metrics.flipRequiredDirection) return interrupt(8)
   if (Math.abs(metrics.flipSignedDegrees) > FULL_FLIP_MAX_TURN_DEGREES) return interrupt(5)
   if (metrics.flipOffAxisDegrees > 120) return interrupt(4)
   if (directed < -15) return interrupt(6)
@@ -260,3 +281,39 @@ export const FULL_FLIP_LEARNING_CONTENT: LessonLearningContent = {
   steps: ['從地面自行起飛，至少 8 m、建議約 10 m，保留翻滾的掉高餘裕。', '帶回接近水平並稍微減緩旋轉與漂移，依提示短暫準備 0.1 秒。', '可先適量加油爬升，再選前翻或後翻，以俯仰軸持續轉動，沿同一方向完整翻一圈。', '倒置時適度收油，避免推力往地面壓；接近正飛時提早回中減緩旋轉，再修回接近水平。', '保持空中與至少 1.5 m 高度，稍微減緩下降與漂移，確認 0.2 秒後完成；不需降落或回原位置。'],
   commonMistakes: ['只翻半圈再反向回平；本課要完成同一方向的一整圈。', '用橫滾或偏航代替俯仰翻轉；本課需沿左右機臂方向的軸前翻或後翻。', '高度不足或倒置時持續大油門，讓機體很快掉高。', '已轉回正飛仍繼續推俯仰桿，沒提早回中停止旋轉。'],
 }
+
+function directionalFlipLesson(id: 'front-flip' | 'back-flip', title: '前翻' | '後翻', priority: number): LessonDefinition {
+  return {
+    ...FULL_FLIP_LESSON, id, title, priority,
+    description: `從地面自行起飛，取得高度餘裕後完成一圈${title}，再恢復正飛與控制。`,
+    objectives: ['從地面自行起飛並為翻轉保留高度。', `實際通過倒置，沿指定方向完成一圈${title}。`, '回中減緩旋轉，再修回正飛並短暫恢復控制。'],
+    checkpoints: FULL_FLIP_LESSON.checkpoints.map((checkpoint, index) => index === 2
+      ? { ...checkpoint, title: `${title}準備` }
+      : index === 3 ? { ...checkpoint, description: `持續${title}，沿同一圈實際通過倒置；反方向翻轉不計入本課。` }
+        : index === 4 ? { ...checkpoint, title: `完成一圈${title}`, description: `沿${title}方向翻完 360° 附近並回到正飛；不以反方向翻轉或半圈回平代替。` }
+          : { ...checkpoint }),
+    success: { ...FULL_FLIP_LESSON.success, title: `${title}完成`, description: `已觀察到完整${title}與其後的空中恢復。`, criteria: ['實際地面自行起飛', `觀察到同一圈的倒置與指定方向${title}`, '空中短暫恢復控制'] },
+    hints: [`取得足夠高度，沿${title}方向完成一圈；接近正飛時提早回中，再主動修回接近水平。`],
+  }
+}
+
+export const FRONT_FLIP_LESSON: LessonDefinition = directionalFlipLesson('front-flip', '前翻', 2.9)
+export const BACK_FLIP_LESSON: LessonDefinition = directionalFlipLesson('back-flip', '後翻', 2.95)
+
+function directionalFlipLearningContent(code: 'L11' | 'L12', title: '前翻' | '後翻', prerequisiteId: string): LessonLearningContent {
+  return {
+    ...FULL_FLIP_LEARNING_CONTENT, code, title, prerequisiteIds: [prerequisiteId],
+    objectives: ['理解倒置時的姿態與油門方向。', `自行完成一圈${title}並恢復正飛與控制。`],
+    steps: [
+      '從地面自行起飛，至少 8 m、建議約 10 m，保留翻轉的掉高餘裕。',
+      '帶回接近水平並稍微減緩旋轉與漂移，依提示短暫準備 0.1 秒。',
+      `可先適量加油爬升，再以俯仰軸持續${title}，沿同一方向完整翻一圈；本課只判定${title}。`,
+      '倒置時適度收油，避免推力往地面壓；接近正飛時提早回中減緩旋轉，再修回接近水平。',
+      '保持空中與至少 1.5 m 高度，稍微減緩下降與漂移，確認 0.2 秒後完成；不需降落或回原位置。',
+    ],
+    commonMistakes: [`朝反方向翻轉；本課需完成${title}，不能以另一方向代替。`, ...FULL_FLIP_LEARNING_CONTENT.commonMistakes],
+  }
+}
+
+export const FRONT_FLIP_LEARNING_CONTENT: LessonLearningContent = directionalFlipLearningContent('L11', '前翻', 'full-roll')
+export const BACK_FLIP_LEARNING_CONTENT: LessonLearningContent = directionalFlipLearningContent('L12', '後翻', 'front-flip')

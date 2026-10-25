@@ -1010,8 +1010,8 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     wideGateField.visible = lessonId === 'wide-gate'
     recoveryField.visible = lessonId === 'basic-recovery'
     rollField.visible = lessonId === 'full-roll'
-    flipField.visible = lessonId === 'full-flip'
-    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip'].includes(lessonId ?? '')
+    flipField.visible = ['full-flip', 'front-flip', 'back-flip'].includes(lessonId ?? '')
+    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip'].includes(lessonId ?? '')
     for (const reference of referenceSet.contract) {
       reference.object.visible = !beginner
     }

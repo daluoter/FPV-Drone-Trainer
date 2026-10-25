@@ -60,13 +60,13 @@ function attemptUnload(): Event {
 
 describe('Free Flight native navigation confirmation', () => {
   it.each([
-    { label: 'L11 前翻示範', direction: 1 },
-    { label: 'L11 後翻示範', direction: -1 },
-  ])('keeps the actual $label direction, degree HUD and playback checkpoints isolated from live training', ({ label, direction }) => {
+    { label: 'L11 前翻示範', direction: 1, lessonId: 'front-flip', title: 'L11 前翻' },
+    { label: 'L12 後翻示範', direction: -1, lessonId: 'back-flip', title: 'L12 後翻' },
+  ])('keeps the actual $label direction, degree HUD and playback checkpoints isolated from live training', ({ label, direction, lessonId, title }) => {
     window.localStorage.clear()
     render(<App />)
     const canvas = screen.getByLabelText('Free Flight 3D scene')
-    fireEvent.change(screen.getByLabelText('選擇課程'), { target: { value: 'full-flip' } })
+    fireEvent.change(screen.getByLabelText('選擇課程'), { target: { value: lessonId } })
     fireEvent.change(screen.getByLabelText('控制方式'), { target: { value: 'keyboard' } })
     expect(screen.getByRole('group', { name: '翻轉練習數值' })).toHaveTextContent('即時')
     expect(screen.getByTestId('flip-progress')).toHaveTextContent('0°')
@@ -80,7 +80,7 @@ describe('Free Flight native navigation confirmation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
     expect(screen.getByRole('button', { name: '0.5×' })).toHaveAttribute('aria-pressed', 'true')
     const progress = screen.getByRole('region', { name: '示範進度' })
-    expect(progress).toHaveTextContent('L11 前後翻轉')
+    expect(progress).toHaveTextContent(title)
     const chapters = within(progress).getAllByRole('button')
     expect(chapters).toHaveLength(6)
     fireEvent.click(chapters[4])
@@ -107,7 +107,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(screen.getByRole('region', { name: '示範進度' })).toHaveTextContent('L00')
     expect(stored()).toEqual(before)
     fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
-    expect(screen.getByLabelText('選擇課程')).toHaveValue('full-flip')
+    expect(screen.getByLabelText('選擇課程')).toHaveValue(lessonId)
     expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
     expect(screen.getByTestId('flight-altitude').textContent).toBe(initialAltitude)
     expect(screen.getByRole('button', { name: /^Arm$/ })).toBeEnabled()

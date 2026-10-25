@@ -7,7 +7,7 @@ import { FIGURE_EIGHT_LESSON } from './figureEight'
 import { WIDE_GATE_LESSON } from './wideGate'
 import { BASIC_RECOVERY_LESSON } from './basicRecovery'
 import { FULL_ROLL_LESSON } from './fullRoll'
-import { FULL_FLIP_LESSON } from './fullFlip'
+import { BACK_FLIP_LESSON, FRONT_FLIP_LESSON, FULL_FLIP_LESSON } from './fullFlip'
 import {
   hoverEvaluator,
   orbitEvaluator,
@@ -228,10 +228,12 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
   BASIC_RECOVERY_LESSON,
   FULL_ROLL_LESSON,
   FULL_FLIP_LESSON,
+  FRONT_FLIP_LESSON,
+  BACK_FLIP_LESSON,
 ]
 
-/** Current learning navigation merges hover into the existing takeoff goal. */
-export const LEARNING_LESSONS: readonly LessonDefinition[] = DEFAULT_LESSONS.filter((lesson) => lesson.id !== 'hover')
+/** Legacy hover and combined-flip definitions remain available only for history. */
+export const LEARNING_LESSONS: readonly LessonDefinition[] = DEFAULT_LESSONS.filter((lesson) => lesson.id !== 'hover' && lesson.id !== 'full-flip')
 export const TRAINING_LESSONS = LEARNING_LESSONS
 
 export function lessonById(lessonId: string): LessonDefinition | null {

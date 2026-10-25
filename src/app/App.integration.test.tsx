@@ -306,7 +306,8 @@ describe('integrated training/runtime UI boundaries', () => {
     { lessonId: 'wide-gate', code: 'L08', steps: 5, nextCode: 'L09' },
     { lessonId: 'basic-recovery', code: 'L09', steps: 8, nextCode: 'L10' },
     { lessonId: 'full-roll', code: 'L10', steps: 6, nextCode: 'L11' },
-    { lessonId: 'full-flip', code: 'L11', steps: 6, nextCode: 'L13' },
+    { lessonId: 'front-flip', code: 'L11', steps: 6, nextCode: 'L12' },
+    { lessonId: 'back-flip', code: 'L12', steps: 6, nextCode: 'L14' },
   ] as const)('records an ordered $code result once and restores its current-rule progress after reload', ({ lessonId, steps, nextCode }) => {
     const { unmount } = render(<App />)
     const training = trainingSection()

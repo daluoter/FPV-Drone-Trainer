@@ -15,9 +15,10 @@ import { recordGateDemonstration } from './gateDemonstration'
 import { recordRecoveryDemonstration } from './recoveryDemonstration'
 import { recordFullRollDemonstration } from './rollDemonstration'
 import { recordFullFlipDemonstration } from './flipDemonstration'
+import { BACK_FLIP_LESSON, FRONT_FLIP_LESSON, FULL_FLIP_LESSON } from './fullFlip'
 import { lessonLearningContent } from './catalog'
 
-export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'back-flip' | 'roll' | 'pitch' | 'yaw'
+export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'front-flip' | 'back-flip' | 'roll' | 'pitch' | 'yaw'
 
 export interface TeachingCue {
   readonly timeSeconds: number
@@ -31,7 +32,7 @@ export interface TeachingCue {
 export interface TeachingDemonstration {
   readonly schemaVersion: 1
   readonly kind: TeachingDemonstrationKind
-  readonly lessonId: 'intro' | 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip'
+  readonly lessonId: 'intro' | 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'front-flip' | 'back-flip'
   readonly rulesVersion: TrainingAttemptContext['rulesVersion']
   readonly physicsVersion: 1
   readonly presetId: TuningPresetSelection
@@ -55,7 +56,7 @@ const LANDING_DESCENT_START_SECONDS = 20
 
 /** Keep learner-facing movie numbers and names aligned with the current course catalog. */
 function courseDemonstrationTitle(kind: Exclude<TeachingDemonstrationKind, 'roll' | 'pitch' | 'yaw'>, detail: string): string {
-  const content = lessonLearningContent(kind === 'back-flip' ? 'full-flip' : kind)
+  const content = lessonLearningContent(kind)
   if (!content) throw new RangeError('此示範沒有對應的課程內容。')
   return `${content.code} ${content.title}：${detail}`
 }
@@ -182,7 +183,7 @@ export function createTeachingDemonstration(
   kind: TeachingDemonstrationKind,
 ): TeachingDemonstration {
   if (!validateTuningSettings(settings).valid) throw new RangeError('示範設定未通過驗證，請先還原有效設定。')
-  if (!['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'back-flip', 'roll', 'pitch', 'yaw'].includes(kind)) {
+  if (!['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'roll', 'pitch', 'yaw'].includes(kind)) {
     throw new RangeError('不支援此示範種類。')
   }
   const simulation = new FlightSimulation(flightSimulationConfigFromTuning(settings))
@@ -190,13 +191,14 @@ export function createTeachingDemonstration(
   if (settings.drone.massKg * settings.drone.gravityMps2 / maximumThrust >= 0.8) {
     throw new RangeError('目前推力不足以完成穩定示範，請檢查機體設定。')
   }
-  if (kind === 'full-flip' || kind === 'back-flip') {
-    const direction = kind === 'full-flip' ? 1 : -1
+  if (kind === 'full-flip' || kind === 'front-flip' || kind === 'back-flip') {
+    const direction = kind === 'back-flip' ? -1 : 1
     const directionName = direction === 1 ? '前翻' : '後翻'
-    const { recording, cues } = recordFullFlipDemonstration(simulation, settings, stickForRate, collectiveThrottle, direction)
+    const lesson = kind === 'full-flip' ? FULL_FLIP_LESSON : kind === 'front-flip' ? FRONT_FLIP_LESSON : BACK_FLIP_LESSON
+    const { recording, cues } = recordFullFlipDemonstration(simulation, settings, stickForRate, collectiveThrottle, direction, lesson)
     return Object.freeze({
-      schemaVersion: 1, kind, lessonId: 'full-flip',
-      rulesVersion: trainingRulesVersionForLesson('full-flip'), physicsVersion: 1,
+      schemaVersion: 1, kind, lessonId: kind,
+      rulesVersion: trainingRulesVersionForLesson(kind), physicsVersion: 1,
       presetId: identifyTuningPreset(settings), settingsFingerprint: fingerprintTrainingSettings(settings),
       title: courseDemonstrationTitle(kind, `地面起飛、${directionName}一圈與恢復正飛`),
       description: `模擬示範，以實際搖桿輸入與物理完成${directionName}一圈；真人練習全程自行操控，觀看不計入通關。`,

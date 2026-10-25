@@ -41,6 +41,16 @@ describe('Chinese-only axis demonstration names', () => {
   })
 })
 
+describe('separate front and back flip demonstrations', () => {
+  it.each([
+    ['front-flip', 'L11 前翻'], ['back-flip', 'L12 後翻'],
+  ] as const)('binds %s to its own lesson and Chinese title', (kind, title) => {
+    const demo = createTeachingDemonstration(createTuningPreset('beginner'), kind)
+    expect(demo).toMatchObject({ kind, lessonId: kind, rulesVersion: 6 })
+    expect(demo.title).toContain(title)
+  })
+})
+
 function at(samples: readonly ReplaySample[], timeSeconds: number): ReplaySample {
   const sample = samples.reduce((closest, candidate) => (
     Math.abs(candidate.timestampSeconds - timeSeconds) < Math.abs(closest.timestampSeconds - timeSeconds) ? candidate : closest

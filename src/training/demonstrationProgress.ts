@@ -180,7 +180,7 @@ export function createDemonstrationProgress(
     complete = evaluation.status === 'success' && nextIndex === -1 && time >= lesson.scoring.minimumActiveSeconds
     // Complete-turn instruments follow each retained observation rather
     // than guessing progress from captions, elapsed time or the wrapped pose.
-    const flip = demonstration.lessonId === 'full-flip'
+    const flip = demonstration.lessonId === 'full-flip' || demonstration.lessonId === 'front-flip' || demonstration.lessonId === 'back-flip'
     if (changed || complete || demonstration.kind === 'full-roll' || flip) {
       const metrics: Readonly<Record<string, number>> | undefined = demonstration.kind === 'full-roll' ? {
         rollProgressDegrees: evaluation.metrics?.rollProgressDegrees ?? 0,
@@ -190,6 +190,7 @@ export function createDemonstrationProgress(
         flipProgressDegrees: evaluation.metrics?.flipProgressDegrees ?? 0,
         flipSignedDegrees: evaluation.metrics?.flipSignedDegrees ?? 0,
         flipDirection: evaluation.metrics?.flipDirection ?? 0,
+        flipRequiredDirection: evaluation.metrics?.flipRequiredDirection ?? 0,
       } : undefined
       frames.push(frozenFrame(time, completed, complete, null, metrics))
     }

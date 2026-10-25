@@ -6,10 +6,10 @@ import type { RateAxis } from '../rates'
 import { FlightReplayRecorder, type ReplayRecording } from '../replay'
 import { GROUND_CONTACT_SLOP_M } from '../simulation/dynamics'
 import type { TuningSettings } from '../tuning/config'
-import { FULL_FLIP_LESSON, FULL_FLIP_TARGET_HEIGHT_M, fullFlipEvaluator } from './fullFlip'
+import { BACK_FLIP_LESSON, FRONT_FLIP_LESSON, FULL_FLIP_TARGET_HEIGHT_M, fullFlipEvaluator } from './fullFlip'
 import type { TeachingCue } from './demonstrations'
 import { createTrainingFieldAnchors } from './field'
-import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample } from './types'
+import type { LessonDefinition, TrainingCheckpointState, TrainingEvaluation, TrainingSample } from './types'
 
 const STEP_SECONDS = 1 / 240
 const MAXIMUM_DURATION_SECONDS = 120
@@ -42,6 +42,7 @@ export function recordFullFlipDemonstration(
   stickForRate: (settings: TuningSettings, axis: RateAxis, desiredDegrees: number) => number,
   collectiveThrottle: (simulation: FlightSimulation, altitudeM: number, maximumVerticalSpeed?: number) => number,
   direction: 1 | -1 = 1,
+  lesson: LessonDefinition = direction === 1 ? FRONT_FLIP_LESSON : BACK_FLIP_LESSON,
 ): { readonly recording: ReplayRecording; readonly cues: readonly TeachingCue[] } {
   const directionName = direction === 1 ? '前翻' : '後翻'
   const { launch, landing } = createTrainingFieldAnchors(settings.drone)
@@ -84,7 +85,7 @@ export function recordFullFlipDemonstration(
   }
   const observe = (sample: TrainingSample): void => {
     const next = fullFlipEvaluator.evaluate(sample, {
-      lesson: FULL_FLIP_LESSON, mode: 'practice', elapsedSeconds: sample.timestampSeconds,
+      lesson, mode: 'practice', elapsedSeconds: sample.timestampSeconds,
       sceneReferences: references, checkpoints, trajectory: [], sampleCount: observedSamples,
       previousSample: previous, previousFlightSample: previous, previousEvaluation: evaluation,
     })

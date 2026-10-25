@@ -29,6 +29,7 @@ import {
   FULL_ROLL_RECOVERY_CLIMB_MPS as ROLL_RECOVERY_CLIMB,
 } from './fullRoll'
 import {
+  fullFlipRequiredDirection,
   FULL_FLIP_TARGET_HEIGHT_M as FLIP_TARGET_HEIGHT,
   FULL_FLIP_MIN_PREPARATION_HEIGHT_M as FLIP_PREP_HEIGHT,
   FULL_FLIP_MIN_HEIGHT_M as FLIP_MIN_HEIGHT,
@@ -187,7 +188,9 @@ function fullRollResultFeedback(result: TrainingResult, scope: string): Training
 }
 
 function fullFlipResultFeedback(result: TrainingResult, scope: string): TrainingResultFeedback | null {
-  if (result.lessonId !== 'full-flip') return null
+  const required = fullFlipRequiredDirection(result.lessonId)
+  if (result.lessonId !== 'full-flip' && required === 0) return null
+  const expected = required === 1 ? '前翻' : required === -1 ? '後翻' : null
   const restart = '本次練習已結束；按「再練一次」會清空本次步驟，從地面重新開始。'
   const message = result.message ?? ''
   const timedOut = /逾時|timed out|timeout/iu.test(message)
@@ -218,16 +221,30 @@ function fullFlipResultFeedback(result: TrainingResult, scope: string): Training
     scopeNote: scope,
   }
   const metrics = result.metrics
+  const observedDirection = metrics.flipDirection === 1 ? '前翻' : metrics.flipDirection === -1 ? '後翻' : null
+  const directionMatches = required === 0 || metrics.flipDirection === required
+  const interruptedWrongDirection = required !== 0 && metrics.flipInterrupted > 0.5 && metrics.flipInterruptionReason === 8
+  if (required !== 0 && (interruptedWrongDirection || observedDirection !== null && !directionMatches)) {
+    const wrongTurn = interruptedWrongDirection
+      ? fullFlipInterruptionReason(metrics, result.lessonId) ?? `本課練${expected}；中斷時翻轉方向不符。`
+      : `本課練${expected}；本次觀察到${observedDirection}${Number.isFinite(metrics.flipProgressDegrees) ? `約 ${Math.max(0, metrics.flipProgressDegrees).toFixed(1)}°` : ''}，不能計入本課。`
+    return {
+      observedStrength: null,
+      observedGap: `${timedOut ? '本次挑戰逾時；' : ''}${wrongTurn}`,
+      nextPractice: `${restart}先回正重新準備，再以${expected}完成同一方向的一整圈及空中恢復。另一方向須在另一堂課獨立完成。`,
+      scopeNote: scope,
+    }
+  }
   const phase = Number.isInteger(metrics.flipPhase) && metrics.flipPhase >= 0 && metrics.flipPhase <= 6 ? metrics.flipPhase : null
   if (result.outcome === 'SUCCESS' && phase === 6 && result.completedCheckpoints === 6
-    && metrics.flipEpisodeValid > 0.5 && metrics.flipInverted > 0.5 && metrics.flipCompleted > 0.5) return {
+    && metrics.flipEpisodeValid > 0.5 && metrics.flipInverted > 0.5 && metrics.flipCompleted > 0.5 && directionMatches) return {
     observedStrength: `本次已從地面自行起飛，完成同一圈的實際倒置與${metrics.flipDirection === 1 ? '前翻' : metrics.flipDirection === -1 ? '後翻' : '俯仰翻轉'}一整圈，以及其後的空中正飛與控制恢復。`,
     observedGap: null,
-    nextPractice: '以相同條件再練一次，觀察適時停止翻轉與油門配合；熟悉後再練另一方向，不需要回到原位置或降落。',
+    nextPractice: expected ? `以相同條件再練一次${expected}，觀察適時停止翻轉與油門配合；另一方向須在另一堂課獨立完成，不需要回到原位置或降落。` : '以相同條件再練一次，觀察適時停止翻轉與油門配合；熟悉後再練另一方向，不需要回到原位置或降落。',
     scopeNote: scope,
   }
   const validEpisode = metrics.flipEpisodeValid > 0.5
-  const completedFlip = validEpisode && metrics.flipCompleted > 0.5
+  const completedFlip = validEpisode && metrics.flipCompleted > 0.5 && directionMatches
   const strength = completedFlip ? '本次已觀察到一圈完整翻轉，尚待完成其後的空中恢復。'
     : validEpisode && metrics.flipInverted > 0.5 ? '本次已觀察到這一圈的實際倒置姿態。'
       : phase !== null && phase >= 2 ? '本次已觀察到從地面自行起飛並取得練習高度。' : null
@@ -245,7 +262,7 @@ function fullFlipResultFeedback(result: TrainingResult, scope: string): Training
     scopeNote: scope,
   }
   let observation: string
-  if (!validEpisode && metrics.flipInterrupted > 0.5) observation = `先前這一圈已中斷；${fullFlipInterruptionReason(metrics) ?? ''}歷史倒置或回正標記不代替新一圈，尚未重新完成準備與完整翻轉。`
+  if (!validEpisode && metrics.flipInterrupted > 0.5) observation = `先前這一圈已中斷；${fullFlipInterruptionReason(metrics, result.lessonId) ?? ''}歷史倒置或回正標記不代替新一圈，尚未重新完成準備與完整翻轉。`
   else if (metrics.groundTouching > 0.5) observation = '結束時已接地；地面停住不能算空中恢復，本圈證據已中斷。'
   else if (metrics.insideFlipArea === 0) observation = `結束時超出起飛點半徑 ${FLIP_AREA_RADIUS} m 的練習區，本圈需要重新準備與完整翻轉。`
   else if (Number.isFinite(metrics.altitudeM) && metrics.altitudeM < FLIP_MIN_HEIGHT) observation = `結束時離地 ${metrics.altitudeM.toFixed(1)} m，未保留空中恢復需要的 ${FLIP_MIN_HEIGHT} m 高度，本圈已中斷。`
@@ -266,7 +283,7 @@ function fullFlipResultFeedback(result: TrainingResult, scope: string): Training
   }
   const action = completedFlip
     ? '下次接近正飛時提早回中減緩旋轉，再主動回平與調整油門；回中不會自動回平或煞停。'
-    : '下次選定前翻或後翻後，沿同一方向連續翻轉，實際通過倒置並完成一圈後，再停止旋轉、修回正飛；先保留足夠高度。'
+    : `下次${expected ? `依本課要求${expected}` : '選定前翻或後翻後'}，沿同一方向連續翻轉，實際通過倒置並完成一圈後，再停止旋轉、修回正飛；先保留足夠高度。`
   return { observedStrength: strength, observedGap: `${ended}完整翻轉尚未完成。${observation}`,
     nextPractice: `${restart}${action}`, scopeNote: scope }
 }

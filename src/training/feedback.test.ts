@@ -1043,3 +1043,74 @@ describe('L11 front and back flip coaching', () => {
     expect(hint).not.toMatch(/先前步驟保留|已完成本圈翻轉|可以解除解鎖/)
   })
 })
+
+describe('separate forward and backward flip coaching', () => {
+  const ready = { flipPhase: 3, flipEpisodeValid: 1, flipInterrupted: 0,
+    flipProgressDegrees: 0, flipDirection: 0, flipInverted: 0, flipCompleted: 0,
+    altitudeM: 10, insideFlipArea: 1, groundTouching: 0, tiltDegrees: 0,
+    bodyRateDegreesPerSecond: 0, horizontalSpeedMps: 0, verticalSpeedMps: 0,
+    preparationDwellSeconds: 0.1, recoveryDwellSeconds: 0 }
+  const courses = [['front-flip', 1, '前翻', '後翻'], ['back-flip', -1, '後翻', '前翻']] as const
+
+  it.each(courses)('teaches only the required direction of %s even with a stale requirement metric', (id, direction, expected) => {
+    expect(trainingHint(id, null)).toContain(`本課練${expected}`)
+    expect(trainingRouteGuide(id)).toContain(`沿俯仰軸連續${expected}一整圈`)
+    expect(trainingRouteGuide(id)).toContain('反方向翻轉不計入本課')
+    expect(trainingRouteGuide(id)).not.toContain('選前翻或後翻')
+    const detail = trainingObjective(id, { metrics: { ...ready, flipRequiredDirection: -direction } })!.detail
+    expect(detail).toContain(`本課練${expected}`)
+    expect(detail).toContain(`繼續${expected}`)
+    expect(detail).not.toContain('選擇前翻或後翻')
+    expect(formatTrainingMetrics(ready, id)[1].value).toBe(`尚未開始${expected}`)
+  })
+
+  it.each(courses)('rejects opposite-direction live completion claims in %s', (id, direction, expected, opposite) => {
+    for (const phase of [3, 5, 6]) {
+      const evaluation = { status: 'continue' as const, metrics: { ...ready, flipPhase: phase,
+        flipDirection: -direction, flipRequiredDirection: -direction, flipProgressDegrees: phase === 3 ? 43 : 360,
+        flipInverted: 1, flipCompleted: 1 } }
+      const detail = trainingObjective(id, evaluation)!.detail
+      expect(detail).toContain(`本課練${expected}；剛才往${opposite}`)
+      expect(detail).toContain('先回正重新準備')
+      expect(detail).not.toMatch(/已完成本圈翻轉|可以解除解鎖/)
+      expect(trainingHint(id, evaluation)).toContain(`本課練${expected}`)
+    }
+  })
+
+  it.each(courses)('retains the actual wrong-direction snapshot in %s after controls normalize', (id, direction, expected, opposite) => {
+    const metrics = { ...ready, flipPhase: 5, flipEpisodeValid: 0, flipInterrupted: 1,
+      flipInterruptionReason: 8, flipRequiredDirection: -direction,
+      interruptionFlipDirection: -direction, interruptionFlipProgressDegrees: 17.4 }
+    const reason = fullFlipInterruptionReason(metrics, id)!
+    expect(reason).toContain(`本課練${expected}`)
+    expect(reason).toContain(`中斷時往${opposite}約 17.4°`)
+    expect(reason).toContain('這一圈不計入本課')
+    const detail = trainingObjective(id, { metrics })!.detail
+    expect(detail).toContain(reason)
+    expect(detail).toContain('先回正重新準備')
+    expect(formatTrainingMetrics(metrics, id).slice(0, 2)).toEqual([
+      { key: 'interruptionFlipDirection', label: '中斷時翻轉方向', value: opposite },
+      { key: 'interruptionFlipProgressDegrees', label: '中斷時翻轉進度', value: '17.4 °' },
+    ])
+    const fresh = trainingObjective(id, { metrics: { ...metrics, flipInterrupted: 0,
+      flipEpisodeValid: 1, flipDirection: direction, flipProgressDegrees: 354,
+      flipInverted: 1, flipCompleted: 1 } })!.detail
+    expect(fresh).toContain('已完成本圈翻轉')
+    expect(fresh).not.toContain('中斷時往')
+  })
+
+  it.each(courses)('does not accept a phase-six marker without measured direction in %s', (id, _direction, expected) => {
+    const detail = trainingObjective(id, { metrics: { ...ready, flipPhase: 6 } })!.detail
+    expect(detail).toContain(`本課練${expected}`)
+    expect(detail).toContain('缺少指定方向的實際旋轉證據')
+    expect(detail).not.toContain('可以解除解鎖')
+  })
+
+  it.each(courses)('keeps terminal flight failures ahead of opposite-direction metadata in %s', (id, direction) => {
+    const text = trainingHint(id, { status: 'failure', message: 'Ground impact latched a crash.',
+      metrics: { ...ready, flipPhase: 6, flipDirection: -direction, flipCompleted: 1 } })
+    expect(text).toContain('本次發生墜毀')
+    expect(text).toContain('清空本次步驟')
+    expect(text).not.toContain('剛才往')
+  })
+})

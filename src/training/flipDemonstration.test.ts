@@ -8,16 +8,17 @@ import { createTuningPreset } from '../tuning/presets'
 import type { TuningSettings } from '../tuning/config'
 import { createTeachingDemonstration, teachingFullFlipPhaseAt } from './demonstrations'
 import { createTrainingFieldAnchors } from './field'
-import { FULL_FLIP_LESSON, FULL_FLIP_PHASE_IDS, fullFlipEvaluator } from './fullFlip'
-import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample } from './types'
+import { BACK_FLIP_LESSON, FRONT_FLIP_LESSON, FULL_FLIP_LESSON, FULL_FLIP_PHASE_IDS, fullFlipEvaluator } from './fullFlip'
+import type { LessonDefinition, TrainingCheckpointState, TrainingEvaluation, TrainingSample } from './types'
 
-function evaluateRecording(settings: TuningSettings, recording: ReturnType<typeof createTeachingDemonstration>['recording']) {
+function evaluateRecording(settings: TuningSettings, recording: ReturnType<typeof createTeachingDemonstration>['recording'], lesson: LessonDefinition = FULL_FLIP_LESSON) {
   const { launch, landing } = createTrainingFieldAnchors(settings.drone)
   const references = [
     { id: 'training-launch', kind: 'spawn', positionM: launch },
     { id: 'landing-surface', kind: 'ground', positionM: landing },
   ]
   const checkpoints: Record<string, TrainingCheckpointState> = {}
+  const interruptionReasons = new Set<number>()
   let previous: TrainingSample | null = null
   let evaluation: TrainingEvaluation | null = null
   for (const [index, pose] of recording.samples.entries()) {
@@ -31,30 +32,32 @@ function evaluateRecording(settings: TuningSettings, recording: ReturnType<typeo
         stepIndex: index, timeSeconds: pose.timestampSeconds },
     }
     evaluation = fullFlipEvaluator.evaluate(sample, {
-      lesson: FULL_FLIP_LESSON, mode: 'practice', elapsedSeconds: sample.timestampSeconds,
+      lesson, mode: 'practice', elapsedSeconds: sample.timestampSeconds,
       trajectory: [], checkpoints, sceneReferences: references, previousSample: previous,
       previousFlightSample: previous, previousEvaluation: evaluation,
     })
     expect(evaluation.status).not.toBe('failure')
+    if (evaluation.metrics?.flipInterruptionReason) interruptionReasons.add(evaluation.metrics.flipInterruptionReason)
     for (const id of evaluation.checkpointIds ?? []) checkpoints[id] = { id, completed: true, completedAtSeconds: pose.timestampSeconds, metrics: { ...evaluation.metrics } }
     previous = sample
   }
-  return { evaluation, checkpoints }
+  return { evaluation, checkpoints, interruptionReasons }
 }
 
 describe('actual full-flip teaching recording', () => {
   it.each([
-    ['full-flip', 'beginner'], ['full-flip', 'standard'], ['full-flip', 'raised-field'],
+    ['front-flip', 'beginner'], ['front-flip', 'standard'], ['front-flip', 'raised-field'],
     ['back-flip', 'beginner'], ['back-flip', 'standard'], ['back-flip', 'raised-field'],
   ] as const)('records %s from ground through a measured pitch turn and recovery with %s settings', (kind, preset) => {
-    const direction = kind === 'full-flip' ? 1 : -1
+    const direction = kind === 'front-flip' ? 1 : -1
+    const lesson = kind === 'front-flip' ? FRONT_FLIP_LESSON : BACK_FLIP_LESSON
     const base = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
     const settings = preset === 'raised-field' ? { ...base, drone: { ...base.drone,
       ground: { ...base.drone.ground, heightM: 10 }, spawnPositionM: { x: 6, y: 35, z: -3 } } } : base
     const before = JSON.stringify(settings)
     const demo = createTeachingDemonstration(settings, kind)
-    expect(demo).toMatchObject({ lessonId: 'full-flip', rulesVersion: 6, physicsVersion: 1, source: 'simulated' })
-    expect(demo.title).toContain('L11')
+    expect(demo).toMatchObject({ lessonId: kind, rulesVersion: 6, physicsVersion: 1, source: 'simulated' })
+    expect(demo.title).toContain(kind === 'front-flip' ? 'L11 前翻' : 'L12 後翻')
     expect(demo.title.replace(/^L\d+\s*/u, '')).not.toMatch(/[A-Za-z]/u)
     expect(demo.recording.samples[0].positionM).toEqual(createTrainingFieldAnchors(settings.drone).launch)
     expect(demo.recording).toMatchObject({ capacity: 7_500, decimation: 4, droppedSamples: 0 })
@@ -103,7 +106,7 @@ describe('actual full-flip teaching recording', () => {
     expect(observedInversion).toBe(true)
     expect(rollMotion).toBeLessThan(35)
     expect(yawMotion).toBeLessThan(35)
-    const { evaluation, checkpoints } = evaluateRecording(settings, demo.recording)
+    const { evaluation, checkpoints } = evaluateRecording(settings, demo.recording, lesson)
     expect(evaluation?.status).toBe('success')
     expect(FULL_FLIP_PHASE_IDS.every((id) => checkpoints[id]?.completed)).toBe(true)
     const end = demo.recording.samples.at(-1)!
@@ -120,7 +123,7 @@ describe('actual full-flip teaching recording', () => {
     const reset = vi.spyOn(FlightSimulation.prototype, 'resetForTraining')
     const step = vi.spyOn(FlightSimulation.prototype, 'step')
     try {
-      const demo = createTeachingDemonstration(createTuningPreset('beginner'), 'full-flip')
+      const demo = createTeachingDemonstration(createTuningPreset('beginner'), 'front-flip')
       expect(reset).toHaveBeenCalledTimes(1)
       expect(step.mock.calls.length).toBeGreaterThan(demo.recording.samples.length)
       expect(step.mock.calls.every(([input, dt]) => input !== null && dt === 1 / 240
@@ -132,22 +135,44 @@ describe('actual full-flip teaching recording', () => {
     }
   })
 
-  it.each(['full-flip', 'back-flip'] as const)('rejects settings unable to finish %s rather than manufacturing a completed movie', (kind) => {
+  it.each(['front-flip', 'back-flip'] as const)('does not award %s recording to the opposite directional lesson', (kind) => {
+    const settings = createTuningPreset('beginner')
+    const demo = createTeachingDemonstration(settings, kind)
+    const opposite = kind === 'front-flip' ? BACK_FLIP_LESSON : FRONT_FLIP_LESSON
+    const result = evaluateRecording(settings, demo.recording, opposite)
+    expect(result.evaluation?.status).not.toBe('success')
+    expect(result.checkpoints['flip-inverted']).toBeUndefined()
+    expect(result.checkpoints['flip-upright']).toBeUndefined()
+    expect(result.checkpoints['flip-recovered']).toBeUndefined()
+    expect(result.interruptionReasons.has(8)).toBe(true)
+    expect(result.evaluation?.metrics?.flipRequiredDirection).toBe(kind === 'front-flip' ? -1 : 1)
+  })
+
+  it('keeps the former combined movie and evaluator available without relabelling their lesson identity', () => {
+    const settings = createTuningPreset('beginner')
+    const historical = createTeachingDemonstration(settings, 'full-flip')
+    expect(historical).toMatchObject({ kind: 'full-flip', lessonId: 'full-flip', rulesVersion: 6 })
+    expect(evaluateRecording(settings, historical.recording, FULL_FLIP_LESSON).evaluation?.status).toBe('success')
+    const backward = createTeachingDemonstration(settings, 'back-flip')
+    expect(evaluateRecording(settings, backward.recording, FULL_FLIP_LESSON).evaluation?.status).toBe('success')
+  })
+
+  it.each(['front-flip', 'back-flip'] as const)('rejects settings unable to finish %s rather than manufacturing a completed movie', (kind) => {
     const defaults = createTuningPreset('beginner')
     const slow = { ...defaults, controller: { ...defaults.controller,
       rateLimitsDegPerSec: { ...defaults.controller.rateLimitsDegPerSec, pitch: 1 } } }
     expect(() => createTeachingDemonstration(slow, kind)).toThrow(/轉速|角速度|設定/)
   })
 
-  it.each(['full-flip', 'back-flip'] as const)('accepts an unbounded nullable pitch-rate limit for %s', (kind) => {
+  it.each(['front-flip', 'back-flip'] as const)('accepts an unbounded nullable pitch-rate limit for %s', (kind) => {
     const defaults = createTuningPreset('beginner')
     const settings = { ...defaults, controller: { ...defaults.controller,
       rateLimitsDegPerSec: { ...defaults.controller.rateLimitsDegPerSec, pitch: null } } }
     const demo = createTeachingDemonstration(settings, kind)
-    expect(evaluateRecording(settings, demo.recording).evaluation?.status).toBe('success')
+    expect(evaluateRecording(settings, demo.recording, kind === 'front-flip' ? FRONT_FLIP_LESSON : BACK_FLIP_LESSON).evaluation?.status).toBe('success')
   })
 
-  it.each(['full-flip', 'back-flip'] as const)('reads measured %s phases from its own movie clock and restores a backward seek', (kind) => {
+  it.each(['front-flip', 'back-flip'] as const)('reads measured %s phases from its own movie clock and restores a backward seek', (kind) => {
     const demo = createTeachingDemonstration(createTuningPreset('beginner'), kind)
     const inversion = demo.cues.find((cue) => cue.fullFlipPhase === 4)!
     expect(teachingFullFlipPhaseAt(demo, inversion.timeSeconds - 0.001)).toBe(3)

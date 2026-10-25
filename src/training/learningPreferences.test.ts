@@ -35,13 +35,37 @@ describe('local learning preferences', () => {
       expect(target.getItem(scoreKey)).toBe(historicalScores)
     }
   })
-  it('canonicalizes a retired selection on an explicit save while preserving mode and knowledge completion', () => {
+  it('resumes the retired combined flip selection at L11 without rewriting scores or granting either directional completion', () => {
+    for (const mode of ['practice', 'challenge'] as const) {
+      const original = JSON.stringify({ ...DEFAULT_LEARNING_PREFERENCES, introCompleted: true, lastLessonId: 'full-flip', mode })
+      const target = memory(original)
+      const scoreKey = 'fpv-drone-trainer.training-progress.v1'
+      const historicalScores = '{"lessons":{"full-flip":{"attempts":2,"completed":true},"full-roll":{"attempts":3,"completed":true}}}'
+      target.setItem(scoreKey, historicalScores)
+      expect(loadLearningPreferences(target)).toEqual({
+        loaded: true, error: null,
+        preferences: { ...DEFAULT_LEARNING_PREFERENCES, introCompleted: true, lastLessonId: 'front-flip', mode },
+      })
+      expect(target.getItem(LEARNING_PREFERENCES_KEY)).toBe(original)
+      expect(target.getItem(scoreKey)).toBe(historicalScores)
+    }
+  })
+  it.each([
+    ['hover', 'takeoff'],
+    ['full-flip', 'front-flip'],
+  ])('canonicalizes retired %s on an explicit save while preserving mode and knowledge completion', (retiredId, currentId) => {
     const target = memory()
-    const retired = { ...DEFAULT_LEARNING_PREFERENCES, lastLessonId: 'hover', introCompleted: true, mode: 'challenge' as const }
+    const retired = { ...DEFAULT_LEARNING_PREFERENCES, lastLessonId: retiredId, introCompleted: true, mode: 'challenge' as const }
     expect(saveLearningPreferences(retired, target)).toEqual({ saved: true, error: null })
-    expect(JSON.parse(target.getItem(LEARNING_PREFERENCES_KEY)!)).toEqual({ ...retired, lastLessonId: 'takeoff' })
-    expect(loadLearningPreferences(target).preferences).toEqual({ ...retired, lastLessonId: 'takeoff' })
+    expect(JSON.parse(target.getItem(LEARNING_PREFERENCES_KEY)!)).toEqual({ ...retired, lastLessonId: currentId })
+    expect(loadLearningPreferences(target).preferences).toEqual({ ...retired, lastLessonId: currentId })
     expect(target.getItem('fpv-drone-trainer.training-progress.v1')).toBeNull()
+  })
+  it.each(['front-flip', 'back-flip'])('resumes the new directional %s lesson independently', (lessonId) => {
+    const target = memory()
+    const next = { ...DEFAULT_LEARNING_PREFERENCES, lastLessonId: lessonId }
+    expect(saveLearningPreferences(next, target)).toEqual({ saved: true, error: null })
+    expect(loadLearningPreferences(target).preferences).toEqual(next)
   })
   it('reports inaccessible storage without throwing or disabling practice', () => {
     const target = { getItem: () => null, setItem: () => { throw new Error('quota') }, removeItem: () => undefined }

@@ -41,6 +41,7 @@ import {
   FULL_ROLL_TIME_LIMIT_SECONDS as ROLL_TIME_LIMIT,
 } from './fullRoll'
 import {
+  fullFlipRequiredDirection,
   FULL_FLIP_AREA_RADIUS_M as FLIP_AREA_RADIUS,
   FULL_FLIP_TARGET_HEIGHT_M as FLIP_TARGET_HEIGHT,
   FULL_FLIP_MIN_PREPARATION_HEIGHT_M as FLIP_PREP_HEIGHT,
@@ -62,6 +63,15 @@ import {
   STRAIGHT_LINE_ROUTE_LENGTH_M,
   STRAIGHT_LINE_TRANSIT_DISTANCE_M,
 } from './straightLine'
+
+function isFullFlipLesson(lessonId: string | null): boolean {
+  return lessonId === 'full-flip' || fullFlipRequiredDirection(lessonId ?? '') !== 0
+}
+
+function flipCourseDirection(lessonId: string | null): string | null {
+  const required = fullFlipRequiredDirection(lessonId ?? '')
+  return required === 1 ? '前翻' : required === -1 ? '後翻' : null
+}
 
 export interface TrainingMetricDisplay {
   readonly key: string
@@ -133,6 +143,8 @@ const METRICS: Readonly<Record<string, MetricDefinition>> = {
   rollDirection: { label: '橫滾方向', unit: '', digits: 0 },
   flipProgressDegrees: { label: '本圈翻轉進度', unit: '/ 360°', digits: 1 },
   flipDirection: { label: '翻轉方向', unit: '', digits: 0 },
+  interruptionFlipDirection: { label: '中斷時翻轉方向', unit: '', digits: 0 },
+  interruptionFlipProgressDegrees: { label: '中斷時翻轉進度', unit: '°', digits: 1 },
   positionErrorM: { label: '位置偏差', unit: 'm', digits: 2 },
   radialErrorM: { label: '繞行半徑偏差', unit: 'm', digits: 2 },
   orbitRadiusM: { label: '繞行半徑', unit: 'm', digits: 2 },
@@ -173,7 +185,10 @@ function metricPriorities(metrics: Readonly<Record<string, number>>, lessonId: s
       ? ['rollProgressDegrees', 'tiltDegrees', 'recoveryDwellSeconds']
       : ['rollProgressDegrees', 'rollDirection', 'altitudeM']
   }
-  if (lessonId === 'full-flip') {
+  if (isFullFlipLesson(lessonId)) {
+    if (metrics.flipInterrupted > 0.5 && metrics.flipInterruptionReason === 8) return ['interruptionFlipDirection', 'interruptionFlipProgressDegrees', 'altitudeM']
+    const required = fullFlipRequiredDirection(lessonId ?? '')
+    if (required !== 0 && metrics.flipDirection !== 0 && Number.isFinite(metrics.flipDirection) && metrics.flipDirection !== required) return ['flipDirection', 'flipProgressDegrees', 'altitudeM']
     if (metrics.flipPhase <= 1 || metrics.groundTouching > 0.5) return ['altitudeM', 'groundTouching', 'flipProgressDegrees']
     if (metrics.insideFlipArea === 0) return ['launchDistanceM', 'altitudeM', 'flipProgressDegrees']
     if (Number.isFinite(metrics.altitudeM) && metrics.altitudeM < FLIP_MIN_HEIGHT) return ['altitudeM', 'verticalSpeedMps', 'flipProgressDegrees']
@@ -266,18 +281,18 @@ export function formatTrainingMetrics(
     const displayed = definition.transform?.(value) ?? value
     return [{
       key,
-      label: (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'full-flip') && key === 'verticalSpeedMps' ? '升降速度（上＋／下−）'
-        : (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'full-flip') && key === 'altitudeM' ? '離地高度'
-        : lessonId === 'full-flip' && key === 'preparationDwellSeconds' ? '翻轉準備確認'
-        : lessonId === 'full-flip' && key === 'recoveryDwellSeconds' ? '正飛恢復確認'
+      label: (lessonId === 'basic-recovery' || lessonId === 'full-roll' || isFullFlipLesson(lessonId)) && key === 'verticalSpeedMps' ? '升降速度（上＋／下−）'
+        : (lessonId === 'basic-recovery' || lessonId === 'full-roll' || isFullFlipLesson(lessonId)) && key === 'altitudeM' ? '離地高度'
+        : isFullFlipLesson(lessonId) && key === 'preparationDwellSeconds' ? '翻轉準備確認'
+        : isFullFlipLesson(lessonId) && key === 'recoveryDwellSeconds' ? '正飛恢復確認'
         : lessonId === 'full-roll' && key === 'preparationDwellSeconds' ? '橫滾準備確認'
         : lessonId === 'full-roll' && key === 'recoveryDwellSeconds' ? '正飛恢復確認'
         : lessonId === 'wide-gate' && key === 'gatesPassed' ? '已通過寬門'
         : lessonId === 'wide-gate' && key === 'nextGateDistanceM' ? '距目前門平面（前＋／後−）' : definition.label,
       value: key === 'groundTouching' ? value > 0.5 ? '已接地' : '尚未接地'
-        : lessonId === 'full-flip' && key === 'flipDirection' ? value === 1 ? '前翻' : value === -1 ? '後翻' : '尚未選定'
-        : lessonId === 'full-flip' && key === 'preparationDwellSeconds' ? `${displayed.toFixed(2)} / ${FLIP_PREP_SECONDS.toFixed(2)} s`
-        : lessonId === 'full-flip' && key === 'recoveryDwellSeconds' ? `${displayed.toFixed(2)} / ${FLIP_HOLD_SECONDS.toFixed(2)} s`
+        : isFullFlipLesson(lessonId) && (key === 'flipDirection' || key === 'interruptionFlipDirection') ? value === 1 ? '前翻' : value === -1 ? '後翻' : flipCourseDirection(lessonId) ? `尚未開始${flipCourseDirection(lessonId)}` : '尚未選定'
+        : isFullFlipLesson(lessonId) && key === 'preparationDwellSeconds' ? `${displayed.toFixed(2)} / ${FLIP_PREP_SECONDS.toFixed(2)} s`
+        : isFullFlipLesson(lessonId) && key === 'recoveryDwellSeconds' ? `${displayed.toFixed(2)} / ${FLIP_HOLD_SECONDS.toFixed(2)} s`
         : lessonId === 'full-roll' && key === 'rollDirection' ? value === 1 ? '向右' : value === -1 ? '向左' : '尚未選定'
         : lessonId === 'full-roll' && key === 'preparationDwellSeconds' ? `${displayed.toFixed(2)} / ${ROLL_PREP_SECONDS.toFixed(2)} s`
         : lessonId === 'full-roll' && key === 'recoveryDwellSeconds' ? `${displayed.toFixed(2)} / ${ROLL_HOLD_SECONDS.toFixed(2)} s`
@@ -331,6 +346,8 @@ const LESSON_HINTS: Readonly<Record<string, string>> = {
   'basic-recovery': `從地面自行起飛到約 ${RECOVERY_TARGET_HEIGHT} m，按提示製造小幅傾斜、下沉與漂移，再親手修正；先偵測到實際偏差，才開始判定恢復。`,
   'full-roll': `從地面自行起飛到約 ${ROLL_TARGET_HEIGHT} m，短暫準備後向左或右完成一圈橫滾，再停止旋轉並恢復正飛與控制。`,
   'full-flip': `從地面自行起飛到約 ${FLIP_TARGET_HEIGHT} m，短暫準備後選擇前翻或後翻，沿俯仰軸完成一圈，再停止旋轉並恢復正飛與控制。`,
+  'front-flip': `本課練前翻。從地面自行起飛到約 ${FLIP_TARGET_HEIGHT} m，短暫準備後向前翻一圈，再恢復正飛與控制；後翻不計入本課。`,
+  'back-flip': `本課練後翻。從地面自行起飛到約 ${FLIP_TARGET_HEIGHT} m，短暫準備後向後翻一圈，再恢復正飛與控制；前翻不計入本課。`,
   'split-s': '先確認進入高度，再依序完成倒置、下降半圈與恢復正向。',
   orbit: '沿目標周圍保持同一繞行方向，先穩住半徑與高度。',
 }
@@ -489,7 +506,7 @@ export function fullFlipStageLabel(phase: number): string {
 }
 
 /** Captured interruption facts survive returning to height/area until a new episode is ready. */
-export function fullFlipInterruptionReason(metrics: Readonly<Record<string, number>>): string | null {
+export function fullFlipInterruptionReason(metrics: Readonly<Record<string, number>>, lessonId: string | null = null): string | null {
   if (!(metrics.flipInterrupted > 0.5)) return null
   const height = Number.isFinite(metrics.interruptionAltitudeM) ? `${metrics.interruptionAltitudeM.toFixed(1)} m` : null
   const distance = Number.isFinite(metrics.interruptionLaunchDistanceM) ? `${metrics.interruptionLaunchDistanceM.toFixed(1)} m` : null
@@ -499,13 +516,20 @@ export function fullFlipInterruptionReason(metrics: Readonly<Record<string, numb
     case 3: return `中斷時${distance ? `距起飛點 ${distance}` : '已離開練習區'}，超出半徑 ${FLIP_AREA_RADIUS} m。`
     case 4: return `這一圈的橫滾／偏航旋轉累積${Number.isFinite(metrics.interruptionOffAxisDegrees) ? `約 ${metrics.interruptionOffAxisDegrees.toFixed(1)}°` : '過多'}，已偏離翻轉軸；下次主要使用俯仰，減少橫滾與偏航。`
     case 5: return '這一圈持續過轉，已超出可接受的完整翻轉範圍；下次接近正飛時提早回中減緩旋轉。'
-    case 6: return '這一圈反向轉過了起始姿態；下次選定前翻或後翻後，沿同一方向完成一整圈。'
+    case 6: return `這一圈反向轉過了起始姿態；下次${flipCourseDirection(lessonId) ? `依本課要求${flipCourseDirection(lessonId)}` : '選定前翻或後翻後'}，沿同一方向完成一整圈。`
     case 7: return `準備後尚未開始翻轉便降到${height ? `離地 ${height}` : '準備高度以下'}；先升回至少 ${FLIP_PREP_HEIGHT} m，再重新準備。`
+    case 8: {
+      const required = lessonId === null ? metrics.flipRequiredDirection : fullFlipRequiredDirection(lessonId)
+      const expected = required === 1 ? '前翻' : required === -1 ? '後翻' : null
+      const observed = metrics.interruptionFlipDirection === 1 ? '前翻' : metrics.interruptionFlipDirection === -1 ? '後翻' : null
+      const progress = Number.isFinite(metrics.interruptionFlipProgressDegrees) ? `約 ${Math.max(0, metrics.interruptionFlipProgressDegrees).toFixed(1)}°` : ''
+      return `${expected ? `本課練${expected}` : '本次翻轉方向不符合課程要求'}；${observed ? `中斷時往${observed}${progress}` : '尚未取得指定方向的有效證據'}，這一圈不計入本課。先回正重新準備，再${expected ? `以${expected}` : '依本課指定方向'}完整翻一圈。`
+    }
     default: return null
   }
 }
 
-function fullFlipPreparation(metrics: Readonly<Record<string, number>>): string {
+function fullFlipPreparation(metrics: Readonly<Record<string, number>>, lessonId: string | null): string {
   if (Number.isFinite(metrics.altitudeM) && metrics.altitudeM < FLIP_PREP_HEIGHT) return `目前離地 ${metrics.altitudeM.toFixed(1)} m；先升回至少 ${FLIP_PREP_HEIGHT} m，建議約 ${FLIP_TARGET_HEIGHT} m，再開始完整翻轉。`
   if (Number.isFinite(metrics.tiltDegrees) && metrics.tiltDegrees > FLIP_PREP_TILT) return `目前傾角 ${metrics.tiltDegrees.toFixed(1)}°；先主動帶回 ${FLIP_PREP_TILT}° 內，再開始翻轉。`
   if (Number.isFinite(metrics.bodyRateDegreesPerSecond) && metrics.bodyRateDegreesPerSecond > FLIP_MAX_RATE) return `目前機身旋轉速度 ${metrics.bodyRateDegreesPerSecond.toFixed(1)}°/s；先回中並小量修正，減緩到 ${FLIP_MAX_RATE}°/s 內再準備。`
@@ -514,10 +538,10 @@ function fullFlipPreparation(metrics: Readonly<Record<string, number>>): string 
   const dwell = Number.isFinite(metrics.preparationDwellSeconds)
     ? `準備確認 ${Math.max(0, Math.min(FLIP_PREP_SECONDS, metrics.preparationDwellSeconds)).toFixed(2)}／${FLIP_PREP_SECONDS.toFixed(2)} s。`
     : `連續準備 ${FLIP_PREP_SECONDS.toFixed(2)} s。`
-  return `${dwell}保持離地至少 ${FLIP_PREP_HEIGHT} m、傾角 ${FLIP_PREP_TILT}° 內，稍微降低升降與漂移；準備完成後再選前翻或後翻，不要求固定位置懸停。`
+  return `${dwell}保持離地至少 ${FLIP_PREP_HEIGHT} m、傾角 ${FLIP_PREP_TILT}° 內，稍微降低升降與漂移；準備完成後${flipCourseDirection(lessonId) ? `再開始${flipCourseDirection(lessonId)}` : '再選前翻或後翻'}，不要求固定位置懸停。`
 }
 
-function fullFlipObjective(metrics: Readonly<Record<string, number>>): TrainingObjective {
+function fullFlipObjectiveBase(metrics: Readonly<Record<string, number>>, lessonId: string | null): TrainingObjective {
   const phase = Number.isInteger(metrics.flipPhase) && metrics.flipPhase >= 0 && metrics.flipPhase <= 6 ? metrics.flipPhase : 0
   if (phase === 6) return {
     title: '6／6 完整翻轉與正飛恢復完成',
@@ -533,7 +557,7 @@ function fullFlipObjective(metrics: Readonly<Record<string, number>>): TrainingO
   const reprepare = `先前步驟保留，但本圈需要重新準備並完成一整圈，舊的倒置或回正標記不代替本圈證據。`
   if (!(metrics.flipEpisodeValid > 0.5) && interrupted) return {
     title,
-    detail: `本圈翻轉已中斷。${fullFlipInterruptionReason(metrics) ?? ''}${reprepare}${fullFlipPreparation(metrics)}`,
+    detail: `本圈翻轉已中斷。${fullFlipInterruptionReason(metrics, lessonId) ?? ''}${reprepare}${fullFlipPreparation(metrics, lessonId)}`,
   }
   if (metrics.groundTouching > 0.5) return {
     title,
@@ -549,11 +573,11 @@ function fullFlipObjective(metrics: Readonly<Record<string, number>>): TrainingO
   }
   if (!(metrics.flipEpisodeValid > 0.5)) return {
     title,
-    detail: fullFlipPreparation(metrics),
+    detail: fullFlipPreparation(metrics, lessonId),
   }
   const progress = Number.isFinite(metrics.flipProgressDegrees)
     ? `本圈已觀察到約 ${Math.max(0, Math.min(360, metrics.flipProgressDegrees)).toFixed(1)}°。` : ''
-  const direction = metrics.flipDirection === 1 ? '前翻' : metrics.flipDirection === -1 ? '後翻' : null
+  const direction = metrics.flipDirection === 1 ? '前翻' : metrics.flipDirection === -1 ? '後翻' : flipCourseDirection(lessonId)
   if (!(metrics.flipCompleted > 0.5)) {
     if (!(metrics.flipInverted > 0.5)) return {
       title,
@@ -575,6 +599,22 @@ function fullFlipObjective(metrics: Readonly<Record<string, number>>): TrainingO
     title,
     detail: `${progress}已完成本圈翻轉，現在停止旋轉並恢復正飛。${blockers.length ? `${blockers.slice(0, 2).join('；')}。` : `將機身主動帶回 ${FLIP_RECOVERY_TILT}° 內，以小量油門止住過快升降。`}${dwell}保持空中、至少 ${FLIP_MIN_HEIGHT} m 高度，連續確認 ${FLIP_HOLD_SECONDS} 秒即可；不要求回原位置或降落。手動角速度模式下回中只停止旋轉，回平與減速仍需自行修正。`,
   }
+}
+
+function fullFlipObjective(metrics: Readonly<Record<string, number>>, lessonId: string | null): TrainingObjective {
+  const required = fullFlipRequiredDirection(lessonId ?? '')
+  const expected = flipCourseDirection(lessonId)
+  const observed = metrics.flipDirection === 1 ? '前翻' : metrics.flipDirection === -1 ? '後翻' : null
+  if (required !== 0 && observed !== null && metrics.flipDirection !== required) return {
+    title: '翻轉方向不符本課要求',
+    detail: `本課練${expected}；剛才往${observed}${Number.isFinite(metrics.flipProgressDegrees) ? `約 ${Math.max(0, metrics.flipProgressDegrees).toFixed(1)}°` : ''}，不能計入本課。先回正重新準備，再以${expected}完整翻一圈；舊的倒置或回正標記不能代替指定方向。`,
+  }
+  if (required !== 0 && metrics.flipPhase === 6 && metrics.flipDirection !== required) return {
+    title: '尚未確認本課方向',
+    detail: `本課練${expected}；目前缺少指定方向的實際旋轉證據，不能只憑完成標記判定通過。先回正重新準備，再以${expected}完成新的一圈。`,
+  }
+  const objective = fullFlipObjectiveBase(metrics, lessonId)
+  return expected ? { ...objective, detail: `本課練${expected}。${objective.detail}` } : objective
 }
 
 function basicRecoveryPreparationLimits(metrics: Readonly<Record<string, number>>) {
@@ -882,7 +922,7 @@ export function trainingObjective(
 ): TrainingObjective | null {
   const metrics = evaluation?.metrics ?? {}
   if (lessonId === 'full-roll') return fullRollObjective(metrics)
-  if (lessonId === 'full-flip') return fullFlipObjective(metrics)
+  if (isFullFlipLesson(lessonId)) return fullFlipObjective(metrics, lessonId)
   if (lessonId === 'basic-recovery') return basicRecoveryObjective(metrics)
   if (lessonId === 'wide-gate') return wideGateObjective(metrics)
   if (lessonId === 'direction-control') return directionObjective(metrics)
@@ -930,7 +970,8 @@ export function trainingObjective(
 /** Short route instructions remain visible before a lesson starts. */
 export function trainingRouteGuide(lessonId: string | null): string | null {
   if (lessonId === 'full-roll') return `地面自行起飛至至少 ${ROLL_PREP_HEIGHT} m（建議約 ${ROLL_TARGET_HEIGHT} m）→ 短暫準備 ${ROLL_PREP_SECONDS} 秒 → 選左或右連續橫滾一圈 → 回中減緩旋轉、主動修回正飛 → 空中恢復控制 ${ROLL_HOLD_SECONDS} 秒。沿機頭到機尾的軸翻轉，需觀察到本圈實際倒置與完整橫滾；反向翻回、原地偏航或前後翻轉不代替 Roll。練習區為起飛點半徑 ${ROLL_AREA_RADIUS} m，恢復時保留至少 ${ROLL_MIN_HEIGHT} m 高度，不要求回原位置或降落。接地、過低或離區中斷本圈後，先重新準備，再完整做一圈；先前步驟保留。引導練習不限時，挑戰 ${ROLL_TIME_LIMIT} 秒。`
-  if (lessonId === 'full-flip') return `地面自行起飛至至少 ${FLIP_PREP_HEIGHT} m（建議約 ${FLIP_TARGET_HEIGHT} m）→ 短暫準備 ${FLIP_PREP_SECONDS} 秒 → 選前翻或後翻連續翻轉一圈 → 回中減緩旋轉、主動修回正飛 → 空中恢復控制 ${FLIP_HOLD_SECONDS} 秒。沿機身左右兩側的俯仰軸翻轉，需觀察到本圈實際倒置與完整翻轉；反向翻回、原地偏航或左右橫滾不能代替完整前後翻轉。練習區為起飛點半徑 ${FLIP_AREA_RADIUS} m，恢復時保留至少 ${FLIP_MIN_HEIGHT} m 高度，不要求回原位置或降落。接地、過低或離區中斷本圈後，先重新準備，再完整做一圈；先前步驟保留。引導練習不限時，挑戰 ${FLIP_TIME_LIMIT} 秒。`
+  if (fullFlipRequiredDirection(lessonId ?? '') !== 0) return `本課練${flipCourseDirection(lessonId)}。地面自行起飛至至少 ${FLIP_PREP_HEIGHT} m（建議約 ${FLIP_TARGET_HEIGHT} m）→ 短暫準備 ${FLIP_PREP_SECONDS} 秒 → 沿俯仰軸連續${flipCourseDirection(lessonId)}一整圈 → 回中減緩旋轉、主動修回正飛 → 空中恢復控制 ${FLIP_HOLD_SECONDS} 秒。必須觀察到指定方向的實際倒置與完整一圈；反方向翻轉不計入本課，先回正重新準備後再練。練習區為起飛點半徑 ${FLIP_AREA_RADIUS} m，恢復時保留至少 ${FLIP_MIN_HEIGHT} m 高度，不要求回原位置或降落。中斷後先前步驟保留，但需完整做新的一圈。引導練習不限時，挑戰 ${FLIP_TIME_LIMIT} 秒。`
+  if (isFullFlipLesson(lessonId)) return `地面自行起飛至至少 ${FLIP_PREP_HEIGHT} m（建議約 ${FLIP_TARGET_HEIGHT} m）→ 短暫準備 ${FLIP_PREP_SECONDS} 秒 → 選前翻或後翻連續翻轉一圈 → 回中減緩旋轉、主動修回正飛 → 空中恢復控制 ${FLIP_HOLD_SECONDS} 秒。沿機身左右兩側的俯仰軸翻轉，需觀察到本圈實際倒置與完整翻轉；反向翻回、原地偏航或左右橫滾不能代替完整前後翻轉。練習區為起飛點半徑 ${FLIP_AREA_RADIUS} m，恢復時保留至少 ${FLIP_MIN_HEIGHT} m 高度，不要求回原位置或降落。接地、過低或離區中斷本圈後，先重新準備，再完整做一圈；先前步驟保留。引導練習不限時，挑戰 ${FLIP_TIME_LIMIT} 秒。`
   if (lessonId === 'basic-recovery') return `地面自行起飛至 ${RECOVERY_PREP_HEIGHT} m 以上（建議約 ${RECOVERY_TARGET_HEIGHT} m）→ 按提示製造小幅傾斜並修回水平 → 稍收油門產生下沉並補油止降 → 建立水平漂移並減速回平。每項先確認實際偏差，再確認恢復 ${RECOVERY_HOLD_SECONDS} 秒；各段只準備目前要練的動作，確認 ${RECOVERY_PREP_SECONDS} 秒後才開始。練習區為起飛點半徑 ${RECOVERY_AREA_RADIUS} m，恢復時保持空中且高度至少 ${RECOVERY_MIN_HEIGHT} m；接地或過低會中斷本項，先前完成的整項保留，重新準備後再製造本項偏差；出區會暫停確認，回區後可繼續有效的恢復。不要求回到固定座標或精準懸停，全程由你操控。引導練習不限時，挑戰 ${RECOVERY_TIME_LIMIT} 秒。`
   if (lessonId === 'wide-gate') return '地面起飛 → 前方 8 m 第一道門 → 16 m 第二道門 → 24 m 第三道門。三道門洞寬、高各 4 m，中心離地 3 m；依序從門前向前穿過，反向穿越不算。門框是實體障礙，碰到柱子或橫樑會墜毀；對準中心並為機身、槳葉留出空間。漏門可回該門前補飛，已通過的門及未墜毀接地的進度會保留；不要求精準速度、朝向、停留或降落。引導練習不限時，挑戰 240 秒。'
   if (lessonId === 'figure-eight') return '地面起飛 → 中央入口 → 左圈 → 中央換向點 → 右圈 → 中央空中終點。中央區位於起飛點前方 6 m；相同位置要依順序經過，不能提早當作終點。沿淡色八字路線依序飛入亮起目標，先左轉再右轉；目標半徑 1.8 m，不要求精準速度、停留或降落。漏點及未墜毀接地保留進度，方位提示依目前機頭，XYZ 維持固定場地方向。引導練習不限時，挑戰 300 秒。'
@@ -963,7 +1004,7 @@ export function trainingHint(
     const objective = fullRollObjective(evaluation.metrics)
     return `${objective.title}：${objective.detail}`
   }
-  if (lessonId === 'full-flip' && evaluation?.status === 'failure') {
+  if (isFullFlipLesson(lessonId) && evaluation?.status === 'failure') {
     const restart = '本次練習已結束；按「再練一次」會清空本次步驟，從地面重新開始。'
     if (/墜毀|撞擊|crash|impact|Obstacle collision:/iu.test(message ?? '')) return `本次發生墜毀，完整翻轉練習已停止；先重設場景。${restart}`
     if (/解除解鎖|失焦|斷線|disarm|focus|disconnect/iu.test(message ?? '')) return `本次因解除解鎖、失去焦點或連線中斷而停止；確認網頁與控制器就緒，倒數結束後再明確解鎖。${restart}`
@@ -971,8 +1012,8 @@ export function trainingHint(
     if (/逾時|timed out|timeout/iu.test(message ?? '')) return `本次完整翻轉挑戰逾時。${restart}`
     return `本次完整翻轉尚未完成。${restart}`
   }
-  if (lessonId === 'full-flip' && evaluation?.status === 'continue' && evaluation.metrics && evaluation.recovery !== 'restart') {
-    const objective = fullFlipObjective(evaluation.metrics)
+  if (isFullFlipLesson(lessonId) && evaluation?.status === 'continue' && evaluation.metrics && evaluation.recovery !== 'restart') {
+    const objective = fullFlipObjective(evaluation.metrics, lessonId)
     return `${objective.title}：${objective.detail}`
   }
   if (lessonId === 'basic-recovery' && evaluation?.status === 'failure') {

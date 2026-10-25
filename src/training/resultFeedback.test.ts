@@ -971,3 +971,60 @@ describe('L11 observed front and back flip results', () => {
     expect(feedback.nextPractice).toContain('清空本次步驟')
   })
 })
+
+describe('separate directional flip results', () => {
+  const complete = { flipPhase: 6, flipEpisodeValid: 1, flipCompleted: 1, flipInverted: 1,
+    flipDirection: 1, flipRequiredDirection: 1, flipProgressDegrees: 360, flipInterrupted: 0 }
+  const courses = [['front-flip', 1, '前翻', '後翻'], ['back-flip', -1, '後翻', '前翻']] as const
+  const directedResult = (lessonId: string, metrics: Readonly<Record<string, number>>): TrainingResult => ({
+    ...result, lessonId, totalCheckpoints: 6, completedCheckpoints: 6, outcome: 'SUCCESS',
+    attemptContext: { ...currentContext, rulesVersion: 6 }, metrics,
+  })
+
+  it.each(courses)('recognizes only the measured matching direction for %s', (id, direction, expected) => {
+    const feedback = summarizeTrainingResult(directedResult(id, { ...complete,
+      flipDirection: direction, flipRequiredDirection: -direction }))
+    expect(feedback.observedStrength).toContain(`實際倒置與${expected}一整圈`)
+    expect(feedback.observedGap).toBeNull()
+    expect(feedback.nextPractice).toContain(`再練一次${expected}`)
+    expect(feedback.nextPractice).toContain('另一方向須在另一堂課獨立完成')
+  })
+
+  it.each(courses)('does not turn an opposite full rotation or stale requirement into %s credit', (id, direction, expected, opposite) => {
+    const feedback = summarizeTrainingResult(directedResult(id, { ...complete,
+      flipDirection: -direction, flipRequiredDirection: -direction }))
+    expect(feedback.observedStrength).toBeNull()
+    expect(feedback.observedGap).toContain(`本課練${expected}；本次觀察到${opposite}約 360.0°`)
+    expect(feedback.observedGap).toContain('不能計入本課')
+    expect(feedback.nextPractice).toContain('先回正重新準備')
+    expect(feedback.nextPractice).toContain(`以${expected}完成同一方向的一整圈`)
+  })
+
+  it.each(courses)('does not derive the missing measured direction from required-direction metadata in %s', (id, direction) => {
+    const feedback = summarizeTrainingResult(directedResult(id, { ...complete,
+      flipDirection: 0, flipRequiredDirection: direction }))
+    expect(feedback.observedStrength).toBeNull()
+    expect(feedback.observedGap).toContain('分段資料不足')
+    expect(feedback.observedGap).not.toContain('已完成')
+  })
+
+  it.each(courses)('reports captured direction errors on timeout in %s', (id, direction, expected, opposite) => {
+    const feedback = summarizeTrainingResult({ ...directedResult(id, { ...complete,
+      flipPhase: 5, flipEpisodeValid: 0, flipDirection: 0, flipRequiredDirection: -direction,
+      flipInterrupted: 1, flipInterruptionReason: 8, interruptionFlipDirection: -direction,
+      interruptionFlipProgressDegrees: 21.7 }), outcome: 'FAILED', message: '翻轉挑戰逾時。' })
+    expect(feedback.observedStrength).toBeNull()
+    expect(feedback.observedGap).toContain('本次挑戰逾時')
+    expect(feedback.observedGap).toContain(`本課練${expected}`)
+    expect(feedback.observedGap).toContain(`中斷時往${opposite}約 21.7°`)
+    expect(feedback.nextPractice).toContain('清空本次步驟')
+  })
+
+  it.each(courses)('preserves crash cause before wrong-direction result metadata in %s', (id, direction) => {
+    const feedback = summarizeTrainingResult({ ...directedResult(id, { ...complete,
+      flipDirection: -direction }), outcome: 'FAILED', message: 'Ground impact latched a crash.' })
+    expect(feedback.observedStrength).toBeNull()
+    expect(feedback.observedGap).toContain('本次發生墜毀')
+    expect(feedback.observedGap).not.toContain('本次觀察到')
+  })
+})

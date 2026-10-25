@@ -5,11 +5,12 @@ import { IDENTITY_QUATERNION, integrateBodyAngularVelocity, quaternionFromRotati
 import type { Vector3 } from '../math/vector'
 import { createTrainingFieldAnchors } from './field'
 import { TrainingSession } from './machine'
-import type { TrainingCheckpointState, TrainingEvaluation, TrainingEvaluationContext, TrainingSample, TrainingSceneReference } from './types'
+import type { LessonDefinition, TrainingCheckpointState, TrainingEvaluation, TrainingEvaluationContext, TrainingSample, TrainingSceneReference } from './types'
 import {
+  BACK_FLIP_LEARNING_CONTENT, BACK_FLIP_LESSON, FRONT_FLIP_LEARNING_CONTENT, FRONT_FLIP_LESSON,
   FULL_FLIP_COMPLETION_DEGREES, FULL_FLIP_HOLD_SECONDS, FULL_FLIP_LEARNING_CONTENT, FULL_FLIP_LESSON,
   FULL_FLIP_MIN_HEIGHT_M, FULL_FLIP_PHASE_IDS, FULL_FLIP_PREPARATION_SECONDS, FULL_FLIP_TARGET_HEIGHT_M,
-  FULL_FLIP_TIME_LIMIT_SECONDS, fullFlipEvaluator, measureFullFlipMotion,
+  FULL_FLIP_TIME_LIMIT_SECONDS, fullFlipEvaluator, fullFlipRequiredDirection, measureFullFlipMotion,
 } from './fullFlip'
 
 const STEP = 0.05
@@ -53,7 +54,8 @@ class Observer {
   private orientation: Quaternion = IDENTITY_QUATERNION
   private rate: Vector3 = ZERO
 
-  public constructor(public readonly config = DEFAULT_DRONE_CONFIG, phase = 0, position?: Vector3, orientation = IDENTITY_QUATERNION) {
+  public constructor(public readonly config = DEFAULT_DRONE_CONFIG, phase = 0, position?: Vector3, orientation = IDENTITY_QUATERNION,
+    private readonly lesson: LessonDefinition = FULL_FLIP_LESSON) {
     this.position = position ?? createTrainingFieldAnchors(config).launch
     this.orientation = orientation
     this.checkpointStates = checkpoints(phase)
@@ -76,6 +78,7 @@ class Observer {
     this.position = current.state.positionM
     const previous = this.trace.at(-1)
     this.evaluation = fullFlipEvaluator.evaluate(current, context(0, {
+      lesson: this.lesson,
       elapsedSeconds: current.timestampSeconds, checkpoints: this.checkpointStates, sceneReferences: references(this.config),
       previousSample: previous, previousFlightSample: previous, previousEvaluation: this.evaluation, ...override,
     }))
@@ -104,8 +107,8 @@ class Observer {
   }
 }
 
-function prepared(config = DEFAULT_DRONE_CONFIG, headingRadians = 0): Observer {
-  const observer = new Observer(config, 0, undefined, quaternionFromRotationVector({ x: 0, y: headingRadians, z: 0 }))
+function prepared(config = DEFAULT_DRONE_CONFIG, headingRadians = 0, lesson = FULL_FLIP_LESSON): Observer {
+  const observer = new Observer(config, 0, undefined, quaternionFromRotationVector({ x: 0, y: headingRadians, z: 0 }), lesson)
   observer.safe()
   observer.repeat(40, { velocity: { x: 0, y: 5, z: 0 } })
   observer.repeat(5)
@@ -119,6 +122,86 @@ function directOptions(phase: number, current: TrainingSample, previous: Trainin
 }
 
 describe('ground-start complete front/back flip lesson', () => {
+  const directionalLessons = [
+    { lesson: FRONT_FLIP_LESSON, direction: 1, title: '前翻' },
+    { lesson: BACK_FLIP_LESSON, direction: -1, title: '後翻' },
+  ] as const
+
+  it.each(directionalLessons)('completes only the measured $title direction in its separate lesson', ({ lesson, direction }) => {
+    const observer = prepared(DEFAULT_DRONE_CONFIG, 1.2, lesson)
+    observer.turn(direction * 360)
+    observer.repeat(8)
+    expect(observer.evaluation?.status).toBe('success')
+    expect(observer.evaluation?.metrics).toMatchObject({ flipPhase: 6, flipRequiredDirection: direction, flipDirection: direction })
+    expect(observer.evaluation?.metrics?.flipSignedDegrees).toBeCloseTo(direction * 360, 8)
+    expect(observer.trace.every(({ normalizedInput }) => normalizedInput?.pitch === 0)).toBe(true)
+  })
+
+  it.each(directionalLessons)('rejects a complete opposite turn for $title and retains the observed wrong direction', ({ lesson, direction, title }) => {
+    const observer = prepared(DEFAULT_DRONE_CONFIG, 0, lesson)
+    observer.turn(-direction * 360)
+    expect(observer.evaluation?.metrics).toMatchObject({ flipRequiredDirection: direction, flipInterruptionReason: 8,
+      interruptionFlipDirection: -direction, flipEpisodeValid: 0, flipCompleted: 0, flipInverted: 0 })
+    expect(observer.evaluation?.hint).toContain(`本課指定${title}`)
+    expect(observer.checkpointStates['flip-inverted']).toBeUndefined()
+    expect(observer.checkpointStates['flip-upright']).toBeUndefined()
+    observer.repeat(8)
+    expect(observer.evaluation?.status).not.toBe('success')
+    expect(observer.evaluation?.metrics?.flipCompleted).toBe(0)
+  })
+
+  it.each(directionalLessons)('allows a fresh $title after wrong-direction interruption and preparation', ({ lesson, direction }) => {
+    const observer = prepared(DEFAULT_DRONE_CONFIG, 0, lesson)
+    observer.turn(-direction * 360)
+    expect(observer.evaluation?.metrics?.flipInterruptionReason).toBe(8)
+    observer.repeat(8)
+    expect(observer.evaluation?.metrics).toMatchObject({ flipEpisodeValid: 1, flipInterruptionReason: 0 })
+    observer.turn(direction * 360)
+    observer.repeat(8)
+    expect(observer.evaluation?.status).toBe('success')
+    expect(observer.evaluation?.metrics?.flipSignedDegrees).toBeCloseTo(direction * 360, 8)
+  })
+
+  it.each(directionalLessons)('records $title through the real session under its own lesson ID', ({ lesson, direction }) => {
+    const observer = prepared(DEFAULT_DRONE_CONFIG, 0, lesson)
+    observer.turn(direction * 360)
+    observer.repeat(8)
+    const session = new TrainingSession({ lessons: [lesson], initialLessonId: lesson.id, countdownDurationSeconds: 0, sceneReferences: references() })
+    session.start(0)
+    session.tick(0)
+    for (const current of observer.trace) {
+      session.consumeSample(current)
+      if (session.getState().phase === 'SUCCESS') break
+    }
+    expect(session.getState().result).toMatchObject({ lessonId: lesson.id, outcome: 'SUCCESS', completedCheckpoints: 6, totalCheckpoints: 6 })
+    expect(session.getState().result?.metrics.flipDirection).toBe(direction)
+  })
+
+  it.each(directionalLessons)('does not trust old combined checkpoints or a saved required-direction value for $title', ({ lesson, direction }) => {
+    const current = sample(0)
+    const old: TrainingEvaluation = { status: 'success', metrics: {
+      flipRequiredDirection: -direction, flipDirection: -direction, flipEpisodeValid: 1, flipCompleted: 1, flipInverted: 1,
+      flipSignedDegrees: -direction * 360, flipProgressDegrees: 360,
+    } }
+    const result = fullFlipEvaluator.evaluate(current, context(6, { lesson, previousEvaluation: old }))
+    expect(result.status).toBe('failure')
+    expect(result.metrics?.flipRequiredDirection).toBe(direction)
+    expect(result.message).toContain('指定方向')
+  })
+
+  it('keeps the old combined definition and the two new directional identities distinct', () => {
+    expect(FULL_FLIP_LESSON.id).toBe('full-flip')
+    expect(FRONT_FLIP_LESSON).toMatchObject({ id: 'front-flip', title: '前翻', priority: 2.9 })
+    expect(BACK_FLIP_LESSON).toMatchObject({ id: 'back-flip', title: '後翻', priority: 2.95 })
+    expect(FRONT_FLIP_LEARNING_CONTENT).toMatchObject({ code: 'L11', title: '前翻', prerequisiteIds: ['full-roll'] })
+    expect(BACK_FLIP_LEARNING_CONTENT).toMatchObject({ code: 'L12', title: '後翻', prerequisiteIds: ['front-flip'] })
+    expect(FRONT_FLIP_LESSON.checkpoints.map(({ id }) => id)).toEqual(FULL_FLIP_PHASE_IDS)
+    expect(BACK_FLIP_LESSON.checkpoints.map(({ id }) => id)).toEqual(FULL_FLIP_PHASE_IDS)
+    expect(fullFlipRequiredDirection('front-flip')).toBe(1)
+    expect(fullFlipRequiredDirection('back-flip')).toBe(-1)
+    expect(fullFlipRequiredDirection('full-flip')).toBe(0)
+  })
+
   it.each([-1, 1])('observes a real complete signed turn and airborne recovery in direction %s', (direction) => {
     const observer = prepared()
     observer.turn(direction * 360)

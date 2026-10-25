@@ -89,13 +89,14 @@ describe('training progress persistence', () => {
     expect(loaded.progress.lessons['basic-recovery']).toMatchObject({ completed: true, attempts: 1, best: { sessionId: 'old-L10:passed', totalCheckpoints: 8 } })
 
     const active = LEARNING_LESSONS.map(({ id }) => ({ id, code: lessonLearningContent(id)?.code, progress: loaded.progress.lessons[id] }))
-    expect(active).toHaveLength(13)
+    expect(active).toHaveLength(14)
     expect(active.some(({ id }) => id === 'hover')).toBe(false)
+    expect(active.some(({ id }) => id === 'full-flip')).toBe(false)
     expect(active.find(({ id }) => id === 'takeoff')).toMatchObject({ code: 'L01', progress: { completed: true, attempts: 2 } })
     expect(active.find(({ id }) => id === 'straight-line')).toMatchObject({ code: 'L02', progress: { best: { sessionId: 'old-L03:passed' } } })
     expect(active.find(({ id }) => id === 'basic-recovery')).toMatchObject({ code: 'L09', progress: { best: { sessionId: 'old-L10:passed' } } })
-    expect(active.find(({ id }) => id === 'split-s')).toMatchObject({ code: 'L13', progress: { best: { sessionId: 'old-L12:passed' } } })
-    expect(active.find(({ id }) => id === 'orbit')).toMatchObject({ code: 'L14', progress: { best: { sessionId: 'old-L13:passed' } } })
+    expect(active.find(({ id }) => id === 'split-s')).toMatchObject({ code: 'L14', progress: { best: { sessionId: 'old-L12:passed' } } })
+    expect(active.find(({ id }) => id === 'orbit')).toMatchObject({ code: 'L15', progress: { best: { sessionId: 'old-L13:passed' } } })
     expect(loaded.progress.lessons['full-roll']).toMatchObject({ completed: false, attempts: 0, best: null })
     expect(keys.map((key) => storage.getItem(key))).toEqual(original)
     const keyboard = new TrainingProgressStore(storage).loadCurrent({ ...recovery, inputSource: 'keyboard' })
@@ -116,10 +117,79 @@ describe('training progress persistence', () => {
       attemptContext: recovery, completedCheckpoints: 6, totalCheckpoints: 6 })).saved).toBe(true)
     const withFlip = new TrainingProgressStore(storage).loadCurrent(recovery)
     expect(withFlip.progress.lessons['full-flip']).toMatchObject({ completed: true, attempts: 1, best: { sessionId: 'full-flip:passed' } })
+    for (const id of ['front-flip', 'back-flip']) {
+      expect(withFlip.progress.lessons[id]).toEqual({ recent: null, best: null, completed: false, attempts: 0 })
+    }
     for (const id of ['hover', 'takeoff', 'straight-line', 'basic-recovery', 'full-roll', 'split-s', 'orbit']) {
       expect(withFlip.progress.lessons[id]).toEqual(withRoll.progress.lessons[id])
     }
     expect(storage.getItem(keys[0])).toBe(original[0])
+  })
+
+  it.each([1, -1])('keeps a legacy combined-flip result with direction %s historical while saving the split courses independently', (legacyDirection) => {
+    const storage = new MemoryStorage()
+    const store = new TrainingProgressStore(storage)
+    const scope = context({ rulesVersion: 6, mode: 'practice' })
+    const baseline = { ...scope, rulesVersion: 4 } as const
+    expect(store.recordResult(result({ lessonId: 'full-flip', sessionId: 'combined-flip:accepted',
+      attemptContext: scope, completedCheckpoints: 6, totalCheckpoints: 6,
+      metrics: { flipDirection: legacyDirection, flipProgressDegrees: 360, flipPhase: 6 } })).saved).toBe(true)
+    expect(store.recordResult(result({ lessonId: 'full-roll', sessionId: 'roll:accepted',
+      attemptContext: scope, completedCheckpoints: 6, totalCheckpoints: 6 })).saved).toBe(true)
+    expect(store.recordResult(result({ lessonId: 'orbit', sessionId: 'orbit:accepted',
+      attemptContext: baseline })).saved).toBe(true)
+    const key = trainingAttemptContextKey(scope)
+    // Emulate an actual older document which predates the two directional IDs.
+    const oldEnvelope = JSON.parse(storage.getItem(key)!)
+    delete oldEnvelope.progress.lessons['front-flip']
+    delete oldEnvelope.progress.lessons['back-flip']
+    const oldRaw = JSON.stringify(oldEnvelope)
+    storage.setItem(key, oldRaw)
+    const baselineRaw = storage.getItem(trainingAttemptContextKey(baseline))
+    const historical = new TrainingProgressStore(storage).loadCurrent(scope)
+    expect(historical.errors).toEqual([])
+    expect(historical.progress.lessons['full-flip']).toMatchObject({ completed: true, attempts: 1,
+      best: { sessionId: 'combined-flip:accepted', metrics: { flipDirection: legacyDirection } } })
+    for (const id of ['front-flip', 'back-flip']) {
+      expect(historical.progress.lessons[id]).toEqual({ recent: null, best: null, completed: false, attempts: 0 })
+    }
+    expect(storage.getItem(key)).toBe(oldRaw)
+    expect(storage.getItem(trainingAttemptContextKey(baseline))).toBe(baselineRaw)
+
+    expect(store.recordResult(result({ lessonId: 'front-flip', sessionId: 'front-flip:passed',
+      attemptContext: scope, completedCheckpoints: 6, totalCheckpoints: 6,
+      metrics: { flipDirection: 1, flipRequiredDirection: 1, flipProgressDegrees: 360 } })).saved).toBe(true)
+    const afterFront = new TrainingProgressStore(storage).loadCurrent(scope).progress
+    expect(afterFront.lessons['front-flip']).toMatchObject({ completed: true, attempts: 1,
+      best: { sessionId: 'front-flip:passed', metrics: { flipDirection: 1 } } })
+    expect(afterFront.lessons['back-flip']).toEqual({ recent: null, best: null, completed: false, attempts: 0 })
+
+    expect(store.recordResult(result({ lessonId: 'back-flip', sessionId: 'back-flip:retry',
+      attemptContext: scope, outcome: 'FAILED', score: 0, completedCheckpoints: 3, totalCheckpoints: 6 })).saved).toBe(true)
+    const afterRetry = new TrainingProgressStore(storage).loadCurrent(scope).progress
+    expect(afterRetry.lessons['back-flip']).toMatchObject({ completed: false, attempts: 1, best: null,
+      recent: { sessionId: 'back-flip:retry', outcome: 'FAILED' } })
+    expect(afterRetry.lessons['front-flip']).toEqual(afterFront.lessons['front-flip'])
+
+    expect(store.recordResult(result({ lessonId: 'back-flip', sessionId: 'back-flip:passed',
+      attemptContext: scope, completedCheckpoints: 6, totalCheckpoints: 6,
+      metrics: { flipDirection: -1, flipRequiredDirection: -1, flipProgressDegrees: 360 } })).saved).toBe(true)
+    const afterBoth = new TrainingProgressStore(storage).loadCurrent(scope).progress
+    expect(afterBoth.lessons['back-flip']).toMatchObject({ completed: true, attempts: 2,
+      best: { sessionId: 'back-flip:passed', metrics: { flipDirection: -1 } } })
+    expect(afterBoth.lessons['front-flip']).toEqual(afterFront.lessons['front-flip'])
+    for (const id of ['full-flip', 'full-roll', 'orbit']) {
+      expect(afterBoth.lessons[id]).toEqual(historical.progress.lessons[id])
+    }
+    const savedScope = storage.getItem(key)
+    for (const variant of [{ ...scope, mode: 'challenge' as const }, { ...scope, inputSource: 'keyboard' as const }]) {
+      const isolated = new TrainingProgressStore(storage).loadCurrent(variant)
+      for (const id of ['front-flip', 'back-flip', 'full-flip']) {
+        expect(isolated.progress.lessons[id]).toEqual({ recent: null, best: null, completed: false, attempts: 0 })
+      }
+    }
+    expect(storage.getItem(key)).toBe(savedScope)
+    expect(storage.getItem(trainingAttemptContextKey(baseline))).toBe(baselineRaw)
   })
 
   it('rejects malformed documents and falls back to empty versioned progress', () => {

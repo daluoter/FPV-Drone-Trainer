@@ -6,7 +6,7 @@ import { lessonLearningContent } from './catalog'
 
 describe('lesson catalog', () => {
   it('keeps existing lesson IDs and the historical hover definition stable', () => {
-    expect(DEFAULT_LESSONS).toHaveLength(14)
+    expect(DEFAULT_LESSONS).toHaveLength(16)
     expect(DEFAULT_LESSONS.map((lesson) => lesson.id)).toEqual([
       'hover',
       'coordinated-turn',
@@ -22,6 +22,8 @@ describe('lesson catalog', () => {
       'basic-recovery',
       'full-roll',
       'full-flip',
+      'front-flip',
+      'back-flip',
     ])
     expect(DEFAULT_LESSONS.map((lesson) => lesson.title)).toEqual([
       '定點懸停',
@@ -38,6 +40,8 @@ describe('lesson catalog', () => {
       '基礎失誤恢復',
       '完整橫滾',
       '前後翻轉',
+      '前翻',
+      '後翻',
     ])
     expect(DEFAULT_LESSONS.every((lesson) => lesson.available && lesson.availability === 'available' && lesson.evaluator)).toBe(true)
     expect(DEFAULT_LESSONS.map((lesson) => lesson.setup.sceneReferenceIds)).toEqual([
@@ -55,12 +59,14 @@ describe('lesson catalog', () => {
       ['training-launch', 'landing-surface'],
       ['training-launch', 'landing-surface'],
       ['training-launch', 'landing-surface'],
+      ['training-launch', 'landing-surface'],
+      ['training-launch', 'landing-surface'],
     ])
   })
 
   it('offers learning content in prerequisite order without requiring completion to select a lesson', () => {
     const ordered = [...LEARNING_LESSONS].sort((left, right) => left.priority - right.priority)
-    expect(ordered.map((lesson) => lessonLearningContent(lesson.id)?.code)).toEqual(['L01', 'L02', 'L03', 'L04', 'L05', 'L06', 'L07', 'L08', 'L09', 'L10', 'L11', 'L13', 'L14'])
+    expect(ordered.map((lesson) => lessonLearningContent(lesson.id)?.code)).toEqual(['L01', 'L02', 'L03', 'L04', 'L05', 'L06', 'L07', 'L08', 'L09', 'L10', 'L11', 'L12', 'L14', 'L15'])
     expect(lessonLearningContent('takeoff')?.prerequisiteIds).toEqual(['intro'])
     expect(lessonLearningContent('hover')?.prerequisiteIds).toEqual(['takeoff'])
     expect(lessonLearningContent('direction-control')?.prerequisiteIds).toEqual(['landing'])
@@ -71,6 +77,8 @@ describe('lesson catalog', () => {
     expect(lessonLearningContent('basic-recovery')?.prerequisiteIds).toEqual(['wide-gate'])
     expect(lessonLearningContent('full-roll')?.prerequisiteIds).toEqual(['basic-recovery'])
     expect(lessonLearningContent('full-flip')?.prerequisiteIds).toEqual(['full-roll'])
+    expect(lessonLearningContent('front-flip')?.prerequisiteIds).toEqual(['full-roll'])
+    expect(lessonLearningContent('back-flip')?.prerequisiteIds).toEqual(['front-flip'])
     expect(lessonLearningContent('unknown')).toBeNull()
     expect(DEFAULT_LESSONS.every((lesson) => {
       const content = lessonLearningContent(lesson.id)
@@ -82,12 +90,14 @@ describe('lesson catalog', () => {
     const ordered = [...LEARNING_LESSONS].sort((left, right) => left.priority - right.priority)
     expect(ordered.map((lesson) => lesson.id)).toEqual([
       'takeoff', 'straight-line', 'landing', 'direction-control', 'coordinated-turn',
-      'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'split-s', 'orbit',
+      'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'front-flip', 'back-flip', 'split-s', 'orbit',
     ])
     expect(TRAINING_LESSONS).toBe(LEARNING_LESSONS)
     expect(LEARNING_LESSONS.every((lesson) => lessonById(lesson.id) === lesson)).toBe(true)
     expect(lessonById('hover')).toBe(DEFAULT_LESSONS.find((lesson) => lesson.id === 'hover'))
     expect(LEARNING_LESSONS.some((lesson) => lesson.id === 'hover')).toBe(false)
+    expect(LEARNING_LESSONS.some((lesson) => lesson.id === 'full-flip')).toBe(false)
+    expect(lessonById('full-flip')).toBe(DEFAULT_LESSONS.find((lesson) => lesson.id === 'full-flip'))
     const takeoff = lessonById('takeoff')!
     expect(takeoff.checkpoints.map((checkpoint) => checkpoint.id)).toEqual(['takeoff-ready', 'takeoff-liftoff', 'takeoff-settle'])
     expect(takeoff.checkpoints[2]?.title).toBe('定點懸停 1.5 秒')

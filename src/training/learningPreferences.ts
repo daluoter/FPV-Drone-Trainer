@@ -22,7 +22,9 @@ function valid(value: unknown): value is LearningPreferences {
 }
 /** Retired navigation aliases never rewrite a historical flight result. */
 function currentLessonId(lessonId: string): string {
-  return lessonId === 'hover' ? 'takeoff' : lessonId
+  if (lessonId === 'hover') return 'takeoff'
+  if (lessonId === 'full-flip') return 'front-flip'
+  return lessonId
 }
 export function loadLearningPreferences(target = storage()): { preferences: LearningPreferences; loaded: boolean; error: string | null } {
   const fallback = { ...DEFAULT_LEARNING_PREFERENCES }

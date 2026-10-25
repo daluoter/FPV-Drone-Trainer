@@ -7,7 +7,7 @@ import { FIGURE_EIGHT_LEARNING_CONTENT } from './figureEight'
 import { WIDE_GATE_LEARNING_CONTENT } from './wideGate'
 import { BASIC_RECOVERY_LEARNING_CONTENT } from './basicRecovery'
 import { FULL_ROLL_LEARNING_CONTENT } from './fullRoll'
-import { FULL_FLIP_LEARNING_CONTENT } from './fullFlip'
+import { BACK_FLIP_LEARNING_CONTENT, FRONT_FLIP_LEARNING_CONTENT, FULL_FLIP_LEARNING_CONTENT } from './fullFlip'
 
 export interface LessonLearningContent {
   readonly code: string
@@ -69,8 +69,10 @@ const LEARNING_CONTENT: Readonly<Record<string, LessonLearningContent>> = {
   'basic-recovery': BASIC_RECOVERY_LEARNING_CONTENT,
   'full-roll': FULL_ROLL_LEARNING_CONTENT,
   'full-flip': FULL_FLIP_LEARNING_CONTENT,
+  'front-flip': FRONT_FLIP_LEARNING_CONTENT,
+  'back-flip': BACK_FLIP_LEARNING_CONTENT,
   'split-s': {
-    code: 'L13',
+    code: 'L14',
     title: '翻轉下降',
     level: '特技',
     prerequisiteIds: ['coordinated-turn'],
@@ -88,7 +90,7 @@ const LEARNING_CONTENT: Readonly<Record<string, LessonLearningContent>> = {
     ],
   },
   orbit: {
-    code: 'L14',
+    code: 'L15',
     title: '正刷鍋',
     level: '特技',
     prerequisiteIds: ['coordinated-turn'],
