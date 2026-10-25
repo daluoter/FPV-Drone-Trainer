@@ -23,9 +23,9 @@ const PHASE_CAPTIONS = [
   `第 2 步：自行起飛至約 ${FULL_ROLL_TARGET_HEIGHT_M} m，先留出翻滾與恢復的高度餘裕。`,
   '第 3 步：接近水平、減少過大的漂移，短暫準備；不必精準停在原位置。',
   '橫滾前準備完成；先讀提示，接著補油建立上升餘裕，再保持同方向 Roll。',
-  '第 4 步已觀察到倒飛；繼續同方向橫滾，倒飛時收油，避免推力把機體壓向地面。',
+  '第 4 步已觀察到倒置；繼續同方向橫滾，倒置時收油，避免推力把機體壓向地面。',
   '第 5 步已完成一圈並回到正飛；停止旋轉，再適量補油止住下降與減少漂移。',
-  '已完成完整橫滾與空中恢復；實際通過倒飛、同方向一圈及恢復確認，沒有自動操控真人飛行。',
+  '已完成完整橫滾與空中恢復；實際通過倒置、同方向一圈及恢復確認，沒有自動操控真人飛行。',
 ] as const
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -195,7 +195,7 @@ export function recordFullRollDemonstration(
     if (mode !== lastMode) {
       if (phase < 6) cue(step.state.timeSeconds, mode === 'boost'
         ? '先適量補油建立上升餘裕，再開始同方向橫滾；真人操作需要自己配合油門。'
-        : mode === 'roll' ? '第 4 步現在開始：保持向右 Roll；經過側身、倒飛，再轉回正飛。'
+        : mode === 'roll' ? '第 4 步現在開始：保持向右 Roll；經過側身、倒置，再轉回正飛。'
           : '第 6 步現在恢復：回中停止旋轉、修回接近水平，適量補油止住下降並減少漂移。')
       lastMode = mode
     }

@@ -73,6 +73,8 @@ describe('training progress persistence', () => {
       result({ lessonId: 'takeoff', sessionId: 'takeoff:retry', outcome: 'FAILED', attemptContext: baseline }),
       result({ lessonId: 'takeoff', sessionId: 'takeoff:hover-passed', attemptContext: baseline }),
       result({ lessonId: 'straight-line', sessionId: 'old-L03:passed', attemptContext: baseline, completedCheckpoints: 5, totalCheckpoints: 5 }),
+      result({ lessonId: 'split-s', sessionId: 'old-L12:passed', attemptContext: baseline, completedCheckpoints: 5, totalCheckpoints: 5 }),
+      result({ lessonId: 'orbit', sessionId: 'old-L13:passed', attemptContext: baseline, completedCheckpoints: 3, totalCheckpoints: 3 }),
       result({ lessonId: 'basic-recovery', sessionId: 'old-L10:passed', attemptContext: recovery, completedCheckpoints: 8, totalCheckpoints: 8 }),
     ]) {
       expect(store.recordResult(attempt, '2026-10-23T15:00:00.000Z').saved).toBe(true)
@@ -87,11 +89,13 @@ describe('training progress persistence', () => {
     expect(loaded.progress.lessons['basic-recovery']).toMatchObject({ completed: true, attempts: 1, best: { sessionId: 'old-L10:passed', totalCheckpoints: 8 } })
 
     const active = LEARNING_LESSONS.map(({ id }) => ({ id, code: lessonLearningContent(id)?.code, progress: loaded.progress.lessons[id] }))
-    expect(active).toHaveLength(12)
+    expect(active).toHaveLength(13)
     expect(active.some(({ id }) => id === 'hover')).toBe(false)
     expect(active.find(({ id }) => id === 'takeoff')).toMatchObject({ code: 'L01', progress: { completed: true, attempts: 2 } })
     expect(active.find(({ id }) => id === 'straight-line')).toMatchObject({ code: 'L02', progress: { best: { sessionId: 'old-L03:passed' } } })
     expect(active.find(({ id }) => id === 'basic-recovery')).toMatchObject({ code: 'L09', progress: { best: { sessionId: 'old-L10:passed' } } })
+    expect(active.find(({ id }) => id === 'split-s')).toMatchObject({ code: 'L13', progress: { best: { sessionId: 'old-L12:passed' } } })
+    expect(active.find(({ id }) => id === 'orbit')).toMatchObject({ code: 'L14', progress: { best: { sessionId: 'old-L13:passed' } } })
     expect(loaded.progress.lessons['full-roll']).toMatchObject({ completed: false, attempts: 0, best: null })
     expect(keys.map((key) => storage.getItem(key))).toEqual(original)
     const keyboard = new TrainingProgressStore(storage).loadCurrent({ ...recovery, inputSource: 'keyboard' })
@@ -106,6 +110,14 @@ describe('training progress persistence', () => {
     expect(withRoll.progress.lessons['full-roll']).toMatchObject({ completed: true, attempts: 1, best: { sessionId: 'full-roll:passed' } })
     for (const id of ['hover', 'takeoff', 'straight-line', 'basic-recovery']) {
       expect(withRoll.progress.lessons[id]).toEqual(loaded.progress.lessons[id])
+    }
+    expect(storage.getItem(keys[0])).toBe(original[0])
+    expect(store.recordResult(result({ lessonId: 'full-flip', sessionId: 'full-flip:passed',
+      attemptContext: recovery, completedCheckpoints: 6, totalCheckpoints: 6 })).saved).toBe(true)
+    const withFlip = new TrainingProgressStore(storage).loadCurrent(recovery)
+    expect(withFlip.progress.lessons['full-flip']).toMatchObject({ completed: true, attempts: 1, best: { sessionId: 'full-flip:passed' } })
+    for (const id of ['hover', 'takeoff', 'straight-line', 'basic-recovery', 'full-roll', 'split-s', 'orbit']) {
+      expect(withFlip.progress.lessons[id]).toEqual(withRoll.progress.lessons[id])
     }
     expect(storage.getItem(keys[0])).toBe(original[0])
   })

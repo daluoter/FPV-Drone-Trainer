@@ -104,7 +104,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if response is None or response.status != 200:
                 raise AssertionError("The production entry page did not return HTTP 200.")
             expect(page).to_have_title("FPV Drone Trainer")
-            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.24.2")
+            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.24.3")
             report["release"] = page.get_by_test_id("app-release").inner_text()
 
             asset_urls = page.locator("script[src], link[rel='stylesheet'][href]").evaluate_all(
@@ -238,12 +238,12 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(mode).to_have_value("practice")
             expect(lesson).to_have_value("takeoff")
             expect(lesson.locator("option:checked")).to_contain_text("L01")
-            expect(lesson.locator("option")).to_have_count(12)
+            expect(lesson.locator("option")).to_have_count(13)
             expect(lesson.locator("option[value='hover']")).to_have_count(0)
             active_codes = lesson.locator("option").evaluate_all(
                 "options => options.map(option => option.textContent.trim().match(/^L\\d{2}/)?.[0])"
             )
-            if active_codes != ["L01", "L02", "L03", "L04", "L05", "L06", "L07", "L08", "L09", "L10", "L12", "L13"]:
+            if active_codes != ["L01", "L02", "L03", "L04", "L05", "L06", "L07", "L08", "L09", "L10", "L11", "L13", "L14"]:
                 raise AssertionError(f"Active course numbers do not match the merged curriculum: {active_codes}")
             expect(training.get_by_role("heading", name="起飛與定點懸停", exact=True)).to_be_visible()
             expect(training.get_by_role("list", name="本課步驟", exact=True)).to_contain_text("懸停")
@@ -251,6 +251,15 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(lesson.locator("option[value='straight-line']")).to_contain_text("L02")
             expect(lesson.locator("option[value='direction-control']")).to_contain_text("L04")
             expect(lesson.locator("option[value='full-roll']")).to_contain_text("L10")
+            expect(lesson.locator("option[value='full-flip']")).to_contain_text("L11")
+            expect(lesson.locator("option[value='split-s']")).to_contain_text("L13")
+            expect(lesson.locator("option[value='orbit']")).to_contain_text("L14")
+            for option in lesson.locator("option").all_text_contents():
+                title = re.sub(r"^L\d{2}\s*[·：:]?\s*", "", option.strip())
+                if re.search(r"[A-Za-z]", title):
+                    raise AssertionError(f"A visible course title still contains English: {option}")
+            expect(flight.locator(".school-demo-toolbar").get_by_role("button")).to_have_count(15)
+            checks.append("Chinese-only course titles, thirteen active lessons and fifteen distinct demonstrations")
             progress_before_waiting = training_progress(page)
             training.get_by_role("button", name="開始課程", exact=True).click()
             expect(phase).to_have_text("倒數準備")
@@ -407,7 +416,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
             if training_progress(page) != stored_attempts:
                 raise AssertionError("Changing learning mode modified stored flight results.")
-            checks.append("default practice mode, eleven active lessons and persisted practice/challenge isolation")
+            checks.append("default practice mode, thirteen active lessons and persisted practice/challenge isolation")
 
             # Answer the actual radios/form. Wrong answers must not unlock the
             # next step; knowledge completion is separate from flight progress.
@@ -466,7 +475,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
             checks.append("L00 wrong-answer gating, full knowledge completion and reload persistence")
 
-            for axis_name in ("俯仰 Pitch", "偏航 Yaw"):
+            for axis_name in ("俯仰", "偏航"):
                 before_axis_demo = training_progress(page)
                 flight.get_by_role("button", name=axis_name, exact=True).click()
                 flight.get_by_role("button", name="Pause", exact=True).click()
@@ -1008,6 +1017,155 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             lesson.select_option("full-roll")
             checks.append("L10 ground-start full-roll demo, measured inverted and upright phases, half-speed, chapter rewind, live-progress isolation and lesson reload")
 
+            lesson.select_option("full-flip")
+            expect(training.get_by_role("heading", name="前後翻轉", exact=True)).to_be_visible()
+            before_flip_demos = training_progress(page)
+            prior_flip_steps = training.get_by_role("list", name="本課步驟", exact=True).get_by_role("listitem").all_text_contents()
+            if len(prior_flip_steps) != 6:
+                raise AssertionError("L11 does not expose six ordered ground-to-recovery checkpoints.")
+            original_flip_canvas = canvas.element_handle()
+            flip_hud = flight.get_by_role("group", name="翻轉練習數值", exact=True)
+            flip_fields = {
+                "progress_degrees": flight.get_by_test_id("flip-progress"),
+                "flip_rate_dps": flight.get_by_test_id("flip-rate"),
+                "tilt_degrees": flight.get_by_test_id("flip-tilt"),
+            }
+
+            def flip_motion() -> dict:
+                values = {}
+                for key, field in flip_fields.items():
+                    expect(field).to_be_visible()
+                    match = re.match(r"^[+-]?\d+(?:\.\d+)?", field.inner_text())
+                    if not match:
+                        raise AssertionError(f"L11 flip readout is not numeric: {key}.")
+                    values[key] = float(match.group())
+                return values
+
+            expect(flip_hud).to_be_visible()
+            report["l11_full_flip"] = {}
+            report["l11_flip_hud_layouts"] = {}
+            for direction, demo_name, rate_sign in (
+                ("forward", "L11 前翻示範", 1),
+                ("backward", "L11 後翻示範", -1),
+            ):
+                flight.get_by_role("button", name=demo_name, exact=True).click()
+                expect(flight.get_by_role("button", name="0.5×", exact=True)).to_have_attribute("aria-pressed", "true")
+                expect(arm).to_be_disabled()
+                expect(lesson).to_be_disabled()
+                expect(flip_hud).to_contain_text("回放")
+                flight.get_by_role("button", name="Pause", exact=True).click()
+                timeline.press("Home")
+                demonstration_snapshot("L11", 6)
+                expect(altitude).to_have_text("0.0 m")
+                home_flip = flip_motion()
+                if any(abs(value) > .05 for value in home_flip.values()):
+                    raise AssertionError(f"{demo_name} does not begin from supported rest: {home_flip}")
+                timeline.press("End")
+                demonstration_snapshot("L11", 6, complete=True)
+                end_flip = flip_motion()
+                if not 340 <= end_flip["progress_degrees"] <= 360.1:
+                    raise AssertionError(f"{demo_name} does not display a measured full flip: {end_flip}")
+                if end_flip["tilt_degrees"] > 30.1 or abs(end_flip["flip_rate_dps"]) > 120.1:
+                    raise AssertionError(f"{demo_name} does not finish with a recovered actual ghost: {end_flip}")
+                if float(altitude.inner_text().split()[0]) < 1.5:
+                    raise AssertionError(f"{demo_name} completes on the ground rather than airborne.")
+                paused_flip_position = position_hud.inner_text()
+                page.wait_for_timeout(200)
+                if position_hud.inner_text() != paused_flip_position or flip_motion() != end_flip:
+                    raise AssertionError(f"{demo_name} paused position or flip instruments kept advancing.")
+                if screenshot:
+                    flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / f"l11-{direction}-demonstration-end.png"))
+                flip_chapters = demo_progress.get_by_role("list", name="示範步驟", exact=True).get_by_role("button")
+                flip_chapters.nth(4).click()
+                expect(flight.get_by_role("button", name="Play", exact=True)).to_be_enabled()
+                expect(demo_progress).to_contain_text("4 / 6 個示範步驟完成")
+                inverted_flip = flip_motion()
+                if inverted_flip["tilt_degrees"] <= 120:
+                    raise AssertionError(f"{demo_name} inverted chapter shows a level/live pose: {inverted_flip}")
+                if inverted_flip["flip_rate_dps"] * rate_sign < 5:
+                    raise AssertionError(f"{demo_name} has the wrong actual forward/backward pitch direction: {inverted_flip}")
+                if not 120 <= inverted_flip["progress_degrees"] <= 250:
+                    raise AssertionError(f"{demo_name} inverted chapter lost its measured partial-turn progress: {inverted_flip}")
+                chapter_time = float(timeline.input_value())
+                page.wait_for_timeout(200)
+                if abs(float(timeline.input_value()) - chapter_time) > .02 or flip_motion() != inverted_flip:
+                    raise AssertionError(f"{demo_name} chapter selection did not pause the actual ghost and values.")
+                report["l11_full_flip"][direction] = {
+                    "home": home_flip, "end": end_flip,
+                    "inverted": {"time_seconds": chapter_time, **inverted_flip},
+                }
+                if screenshot:
+                    page.locator(".free-flight-layout").evaluate("layout => window.scrollTo({top: layout.getBoundingClientRect().top + window.scrollY - 8, behavior: 'instant'})")
+                    page.screenshot(path=str(artifact_dir / f"l11-{direction}-demonstration-inverted.png"))
+                report["l11_flip_hud_layouts"][direction] = {}
+                for width, height in ((1280, 720), (1280, 600), (375, 720)):
+                    page.set_viewport_size({"width": width, "height": height})
+                    position_hud.scroll_into_view_if_needed()
+                    viewport_bounds = flight.locator(".free-flight-viewport").bounding_box()
+                    flip_bounds = flip_hud.bounding_box()
+                    if not viewport_bounds or not flip_bounds:
+                        raise AssertionError(f"{demo_name} instruments have no layout bounds at {width}x{height}.")
+                    if (flip_bounds['x'] < viewport_bounds['x']
+                            or flip_bounds['x'] + flip_bounds['width'] > viewport_bounds['x'] + viewport_bounds['width']
+                            or flip_bounds['y'] < viewport_bounds['y']
+                            or flip_bounds['y'] + flip_bounds['height'] > viewport_bounds['y'] + viewport_bounds['height']):
+                        raise AssertionError(f"{demo_name} instruments overflow the viewport at {width}x{height}.")
+                    for other, label in ((position_hud.bounding_box(), "position HUD"), (flight.locator(".flight-safe-overlay").bounding_box(), "playback banner")):
+                        if not other:
+                            raise AssertionError(f"{demo_name} {label} has no bounds at {width}x{height}.")
+                        overlap_x = min(flip_bounds['x'] + flip_bounds['width'], other['x'] + other['width']) - max(flip_bounds['x'], other['x'])
+                        overlap_y = min(flip_bounds['y'] + flip_bounds['height'], other['y'] + other['height']) - max(flip_bounds['y'], other['y'])
+                        if overlap_x > 0 and overlap_y > 0:
+                            raise AssertionError(f"{demo_name} instruments overlap {label} at {width}x{height}.")
+                    report["l11_flip_hud_layouts"][direction][f"{width}x{height}"] = {"flip_hud": flip_bounds, "viewport": viewport_bounds}
+                    if screenshot and width == 375:
+                        flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / f"l11-{direction}-hud-375.png"))
+                page.set_viewport_size({"width": 1280, "height": 720})
+                flip_chapters.nth(3).click()
+                expect(demo_progress).to_contain_text("3 / 6 個示範步驟完成")
+                timeline.press("Home")
+                demonstration_snapshot("L11", 6)
+                expect(altitude).to_have_text("0.0 m")
+                if flip_motion() != home_flip:
+                    raise AssertionError(f"{demo_name} Home seek does not restore its initial measured values.")
+                timeline.press("End")
+                demonstration_snapshot("L11", 6, complete=True)
+                flight.get_by_role("button", name="結束示範", exact=True).click()
+                expect(arm).to_be_enabled()
+                expect(disarm).to_be_disabled()
+                expect(flip_hud).not_to_contain_text("回放")
+                expect(demo_progress).to_have_count(0)
+                expect(training.get_by_role("list", name="本課步驟", exact=True).get_by_role("listitem")).to_have_text(prior_flip_steps)
+                if not original_flip_canvas or not original_flip_canvas.evaluate("element => element === document.querySelector('#free-flight canvas')"):
+                    raise AssertionError(f"{demo_name} replaced the shared live flight canvas.")
+                if training_progress(page) != before_flip_demos:
+                    raise AssertionError(f"{demo_name} modified the live attempt or any saved result.")
+            checks.append("L11 forward and backward physical flip demos, signed inverted motion, full-turn recovery, independent seek/pause and live-result isolation")
+            checks.append("L11 measured flip HUD fits desktop, short desktop and mobile without overlapping altitude/XYZ or playback banner")
+
+            # The introductory pitch illustration remains a separate five-step
+            # lesson even while the actual full-flip course is selected.
+            flight.get_by_role("button", name="俯仰", exact=True).click()
+            flight.get_by_role("button", name="Pause", exact=True).click()
+            timeline.press("Home")
+            demonstration_snapshot("L00", 5)
+            expect(flip_hud).to_have_count(0)
+            timeline.press("End")
+            demonstration_snapshot("L00", 5, complete=True)
+            flight.get_by_role("button", name="結束示範", exact=True).click()
+            expect(flip_hud).to_be_visible()
+            expect(training.get_by_role("list", name="本課步驟", exact=True).get_by_role("listitem")).to_have_text(prior_flip_steps)
+            if training_progress(page) != before_flip_demos:
+                raise AssertionError("L00 pitch playback while selecting L11 wrote a full-flip result.")
+            page.reload(wait_until="networkidle")
+            expect(lesson).to_have_value("full-flip")
+            source.select_option("keyboard")
+            expect(training.locator(".school-progress")).to_contain_text("已練 0 次")
+            lesson.select_option("takeoff")
+            expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
+            lesson.select_option("full-flip")
+            checks.append("L00 pitch illustration stays separate from L11 and both flip demos preserve old records and selected lesson across reload")
+
             # Ground-based lessons wait on actual supported ground and remain
             # safe after arm at zero throttle while the learner prepares to lift off.
             hud = flight.get_by_role("checkbox", name="Developer HUD", exact=True)
@@ -1016,7 +1174,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 has=page.get_by_text("Position m", exact=True)
             ).locator("code")
             report["ground_start_positions"] = {}
-            for lesson_id in ("landing", "straight-line", "direction-control", "coordinated-turn", "square-route", "figure-eight", "wide-gate", "basic-recovery", "full-roll"):
+            for lesson_id in ("landing", "straight-line", "direction-control", "coordinated-turn", "square-route", "figure-eight", "wide-gate", "basic-recovery", "full-roll", "full-flip"):
                 lesson.select_option(lesson_id)
                 training.get_by_role("button", name="開始課程", exact=True).click()
                 coords = [float(value.strip()) for value in position.inner_text().split(",")]
@@ -1044,7 +1202,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 expect(source).to_be_enabled()
             hud.uncheck()
             lesson.select_option("basic-recovery")
-            checks.append("L02/L03/L04/L05/L06/L07/L08/L09/L10 actual ground start, safe low-throttle arm and visible stage guidance")
+            checks.append("L02/L03/L04/L05/L06/L07/L08/L09/L10/L11 actual ground start, safe low-throttle arm and visible stage guidance")
 
             fullscreen = flight.locator(".school-fullscreen")
             fullscreen.click()

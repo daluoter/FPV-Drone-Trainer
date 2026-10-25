@@ -14,9 +14,10 @@ import { recordEightDemonstration } from './eightDemonstration'
 import { recordGateDemonstration } from './gateDemonstration'
 import { recordRecoveryDemonstration } from './recoveryDemonstration'
 import { recordFullRollDemonstration } from './rollDemonstration'
+import { recordFullFlipDemonstration } from './flipDemonstration'
 import { lessonLearningContent } from './catalog'
 
-export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'roll' | 'pitch' | 'yaw'
+export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'back-flip' | 'roll' | 'pitch' | 'yaw'
 
 export interface TeachingCue {
   readonly timeSeconds: number
@@ -24,12 +25,13 @@ export interface TeachingCue {
   readonly targetReferenceId?: string
   readonly recoveryPhase?: number
   readonly fullRollPhase?: number
+  readonly fullFlipPhase?: number
 }
 
 export interface TeachingDemonstration {
   readonly schemaVersion: 1
   readonly kind: TeachingDemonstrationKind
-  readonly lessonId: 'intro' | 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll'
+  readonly lessonId: 'intro' | 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip'
   readonly rulesVersion: TrainingAttemptContext['rulesVersion']
   readonly physicsVersion: 1
   readonly presetId: TuningPresetSelection
@@ -53,7 +55,7 @@ const LANDING_DESCENT_START_SECONDS = 20
 
 /** Keep learner-facing movie numbers and names aligned with the current course catalog. */
 function courseDemonstrationTitle(kind: Exclude<TeachingDemonstrationKind, 'roll' | 'pitch' | 'yaw'>, detail: string): string {
-  const content = lessonLearningContent(kind)
+  const content = lessonLearningContent(kind === 'back-flip' ? 'full-flip' : kind)
   if (!content) throw new RangeError('此示範沒有對應的課程內容。')
   return `${content.code} ${content.title}：${detail}`
 }
@@ -160,7 +162,7 @@ function cuesFor(kind: TeachingDemonstrationKind): readonly TeachingCue[] {
     { timeSeconds: 18, text: '繼續對準綠色終點圈，從圈內飛過；沒有停穩也能完成。' },
     { timeSeconds: 22, text: '依序穿過藍、金、綠三圈就完成；漏圈可以回到該圈前方重新穿過。' },
   ])
-  const axisName = kind === 'roll' ? '橫滾 Roll' : kind === 'pitch' ? '俯仰 Pitch' : '偏航 Yaw'
+  const axisName = kind === 'roll' ? '橫滾' : kind === 'pitch' ? '俯仰' : '偏航'
   return freeze([
     { timeSeconds: 0, text: `先看${axisName}；示範油門會隨姿態調整，真人飛行沒有自動定高。` },
     { timeSeconds: 1, text: `小量推動${axisName}，開始產生旋轉。` },
@@ -180,13 +182,26 @@ export function createTeachingDemonstration(
   kind: TeachingDemonstrationKind,
 ): TeachingDemonstration {
   if (!validateTuningSettings(settings).valid) throw new RangeError('示範設定未通過驗證，請先還原有效設定。')
-  if (!['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'roll', 'pitch', 'yaw'].includes(kind)) {
+  if (!['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'back-flip', 'roll', 'pitch', 'yaw'].includes(kind)) {
     throw new RangeError('不支援此示範種類。')
   }
   const simulation = new FlightSimulation(flightSimulationConfigFromTuning(settings))
   const maximumThrust = settings.drone.motors.reduce((sum, motor) => sum + motor.maxThrustN, 0)
   if (settings.drone.massKg * settings.drone.gravityMps2 / maximumThrust >= 0.8) {
     throw new RangeError('目前推力不足以完成穩定示範，請檢查機體設定。')
+  }
+  if (kind === 'full-flip' || kind === 'back-flip') {
+    const direction = kind === 'full-flip' ? 1 : -1
+    const directionName = direction === 1 ? '前翻' : '後翻'
+    const { recording, cues } = recordFullFlipDemonstration(simulation, settings, stickForRate, collectiveThrottle, direction)
+    return Object.freeze({
+      schemaVersion: 1, kind, lessonId: 'full-flip',
+      rulesVersion: trainingRulesVersionForLesson('full-flip'), physicsVersion: 1,
+      presetId: identifyTuningPreset(settings), settingsFingerprint: fingerprintTrainingSettings(settings),
+      title: courseDemonstrationTitle(kind, `地面起飛、${directionName}一圈與恢復正飛`),
+      description: `模擬示範，以實際搖桿輸入與物理完成${directionName}一圈；真人練習全程自行操控，觀看不計入通關。`,
+      source: 'simulated', recording, cues,
+    })
   }
   if (kind === 'full-roll') {
     const { recording, cues } = recordFullRollDemonstration(simulation, settings, stickForRate, collectiveThrottle)
@@ -302,9 +317,9 @@ export function createTeachingDemonstration(
   const title = kind === 'takeoff' ? courseDemonstrationTitle(kind, '垂直離地、減速與連續懸停')
     : kind === 'landing' ? courseDemonstrationTitle(kind, '前往藍色降落區、減速與平穩接地')
     : kind === 'straight-line' ? courseDemonstrationTitle(kind, '依序飛過藍、金、綠三圈')
-        : kind === 'roll' ? '橫滾 Roll：推桿、回中與反向修正'
-      : kind === 'pitch' ? '俯仰 Pitch：推桿、回中與反向修正'
-        : '偏航 Yaw：推桿、回中與反向修正'
+        : kind === 'roll' ? '橫滾：推桿、回中與反向修正'
+      : kind === 'pitch' ? '俯仰：推桿、回中與反向修正'
+        : '偏航：推桿、回中與反向修正'
   return Object.freeze({
     schemaVersion: 1,
     kind,
@@ -365,6 +380,18 @@ export function teachingFullRollPhaseAt(demonstration: TeachingDemonstration, ti
   for (const cue of demonstration.cues) {
     if (cue.timeSeconds > time + TEACHING_CLOCK_TOLERANCE_SECONDS) break
     const candidate = cue.fullRollPhase
+    if (typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 0 && candidate <= 6) phase = candidate
+  }
+  return phase
+}
+
+/** Forward and backward flips share measured scene phases on their own replay clock. */
+export function teachingFullFlipPhaseAt(demonstration: TeachingDemonstration, timeSeconds: number): number | null {
+  const time = Number.isFinite(timeSeconds) ? Math.max(0, timeSeconds) : 0
+  let phase: number | null = null
+  for (const cue of demonstration.cues) {
+    if (cue.timeSeconds > time + TEACHING_CLOCK_TOLERANCE_SECONDS) break
+    const candidate = cue.fullFlipPhase
     if (typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 0 && candidate <= 6) phase = candidate
   }
   return phase

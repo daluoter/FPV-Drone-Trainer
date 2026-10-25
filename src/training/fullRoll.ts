@@ -81,8 +81,8 @@ function exerciseHint(phase: number, metrics: Readonly<Record<string, number>>):
   if (metrics.rollCompleted > 0.5) return '已觀察到完整一圈；回中減緩旋轉，再修到 25° 內。保持至少 1.5 m 高度，減緩下降與漂移，確認 0.25 秒。'
   const direction = metrics.rollDirection < 0 ? '左' : metrics.rollDirection > 0 ? '右' : '選左或右'
   return metrics.rollInverted > 0.5
-    ? `已通過倒飛；繼續向${direction}完成同一圈，接近正飛時提早回中減緩旋轉。`
-    : `準備完成；${direction}推 Roll，沿同一方向完整翻一圈。可先適量加油爬升；倒飛時適度收油，不以 Pitch 或 Yaw 代替。`
+    ? `已通過倒置；繼續向${direction}完成同一圈，接近正飛時提早回中減緩旋轉。`
+    : `準備完成；${direction}推橫滾桿，沿同一方向完整翻一圈。可先適量加油爬升；倒置時適度收油，不以 俯仰或偏航 代替。`
 }
 
 function evaluateFullRoll(sample: TrainingSample, context: TrainingEvaluationContext): TrainingEvaluation {
@@ -234,19 +234,19 @@ function evaluateFullRoll(sample: TrainingSample, context: TrainingEvaluationCon
 export const fullRollEvaluator: LessonEvaluatorContract = { evaluate: evaluateFullRoll }
 
 export const FULL_ROLL_LESSON: LessonDefinition = {
-  id: 'full-roll', priority: 2.8, title: '完整橫滾 Roll', availability: 'available', available: true,
+  id: 'full-roll', priority: 2.8, title: '完整橫滾', availability: 'available', available: true,
   description: '從地面自行起飛，取得高度餘裕後向左或右翻一整圈，再恢復正飛與控制。',
-  objectives: ['從地面自行起飛並為翻滾保留高度。', '實際通過倒飛，沿同一方向完成一圈橫滾。', '回中減緩旋轉，再修回正飛並短暫恢復控制。'],
+  objectives: ['從地面自行起飛並為翻滾保留高度。', '實際通過倒置，沿同一方向完成一圈橫滾。', '回中減緩旋轉，再修回正飛並短暫恢復控制。'],
   setup: { requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: ['training-launch', 'landing-surface'], spawnOrientation: { x: 0, y: 0, z: 0, w: 1 } },
   checkpoints: [
     { id: 'roll-ground', title: '地面開始', description: '在起飛區實際接地開始。' },
     { id: 'roll-liftoff', title: '自行起飛至練習高度', description: '自行起飛至至少 8 m，建議約 10 m。' },
     { id: 'roll-ready', title: '橫滾前準備', description: '帶回接近水平、減緩旋轉與漂移，短暫準備 0.1 秒。' },
-    { id: 'roll-inverted', title: '通過倒飛姿態', description: '選左或右 Roll，沿同一圈實際通過倒飛。' },
+    { id: 'roll-inverted', title: '通過倒置姿態', description: '選左或右橫滾，沿同一圈實際通過倒置姿態。' },
     { id: 'roll-upright', title: '完成一圈橫滾', description: '沿同一方向翻完 360° 附近並回到正飛，不以半圈後反向回平代替。' },
     { id: 'roll-recovered', title: '恢復正飛與控制', description: '留在空中，減緩旋轉、下降與漂移，短暫確認 0.25 秒。' },
   ],
-  success: { title: '完整橫滾完成', description: '已觀察到完整橫滾與其後的空中恢復。', criteria: ['實際地面自行起飛', '觀察到同一圈的倒飛與完整橫滾', '空中短暫恢復控制'] },
+  success: { title: '完整橫滾完成', description: '已觀察到完整橫滾與其後的空中恢復。', criteria: ['實際地面自行起飛', '觀察到同一圈的倒置與完整橫滾', '空中短暫恢復控制'] },
   failure: { title: '橫滾尚未完成', description: '一般動作中斷可重新準備；墜毀、解除解鎖或無效資料需要重試。', criteria: ['不能以偏航、前後翻或半圈回平代替', '接地停住不能代替空中恢復'] },
   scoring: { maxScore: 100, minimumPassingScore: 70, minimumActiveSeconds: 0, metricLabels: ['rollProgressDegrees', 'tiltDegrees', 'verticalSpeedMps', 'recoveryDwellSeconds'] },
   hints: ['取得足夠高度，選左或右完整翻一圈；接近正飛時提早回中，再主動修回接近水平。'],
@@ -254,8 +254,8 @@ export const FULL_ROLL_LESSON: LessonDefinition = {
 }
 
 export const FULL_ROLL_LEARNING_CONTENT: LessonLearningContent = {
-  code: 'L10', title: '完整橫滾 Roll', level: '花飛入門', prerequisiteIds: ['basic-recovery'],
-  objectives: ['理解倒飛時的姿態與油門方向。', '自行完成一圈完整橫滾並恢復正飛與控制。'],
-  steps: ['從地面自行起飛，至少 8 m、建議約 10 m，保留翻滾的掉高餘裕。', '帶回接近水平並稍微減緩旋轉與漂移，依提示短暫準備 0.1 秒。', '可先適量加油爬升，再選左或右推 Roll，沿同一方向完整翻一圈。', '倒飛時適度收油，避免推力往地面壓；接近正飛時提早回中減緩旋轉，再修回接近水平。', '保持空中與至少 1.5 m 高度，稍微減緩下降與漂移，確認 0.25 秒後完成；不需降落或回原位置。'],
-  commonMistakes: ['只翻半圈再反向回平；本課要完成同一方向的一整圈。', '用 Pitch 或 Yaw 代替 Roll；需沿機頭到機尾的軸橫滾。', '高度不足或倒飛時持續大油門，讓機體很快掉高。', '已轉回正飛仍繼續推 Roll，沒提早回中停止旋轉。'],
+  code: 'L10', title: '完整橫滾', level: '花飛入門', prerequisiteIds: ['basic-recovery'],
+  objectives: ['理解倒置時的姿態與油門方向。', '自行完成一圈完整橫滾並恢復正飛與控制。'],
+  steps: ['從地面自行起飛，至少 8 m、建議約 10 m，保留翻滾的掉高餘裕。', '帶回接近水平並稍微減緩旋轉與漂移，依提示短暫準備 0.1 秒。', '可先適量加油爬升，再選左或右推橫滾桿，沿同一方向完整翻一圈。', '倒置時適度收油，避免推力往地面壓；接近正飛時提早回中減緩旋轉，再修回接近水平。', '保持空中與至少 1.5 m 高度，稍微減緩下降與漂移，確認 0.25 秒後完成；不需降落或回原位置。'],
+  commonMistakes: ['只翻半圈再反向回平；本課要完成同一方向的一整圈。', '用 俯仰或偏航 代替 Roll；需沿機頭到機尾的軸橫滾。', '高度不足或倒置時持續大油門，讓機體很快掉高。', '已轉回正飛仍繼續推橫滾桿，沒提早回中停止旋轉。'],
 }

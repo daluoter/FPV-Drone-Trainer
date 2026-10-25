@@ -193,7 +193,7 @@ function evaluateStraightLine(sample: TrainingSample, context: TrainingEvaluatio
 export const straightLineEvaluator: LessonEvaluatorContract = { evaluate: evaluateStraightLine }
 
 export const STRAIGHT_LINE_LESSON: LessonDefinition = {
-  id: 'straight-line', priority: 1.5, title: 'Straight Line Through Rings',
+  id: 'straight-line', priority: 1.5, title: '起飛與直線穿圈',
   description: '從地面自行起飛，依序穿過藍色、金色與綠色圈圈。',
   availability: 'available', available: true,
   objectives: ['從地面自行起飛到圈圈附近。', '依序穿過三公尺藍圈、五公尺金圈與八公尺綠圈。', '通過最後一圈即完成，不要求減速或停穩。'],

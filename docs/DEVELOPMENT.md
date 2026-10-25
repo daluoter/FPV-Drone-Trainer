@@ -13,11 +13,11 @@ Open the Vite URL shown in the terminal. Phase 8 exposes the Controller Lab hand
 
 ### Confirm the updated local screen
 
-The current classroom shows **版本 2026.10.24.2** near the page heading. Select **L10 完整橫滾 Roll** and open its dedicated full-roll demonstration; the L00 Roll button remains the short axis-introduction example. There are 12 active flight lessons and 13 demonstrations, covering three L00 axes and L01–L10. See [the L10 guide](L10_FULL_ROLL.md), [the L01 guide](L01_TAKEOFF_HOVER.md) and [the numbering table](LEARNING_CONTRACT.md#課程編號與合併相容性).
+The current release shows **版本 2026.10.24.3** near the page heading. Select **L11 前後翻轉** and open **L11 前翻示範** or **L11 後翻示範**. The L00 俯仰 button remains the short axis-introduction example. There are 13 active flight lessons and 15 demonstrations: three L00 axes, L01–L10 and both L11 directions. Course titles are Chinese only. The retained `split-s` and `orbit` entries are now labelled **L13 翻轉下降** and **L14 正刷鍋**; their existing IDs, rules and historical results remain. L12 大迴旋 is still planned. See [the L11 guide](L11_FULL_FLIP.md), [the L10 guide](L10_FULL_ROLL.md) and [the numbering table](LEARNING_CONTRACT.md#課程編號與合併相容性).
 
-Every existing demonstration has an independent **示範進度** view with its own current step and checkmarks. While a demo is open, this view replaces the learner's live objectives, checkpoints and result view; the learner's session remains unchanged. Clicking a chapter pauses at that step's start; press Play to watch it. For L09, try step 5「產生小幅下沉」and step 7「建立前進或側移」. L09 and L10 start at 0.5×. L09 leaves time to read the next action and observe the actual deviation before correction; L10 separates preparation, inversion, completion of the roll and airborne recovery. Every chapter remains synchronized with the recorded ghost and its actual observed progress.
+Every demonstration has its own **示範進度** view. Opening it replaces the learner's live objectives/checkpoints/result presentation while preserving the learner session. Clicking a chapter pauses at that step's start; press Play to continue. L09, L10 and both L11 demonstrations open at 0.5×. L11 separates ground start, takeoff, preparation, actual inversion, a full forward/backward turn and airborne recovery. Its degree/rate/tilt instruments use the live state or the actual recording and independent progress timeline as appropriate; pause and backward seek restore the matching values and steps.
 
-The user has accepted basic recovery from `2026.10.23.6` / `b30806e`, called L10 at that time and now L09, and the merge/navigation/record-preservation work from `2026.10.24.1` / `d518897`. Earlier acceptance is retained under each stable lesson ID. The user has also accepted L10 Roll in the `2026.10.24.2` / `f1c8745` delivery context. No local storage clear is needed: a saved `hover` selection opens L01, old Hover results remain historical, and other results keep their existing IDs and rule scopes. The earlier L01 merge changed navigation and teaching labels while retaining its flight criteria. New L10 adds its own evaluator without changing the physics. L09 continues to use rules 6, with about 4 m recommended height; see [its guide](L09_BASIC_RECOVERY.md).
+The user accepted basic recovery in `2026.10.23.6` / `b30806e` under its old number L10 (now L09), the L01 merge/navigation/record work in `2026.10.24.1` / `d518897`, and L10 完整橫滾 in `2026.10.24.2` / `f1c8745`. Those approvals remain under stable IDs. New L11 passed automated and browser checks and is awaiting user acceptance; the current batch does not claim a transmitter or pilot calibration result. No local storage clear is needed: saved `hover` selection still opens L01, old Hover results remain historical, and other results keep their IDs/rule scopes. L11 has its own evaluator and rules 6 without changing the physics or L10 criteria.
 
 If these are absent, stop the old terminal process with Ctrl+C, enter the intended repository, then update the feature branch and start the source server:
 
@@ -52,8 +52,8 @@ A Python Playwright smoke check opens that production build in Chromium and
 checks project-path assets, an initialized WebGL2 canvas, explicit keyboard
 arm/disarm, countdown and waiting for explicit arm, keyboard reset, training stop,
 practice/challenge progress isolation, L00 knowledge completion and reload,
-synchronized L01/L02/L03/L04/L05/L06/L07/L08/L09/L10 demo controls without progress writes, L04/L05/L06/L07/L08/L09/L10 seek/pause
-and lesson reload, L02/L03/L04/L05/L06/L07/L08/L09/L10 ground starts, an inline L00 playback exit,
+synchronized L01/L02/L03/L04/L05/L06/L07/L08/L09/L10/L11 demo controls without progress writes, L04/L05/L06/L07/L08/L09/L10/L11 seek/pause
+and lesson reload, L02/L03/L04/L05/L06/L07/L08/L09/L10/L11 ground starts, an inline L00 playback exit,
 independent progress and chapter seeking for every existing demo,
 session-bound result marker seek with progress isolation, fullscreen recovery,
 camera controls, and logo navigation. This workflow does

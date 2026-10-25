@@ -17,7 +17,7 @@ import {
 import Mode2StickOverlay from '../training/StickOverlay'
 import { trainingHint, trainingObjective, wideGateCollisionCause } from '../training/feedback'
 import { createResultReplaySnapshot, type ResultReplayMarker, type ResultReplaySnapshot } from '../training/resultReplay'
-import { createTeachingDemonstration, teachingCueAt, teachingTargetAt, teachingRecoveryPhaseAt, teachingFullRollPhaseAt, type TeachingDemonstration, type TeachingDemonstrationKind } from '../training/demonstrations'
+import { createTeachingDemonstration, teachingCueAt, teachingTargetAt, teachingRecoveryPhaseAt, teachingFullRollPhaseAt, teachingFullFlipPhaseAt, type TeachingDemonstration, type TeachingDemonstrationKind } from '../training/demonstrations'
 import { DIRECTION_CONTROL_TARGET_IDS } from '../training/directionControl'
 import { COORDINATED_TURN_TARGET_IDS } from '../training/coordinatedTurn'
 import { SQUARE_ROUTE_TARGET_IDS } from '../training/squareRoute'
@@ -25,6 +25,7 @@ import { FIGURE_EIGHT_TARGET_IDS } from '../training/figureEight'
 import { createTrainingFieldAnchors } from '../training/field'
 import { createWideGates, WIDE_GATE_IDS } from '../world/wideGates'
 import { measureBasicRecoveryMotion } from '../training/basicRecovery'
+import { measureFullFlipMotion } from '../training/fullFlip'
 import { lessonLearningContent } from '../training/catalog'
 import DemonstrationProgress from '../training/TeachingDemonstrationProgress'
 import { createDemonstrationProgress, demonstrationProgressAt, type TeachingDemonstrationProgressSnapshot } from '../training/demonstrationProgress'
@@ -369,7 +370,11 @@ export default function FreeFlight({
       ? demonstration ? teachingFullRollPhaseAt(demonstration, telemetry.replay.currentTimeSeconds) : null
       : trainingState?.lastEvaluation?.metrics?.rollPhase ?? 0
     rendererRef.current?.setFullRollStage?.(rollPhase)
-  }, [trainingState?.lessonId, trainingState?.lastEvaluation?.metrics?.directionTargetIndex, trainingState?.lastEvaluation?.metrics?.turnTargetIndex, trainingState?.lastEvaluation?.metrics?.squareTargetIndex, trainingState?.lastEvaluation?.metrics?.eightTargetIndex, trainingState?.lastEvaluation?.metrics?.gateTargetIndex, trainingState?.lastEvaluation?.metrics?.recoveryPhase, trainingState?.lastEvaluation?.metrics?.rollPhase, rendererRetryKey, telemetry?.replay.active, telemetry?.replay.currentTimeSeconds, demonstration])
+    const flipPhase = lessonId !== 'full-flip' ? null : telemetry?.replay.active
+      ? demonstration ? teachingFullFlipPhaseAt(demonstration, telemetry.replay.currentTimeSeconds) : null
+      : trainingState?.lastEvaluation?.metrics?.flipPhase ?? 0
+    rendererRef.current?.setFullFlipStage?.(flipPhase)
+  }, [trainingState?.lessonId, trainingState?.lastEvaluation?.metrics?.directionTargetIndex, trainingState?.lastEvaluation?.metrics?.turnTargetIndex, trainingState?.lastEvaluation?.metrics?.squareTargetIndex, trainingState?.lastEvaluation?.metrics?.eightTargetIndex, trainingState?.lastEvaluation?.metrics?.gateTargetIndex, trainingState?.lastEvaluation?.metrics?.recoveryPhase, trainingState?.lastEvaluation?.metrics?.rollPhase, trainingState?.lastEvaluation?.metrics?.flipPhase, rendererRetryKey, telemetry?.replay.active, telemetry?.replay.currentTimeSeconds, demonstration])
 
   useEffect(() => {
     rendererRef.current?.setTrainingPath(trainingPath.map((sample) => sample.state.positionM))
@@ -529,7 +534,7 @@ export default function FreeFlight({
       setDemonstrationSettings(recordedSettings)
       setDemonstration(demo)
       setDemoError(null)
-      runtime.setReplaySpeed(kind === 'basic-recovery' || kind === 'full-roll' ? 0.5 : 1)
+      runtime.setReplaySpeed(kind === 'basic-recovery' || kind === 'full-roll' || kind === 'full-flip' || kind === 'back-flip' ? 0.5 : 1)
       runtime.playReplay()
       setTelemetry(runtime.getTelemetry())
     } catch {
@@ -568,10 +573,13 @@ export default function FreeFlight({
   const recoveryMotionState = telemetry?.replay.active ? replayGhost : telemetry?.state
   const recoveryMotion = showRecoveryHud && recoveryMotionState ? measureBasicRecoveryMotion(recoveryMotionState) : null
   const showRollHud = telemetry?.replay.active ? demonstration?.lessonId === 'full-roll' : trainingState?.lessonId === 'full-roll'
-  const showMotionHud = showRecoveryHud || showRollHud
+  const showFlipHud = telemetry?.replay.active ? demonstration?.lessonId === 'full-flip' : trainingState?.lessonId === 'full-flip'
+  const showMotionHud = showRecoveryHud || showRollHud || showFlipHud
   const rollMotion = showRollHud && recoveryMotionState ? measureBasicRecoveryMotion(recoveryMotionState) : null
   const rollProgress = telemetry?.replay.active ? demonstrationProgress?.metrics?.rollProgressDegrees : trainingState?.lastEvaluation?.metrics?.rollProgressDegrees
   const rollRate = showRollHud && recoveryMotionState ? -recoveryMotionState.angularVelocityBodyRadPerSec.z * 180 / Math.PI : undefined
+  const flipMotion = showFlipHud && recoveryMotionState ? measureFullFlipMotion(recoveryMotionState) : null
+  const flipProgress = telemetry?.replay.active ? demonstrationProgress?.metrics?.flipProgressDegrees : trainingState?.lastEvaluation?.metrics?.flipProgressDegrees
   const recovery = trainingState?.recoveryInProgress ? trainingState.lastRecovery : null
   const currentObjective = trainingObjective(trainingState?.lessonId ?? null, trainingState?.lastEvaluation)
   const visibleResultReplay = resultReplay?.sessionId === trainingState?.result?.sessionId && !demonstration ? resultReplay : null
@@ -597,7 +605,10 @@ export default function FreeFlight({
 
       <div className="school-demo-bar school-demo-toolbar" aria-label="四軸與課程示範">
         <strong>L00 看懂四軸</strong>
-        {([['roll', '橫滾 Roll'], ['pitch', '俯仰 Pitch'], ['yaw', '偏航 Yaw'], ['takeoff', '起飛與懸停示範'], ['straight-line', '直線示範'], ['landing', '降落示範'], ['direction-control', '方向示範'], ['coordinated-turn', '轉彎示範'], ['square-route', '方形示範'], ['figure-eight', '八字示範'], ['wide-gate', '穿門示範'], ['basic-recovery', '恢復示範'], ['full-roll', '橫滾示範']] as const).map(([kind, label]) => <button className="lab-button lab-button-small" type="button" key={kind} disabled={trainingSettingsLocked || Boolean(telemetry?.armed) || renderingState !== 'ready'} onClick={() => startDemonstration(kind)}>{lessonLearningContent(kind) ? `${lessonLearningContent(kind)?.code} ${label}` : label}</button>)}
+        {([['roll', '橫滾'], ['pitch', '俯仰'], ['yaw', '偏航'], ['takeoff', '起飛與懸停示範'], ['straight-line', '直線示範'], ['landing', '降落示範'], ['direction-control', '方向示範'], ['coordinated-turn', '轉彎示範'], ['square-route', '方形示範'], ['figure-eight', '八字示範'], ['wide-gate', '穿門示範'], ['basic-recovery', '恢復示範'], ['full-roll', '橫滾示範'], ['full-flip', '前翻示範'], ['back-flip', '後翻示範']] as const).map(([kind, label]) => {
+          const course = lessonLearningContent(kind === 'back-flip' ? 'full-flip' : kind)
+          return <button className="lab-button lab-button-small" type="button" key={kind} disabled={trainingSettingsLocked || Boolean(telemetry?.armed) || renderingState !== 'ready'} onClick={() => startDemonstration(kind)}>{course ? `${course.code} ${label}` : label}</button>
+        })}
         <span>左桿：油門／偏航 · 右桿：橫滾／俯仰</span>
       </div>
       {fullscreenError && <p role="status">{fullscreenError}</p>}
@@ -642,6 +653,14 @@ export default function FreeFlight({
                   <span>機身傾角<b data-testid="roll-tilt">{format(rollMotion?.tiltDegrees, 1)}°</b></span>
                 </div>
               </div>}
+              {showFlipHud && <div className="flight-recovery-hud" role="group" aria-label="翻轉練習數值">
+                <strong>{telemetry?.replay.active ? '回放翻轉數值' : '即時翻轉數值'} · 前翻＋</strong>
+                <div>
+                  <span>本圈進度<b data-testid="flip-progress">{format(flipProgress ?? 0, 0)}°</b></span>
+                  <span>俯仰速度<b data-testid="flip-rate">{format(flipMotion?.flipRateDegreesPerSecond, 1)}°/s</b></span>
+                  <span>機身傾角<b data-testid="flip-tilt">{format(flipMotion?.tiltDegrees, 1)}°</b></span>
+                </div>
+              </div>}
             </div>
             {renderingState !== 'ready' && (
               <div className="flight-rendering-error" role="alert" data-testid="flight-rendering-error">
@@ -666,7 +685,7 @@ export default function FreeFlight({
               : demonstration ? demonstration.title : '飛行回放'} · 真人飛行已停止</div>}
             {trainingState?.phase === 'ACTIVE' && <div tabIndex={0} aria-label="目前練習提示" className={`school-viewport-hint${recovery ? ' is-recovering' : ''}`}>{recovery
               ? <><strong>重練原因（當時數值）：{recovery.message}</strong><span>{recovery.hint}</span></>
-              : currentObjective && trainingState.lastEvaluation?.recovery !== 'restart' ? <><strong>{currentObjective.title}</strong><span>{trainingState.lessonId === 'direction-control' || trainingState.lessonId === 'coordinated-turn' || trainingState.lessonId === 'square-route' || trainingState.lessonId === 'figure-eight' || trainingState.lessonId === 'wide-gate' || trainingState.lessonId === 'basic-recovery' || trainingState.lessonId === 'full-roll' || !trainingState.lastEvaluation?.hint ? currentObjective.detail : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</span></> : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>}
+              : currentObjective && trainingState.lastEvaluation?.recovery !== 'restart' ? <><strong>{currentObjective.title}</strong><span>{trainingState.lessonId === 'direction-control' || trainingState.lessonId === 'coordinated-turn' || trainingState.lessonId === 'square-route' || trainingState.lessonId === 'figure-eight' || trainingState.lessonId === 'wide-gate' || trainingState.lessonId === 'basic-recovery' || trainingState.lessonId === 'full-roll' || trainingState.lessonId === 'full-flip' || !trainingState.lastEvaluation?.hint ? currentObjective.detail : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</span></> : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>}
           </div>
           <div className="flight-controls" aria-label="Flight controls">
             <div className="flight-control-group">

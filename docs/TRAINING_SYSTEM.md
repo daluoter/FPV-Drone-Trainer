@@ -1,21 +1,10 @@
 # Training system
 
-Release **2026.10.24.2** presents lessons **L01–L10**: combined
-takeoff/stationary hover, straight-line rings, landing, direction control,
-coordinated turns, square route, figure eight, wide gates, basic recovery and a complete roll with airborne recovery.
-L00 knowledge completion is separate; retained Split-S and Orbit are L12/L13.
-The learning menu has 12 flight lessons. `LEARNING_LESSONS` excludes the retired
-standalone `hover` entry, while the registry and evaluator remain available for
-historical compatibility. The `takeoff` ID retains its existing 1.5-second
-settled-hover condition, so the merge changes teaching labels and navigation
-without changing criteria or rule scopes. Saved `hover` selection opens L01;
-old Hover records are kept and are not credited as new L01 results.
+The **2026.10.24.3** batch adds **L11 前後翻轉** to lessons L01–L10. Its `full-flip` evaluator observes a real full pitch turn in either direction and subsequent airborne recovery. Course names are Chinese only; retained `split-s` and `orbit` entries are labelled **L13 翻轉下降** and **L14 正刷鍋**, preserving their existing rules and records. Their earlier prototypes remain; this batch does not add their complete teaching packages.
 
-The user accepted basic recovery in `2026.10.23.6` / `b30806e`, under its old
-number L10. It is now L09 and retains rules 6. Earlier approvals carry forward
-with the stable lesson IDs. Exact local build, browser and hardware details
-were not supplied. See [the numbering table](LEARNING_CONTRACT.md#課程編號與合併相容性)
-and [the roadmap](LEARNING_ROADMAP.md). The user also accepted the L01 merge, renumbering and record preservation in the `.1` delivery context. L10 (`full-roll`) uses rules 6 under a new ID and was accepted by the user in the `2026.10.24.2` / `f1c8745` delivery context. The next planned course is L11 Flip.
+The learning menu has 13 flight lessons, while the registry retains historical `hover`. `LEARNING_LESSONS` excludes that retired standalone entry. L01 `takeoff` retains its existing 1.5-second settled-hover condition. Saved `hover` selection opens L01; old Hover results remain historical and are not credited as new L01 completions. Display numbers do not serve as storage keys.
+
+The user accepted basic recovery in `2026.10.23.6` / `b30806e` under its old number L10 (now L09), the L01 merge/navigation/record work in the `.1` delivery context, and L10 完整橫滾 in `2026.10.24.2` / `f1c8745`. Those approvals remain. L11 automated and browser checks passed; user acceptance and common transmitter/pilot calibration remain pending. See [the numbering table](LEARNING_CONTRACT.md#課程編號與合併相容性), [the roadmap](LEARNING_ROADMAP.md) and [the L11 guide](L11_FULL_FLIP.md).
 
 The evaluator result is based on finite fixed-step drone state and geometry. A
 stick sequence cannot pass a lesson. Synthetic fixture success is deterministic
@@ -200,7 +189,7 @@ thresholds pending broader learner and pilot calibration. No fixed
 XYZ return, heading target or long hover dwell is imposed. The motion HUD reads
 live state or the paused ghost as appropriate. See [the L09 guide](L09_BASIC_RECOVERY.md).
 
-### Complete roll
+### 完整橫滾
 
 L10 (`full-roll`, rules 6) has six checkpoints: ground, manual takeoff,
 preparation, observed inversion, one full roll and airborne recovery. Its
@@ -230,10 +219,20 @@ checkpoints. Practice is untimed; challenge allows 300 s.
 The real-RC simulated demonstration uses the same evaluator, starts on the
 ground and opens at 0.5×. It has its own chapter progress; replay cannot count
 as a learner result. The live/replay roll HUD shows current episode progress,
-signed roll rate (right positive) and actual tilt alongside altitude/XYZ. New
+signed roll rate (right positive) and actual tilt alongside altitude/XYZ.
 The user accepted L10 in the `2026.10.24.2` / `f1c8745` delivery context. See [the L10 guide](L10_FULL_ROLL.md).
 
-### Split-S
+### 前後翻轉
+
+L11 (`full-flip`, rules 6) has ground, manual takeoff, preparation, inversion, full-turn and recovery checkpoints. Suggested height is 10 m, preparation starts at 8 m or higher inside an 80 m horizontal radius. Preparation takes 0.1 s with tilt ≤25°, body rate ≤120°/s, horizontal speed ≤8 m/s and vertical speed within ±3.5 m/s.
+
+The evaluator accumulates signed net actual quaternion rotation about the body pitch axis and cross-checks the measured angular rate, including cumulative episode consistency. Forward is positive (`-body X`); backward is negative. Either direction may pass. The same valid episode must show inversion (tilt ≥150°), 340–380° of directed net rotation and return to tilt ≤30°. Half-turn rocking, yaw spins, rolls, rate-only traces, pose-only changes, antipodal quaternion signs, discontinuous time/path and overrotation cannot create completion.
+
+Recovery remains airborne at least 1.5 m high, tilt ≤30°, body rate ≤120°/s, horizontal speed ≤8 m/s and vertical speed −2.5 to +4 m/s for 0.2 consecutive seconds. Contact/low altitude, leaving the area, off-axis motion, reversal or excessive rotation invalidates the current episode. Earlier checkpoint milestones may remain, but a new preparation/inversion/full turn is required. Crash, disarm, reset or invalid/discontinuous samples end the attempt. Practice is untimed; challenge allows 300 s.
+
+Forward and backward teaching recordings use kinds `full-flip` and `back-flip`, both bound to lesson `full-flip`. Both start on the ground, use actual controller/physics samples and open at 0.5×. Their own checkpoint timelines and per-sample degree metrics drive replay instruments and chapters without writing learner results. The live/replay instruments show turn progress, signed pitch rate (forward positive) and actual tilt beside altitude/XYZ. See [the L11 guide](L11_FULL_FLIP.md).
+
+### 翻轉下降
 
 The setup requests an explicit disarmed reset at `{ x: 0, y: 25, z: 0 }` with
 identity orientation. The evaluator orders `entry -> inverted -> descent ->
@@ -243,7 +242,7 @@ actual heading reversal, then upright recovery with bounded altitude, speed,
 and position. The inverted checkpoint must precede reversal, so an upright
 U-turn is not a pass.
 
-### Orbit / 刷鍋
+### 正刷鍋 / 刷鍋
 
 The orbit point of interest is the `orbit-poi` tower. The evaluator requires
 real horizontal motion in the radius/height/speed envelope and tangent camera
@@ -267,11 +266,11 @@ references. L08 appends `wide-gate-1` through `wide-gate-3`, with opening size
 positions/dimensions and never mutate Three.js objects. L08's frame meshes use
 the exact shared collider boxes; the opening outline and arrow are guidance
 only. `setWideGateTarget(id | null)` toggles those overlays without removing
-passed physical frames. Other lesson targets, the Split-S reference and orbit
+passed physical frames. Other lesson targets, the `split-s` reference and orbit
 tower remain visual guides without static collision. L09 appends `recovery-zone`
 at launch X/Z and ground + 4 m, with a 40 m horizontal practice radius. The
 `basic-recovery-field` is a visual practice boundary and height guide; it does
-not add collision or move the drone. Stage changes preserve the scene and canvas. L10 appends `roll-zone` and its own non-solid full-roll field with ground-relative height and horizontal guides; changing the lesson or stage never moves the physical drone.
+not add collision or move the drone. Stage changes preserve the scene and canvas. L10 appends `roll-zone` and its own non-solid full-roll field with ground-relative height and horizontal guides; changing the lesson or stage never moves the physical drone. L11 appends `flip-zone` after `roll-zone` and a separate non-solid `full-flip-field`, with ground-relative preparation/target height, world-fixed horizontal and forward/backward references. `setFullFlipStage` changes stage colours without writing flight state.
 
 ## Progress persistence and result feedback
 
@@ -288,7 +287,7 @@ the original document is preserved rather than relabelled as new completion.
 ## Evidence boundaries
 
 The original automated evaluator fixtures cover positive and negative traces for all four
-lessons, retry isolation, disarmed telemetry, upright Split-S U-turns,
+lessons, retry isolation, disarmed telemetry, upright `split-s` U-turns,
 yaw-in-place/oscillatory orbit behavior, and path gaps/teleports. They do not
 prove that a human can pilot the maneuver in a browser or that the simplified
 physics model is realistic. A local headless Chromium smoke run covered the
@@ -304,16 +303,16 @@ uses separate validated envelopes, preserving the original v1 document. Result
 and best-score views remain bound to the result context after changing settings;
 failed writes are visible and malformed history is not automatically overwritten.
 Current L09 attempts use rules 6; L05–L08 stay on rules 5 and earlier scopes
-remain unchanged, including rules 4 for L02–L04. New L10 uses its own `full-roll` ID at rules 6 without modifying any earlier result. The prior L09 rules-5 document
+remain unchanged, including rules 4 for L02–L04. L10 uses `full-roll` and new L11 uses `full-flip`, each at rules 6 without modifying any earlier result. The prior L09 rules-5 document
 remains readable as historical data and is not overwritten or relabeled as a
 rules-6 completion. Current progress loads the per-lesson rule scope. Physics
 context stays version 1; settings, input source and practice/challenge remain
 separate comparison conditions.
 
-The 13 existing demo kinds cover three L00 axis examples and L01–L10.
+The 15 demo kinds cover three L00 axis examples, L01–L10 and the two L11 directions.
 Their bounded recordings are generated through the real 240 Hz simulator and
 play through the independent ghost. The L01 demonstration explicitly teaches both takeoff and continuous hover.
-This release does not add Split-S or Orbit demonstration videos.
+This release does not add demonstrations for L13 翻轉下降 or L14 正刷鍋.
 
 `createDemonstrationProgress` observes each retained course recording once with
 its own checkpoint/evaluator state, outside the live session and progress store.
@@ -352,7 +351,7 @@ L04 Straight Line requires ordered start/transit, observed deceleration inside
 the brake zone, and a continuous settled stop on an eight-metre route.
 
 The scene's pad anchor matches the geometry-clamped initial state. References
-shift with configured ground; Split-S altitude gates use height above ground.
+shift with configured ground; `split-s` altitude gates use height above ground.
 Airborne lesson setup resolves from these same anchors. A disarmed preparation
 hold advances the authoritative fixed-step clock without falling from the lesson
 spawn; successful explicit arm releases it. Ordinary disarmed free flight still

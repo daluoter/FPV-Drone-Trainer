@@ -735,7 +735,7 @@ describe('L10 observed complete-roll results', () => {
   it('reports measured full-turn and airborne recovery without implying mastery or requiring a landing', () => {
     const feedback = summarizeTrainingResult({ ...rollResult, outcome: 'SUCCESS', completedCheckpoints: 6,
       metrics: { ...rollResult.metrics, rollPhase: 6, rollCompleted: 1, rollInverted: 1, rollProgressDegrees: 359 } })
-    expect(feedback.observedStrength).toContain('同一圈的實際倒飛、完整橫滾')
+    expect(feedback.observedStrength).toContain('同一圈的實際倒置、完整橫滾')
     expect(feedback.observedStrength).toContain('空中正飛與控制恢復')
     expect(feedback.observedGap).toBeNull()
     expect(feedback.nextPractice).toContain('熟悉後再練另一側')
@@ -763,13 +763,13 @@ describe('L10 observed complete-roll results', () => {
     expect(preparing.observedGap).toContain('尚未完成橫滾前的短暫準備')
     const partial = summarizeTrainingResult({ ...rollResult, metrics: { ...rollResult.metrics, rollProgressDegrees: 97 } })
     expect(partial.observedGap).toContain('本圈橫滾進度約 97.0°')
-    expect(partial.observedGap).toContain('尚未觀察到這一圈的實際倒飛與完整橫滾')
-    expect(partial.observedStrength).not.toContain('倒飛姿態')
+    expect(partial.observedGap).toContain('尚未觀察到這一圈的實際倒置與完整橫滾')
+    expect(partial.observedStrength).not.toContain('倒置姿態')
     const inverted = summarizeTrainingResult({ ...rollResult, metrics: { ...rollResult.metrics,
       rollPhase: 4, rollInverted: 1, rollProgressDegrees: 184 } })
-    expect(inverted.observedStrength).toContain('這一圈的實際倒飛姿態')
+    expect(inverted.observedStrength).toContain('這一圈的實際倒置姿態')
     expect(inverted.observedGap).toContain('尚未沿同一方向完成一圈並回正')
-    expect(inverted.observedGap).toContain('倒飛後反向翻回不等於完成')
+    expect(inverted.observedGap).toContain('倒置後反向翻回不等於完成')
     expect(inverted.observedStrength).not.toContain('完整橫滾')
   })
 
@@ -778,8 +778,8 @@ describe('L10 observed complete-roll results', () => {
       metrics: { ...rollResult.metrics, rollPhase: 5, rollEpisodeValid: 0, rollInterrupted: 1,
         rollInverted: 0, rollCompleted: 0, rollProgressDegrees: 0 } })
     expect(feedback.observedGap).toContain('先前這一圈已中斷')
-    expect(feedback.observedGap).toContain('歷史倒飛或回正標記不代替新一圈')
-    expect(feedback.observedStrength).not.toContain('實際倒飛姿態')
+    expect(feedback.observedGap).toContain('歷史倒置或回正標記不代替新一圈')
+    expect(feedback.observedStrength).not.toContain('實際倒置姿態')
     expect(feedback.observedStrength).not.toContain('一圈完整橫滾')
     expect(feedback.nextPractice).toContain('清空本次步驟')
     expect(feedback.nextPractice).not.toMatch(/(?:步驟|進度)[^。；]*保留|保留[^。；]*(?:步驟|進度)/)
@@ -845,8 +845,129 @@ describe('captured roll interruption in terminal summaries', () => {
         rollInverted: 0, rollCompleted: 0, altitudeM: 10, insideRollArea: 1, groundTouching: 0, ...captured } })
     expect(feedback.observedGap).toContain(expected)
     expect(feedback.observedGap).toContain('挑戰逾時')
-    expect(feedback.observedStrength).not.toContain('實際倒飛姿態')
+    expect(feedback.observedStrength).not.toContain('實際倒置姿態')
     expect(feedback.nextPractice).toContain('清空本次步驟')
     expect(feedback.nextPractice).not.toContain('本次先前步驟保留')
+  })
+})
+
+describe('L11 observed front and back flip results', () => {
+  const flipResult: TrainingResult = { ...result, lessonId: 'full-flip', totalCheckpoints: 6,
+    completedCheckpoints: 3, attemptContext: { ...currentContext, rulesVersion: 6 },
+    metrics: { flipPhase: 3, flipEpisodeValid: 1, flipProgressDegrees: 0, flipDirection: 0,
+      flipInverted: 0, flipCompleted: 0, flipInterrupted: 0, groundTouching: 0,
+      insideFlipArea: 1, altitudeM: 10, tiltDegrees: 0, bodyRateDegreesPerSecond: 0,
+      horizontalSpeedMps: 0, verticalSpeedMps: 0, recoveryDwellSeconds: 0 } }
+
+  it.each([[1, '前翻'], [-1, '後翻']] as const)('reports only the measured completed direction %s and airborne recovery', (direction, label) => {
+    const feedback = summarizeTrainingResult({ ...flipResult, outcome: 'SUCCESS', completedCheckpoints: 6,
+      metrics: { ...flipResult.metrics, flipPhase: 6, flipCompleted: 1, flipInverted: 1,
+        flipDirection: direction, flipProgressDegrees: 359 } })
+    expect(feedback.observedStrength).toContain(`實際倒置與${label}一整圈`)
+    expect(feedback.observedStrength).toContain('空中正飛與控制恢復')
+    expect(feedback.observedGap).toBeNull()
+    expect(feedback.nextPractice).toContain('熟悉後再練另一方向')
+    expect(feedback.nextPractice).toContain('不需要回到原位置或降落')
+    expect(feedback.scopeNote).toContain('不代表已熟練')
+    expect(JSON.stringify(feedback)).not.toMatch(/Roll|Pitch|Yaw|Flip|倒飛/)
+  })
+
+  it('does not infer success, inversion or liftoff from absent observations', () => {
+    const missing = summarizeTrainingResult({ ...flipResult, metrics: {} })
+    expect(missing.observedStrength).toBeNull()
+    expect(missing.observedGap).toContain('分段資料不足')
+    expect(missing.observedGap).not.toContain('尚未完成從地面')
+    const inconsistent = summarizeTrainingResult({ ...flipResult, outcome: 'SUCCESS', completedCheckpoints: 6,
+      metrics: { flipPhase: 6 } })
+    expect(inconsistent.observedStrength).toBeNull()
+    expect(inconsistent.observedGap).toContain('分段資料不足')
+    const none = summarizeTrainingResult({ ...flipResult, outcome: 'SUCCESS', sampleCount: 0,
+      completedCheckpoints: 6, metrics: { flipPhase: 6, flipInverted: 1, flipCompleted: 1 } })
+    expect(none.observedStrength).toBeNull()
+    expect(none.observedGap).toContain('沒有有效的已解鎖飛行樣本')
+    const ground = summarizeTrainingResult({ ...flipResult, metrics: { flipPhase: 1 } })
+    expect(ground.observedStrength).toBeNull()
+    expect(ground.observedGap).toContain('尚未完成從地面自行起飛並取得翻轉練習高度')
+  })
+
+  it('keeps preparation, partial pitch rotation and inversion distinct', () => {
+    const prepare = summarizeTrainingResult({ ...flipResult,
+      metrics: { ...flipResult.metrics, flipPhase: 2, flipEpisodeValid: 0 } })
+    expect(prepare.observedGap).toContain('尚未完成翻轉前的短暫準備')
+    const partial = summarizeTrainingResult({ ...flipResult,
+      metrics: { ...flipResult.metrics, flipProgressDegrees: 97, flipDirection: 1 } })
+    expect(partial.observedGap).toContain('本圈翻轉進度約 97.0°')
+    expect(partial.observedGap).toContain('尚未觀察到這一圈的實際倒置與完整翻轉')
+    expect(partial.observedStrength).not.toContain('倒置姿態')
+    const inverted = summarizeTrainingResult({ ...flipResult,
+      metrics: { ...flipResult.metrics, flipPhase: 4, flipProgressDegrees: 184, flipInverted: 1 } })
+    expect(inverted.observedStrength).toContain('這一圈的實際倒置姿態')
+    expect(inverted.observedGap).toContain('尚未沿同一方向完成一圈並回正')
+    expect(inverted.observedGap).toContain('倒置後反向翻回不等於完成')
+    expect(inverted.observedStrength).not.toContain('一圈完整翻轉')
+  })
+
+  it('reports measured recovery blockers using the more permissive flip limits', () => {
+    const recoveredTurn = { ...flipResult.metrics, flipPhase: 5, flipInverted: 1,
+      flipCompleted: 1, flipProgressDegrees: 356, recoveryDwellSeconds: 0.08 }
+    const tilt = summarizeTrainingResult({ ...flipResult,
+      metrics: { ...recoveredTurn, tiltDegrees: 37 } })
+    expect(tilt.observedStrength).toContain('已觀察到一圈完整翻轉')
+    expect(tilt.observedGap).toContain('結束時傾角 37.0°，需修回 30° 內')
+    expect(tilt.observedGap).toContain('恢復確認 0.08／0.20 s')
+    expect(tilt.nextPractice).toContain('回中不會自動回平或煞停')
+    const acceptedClimb = summarizeTrainingResult({ ...flipResult,
+      metrics: { ...recoveredTurn, verticalSpeedMps: 3.8, horizontalSpeedMps: 7 } })
+    expect(acceptedClimb.observedGap).not.toMatch(/升降速度|水平速度/)
+    const sink = summarizeTrainingResult({ ...flipResult,
+      metrics: { ...recoveredTurn, verticalSpeedMps: -3.2 } })
+    expect(sink.observedGap).toContain('升降速度 -3.2 m/s（上＋／下−），尚未回到 −2.5～+4 m/s')
+  })
+
+  it.each([
+    [1, {}, '這一圈曾接地'],
+    [2, { interruptionAltitudeM: 1.1 }, '中斷時離地 1.1 m'],
+    [3, { interruptionLaunchDistanceM: 85 }, '中斷時距起飛點 85.0 m'],
+    [4, { interruptionOffAxisDegrees: 126 }, '橫滾／偏航旋轉累積約 126.0°'],
+    [5, {}, '這一圈持續過轉'],
+    [6, {}, '這一圈反向轉過了起始姿態'],
+    [7, { interruptionAltitudeM: 7.8 }, '尚未開始翻轉便降到離地 7.8 m'],
+  ] as const)('retains interruption evidence on timeout without reviving historical milestones: %s', (reason, captured, expected) => {
+    const feedback = summarizeTrainingResult({ ...flipResult, completedCheckpoints: 5,
+      message: '翻轉挑戰逾時：尚未完成完整翻轉與空中恢復。',
+      metrics: { ...flipResult.metrics, flipPhase: 5, flipEpisodeValid: 0,
+        flipInterrupted: 1, flipInterruptionReason: reason, flipInverted: 1, flipCompleted: 1,
+        ...captured } })
+    expect(feedback.observedGap).toContain(expected)
+    expect(feedback.observedGap).toContain('挑戰逾時')
+    expect(feedback.observedGap).toContain('歷史倒置或回正標記不代替新一圈')
+    expect(feedback.observedStrength).not.toMatch(/實際倒置姿態|一圈完整翻轉/)
+    expect(feedback.nextPractice).toContain('清空本次步驟')
+    expect(feedback.nextPractice).not.toMatch(/步驟保留|就地/)
+  })
+
+  it.each([
+    [{ groundTouching: 1 }, '地面停住不能算空中恢復'],
+    [{ altitudeM: 1.2 }, '未保留空中恢復需要的 1.5 m 高度'],
+    [{ insideFlipArea: 0 }, '超出起飛點半徑 80 m'],
+  ] as const)('reports current grounding or envelope facts without inventing a recorded interruption: %j', (changes, expected) => {
+    const feedback = summarizeTrainingResult({ ...flipResult,
+      metrics: { ...flipResult.metrics, ...changes } })
+    expect(feedback.observedGap).toContain(expected)
+    expect(feedback.nextPractice).toContain('從地面重新開始')
+  })
+
+  it.each([
+    ['Ground impact latched a crash; reset required.', '本次發生墜毀'],
+    ['Flight disarmed after focus was lost.', '解除解鎖、失去焦點'],
+    ['翻轉停止：姿態與角速度不一致。', '飛行資料無效、中斷或被重設'],
+    ['翻轉停止：缺少有效的地面接觸資料。', '飛行資料無效、中斷或被重設'],
+  ])('prioritizes the terminal stop cause over missing samples or stale completed flags: %s', (message, cause) => {
+    const feedback = summarizeTrainingResult({ ...flipResult, message, sampleCount: 0,
+      metrics: { ...flipResult.metrics, flipPhase: 5, flipInverted: 1, flipCompleted: 1 } })
+    expect(feedback.observedGap).toContain(cause)
+    expect(feedback.observedStrength).toBeNull()
+    expect(feedback.observedGap).not.toContain('沒有有效的已解鎖飛行樣本')
+    expect(feedback.nextPractice).toContain('清空本次步驟')
   })
 })

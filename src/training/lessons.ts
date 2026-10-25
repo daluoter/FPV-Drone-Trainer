@@ -7,6 +7,7 @@ import { FIGURE_EIGHT_LESSON } from './figureEight'
 import { WIDE_GATE_LESSON } from './wideGate'
 import { BASIC_RECOVERY_LESSON } from './basicRecovery'
 import { FULL_ROLL_LESSON } from './fullRoll'
+import { FULL_FLIP_LESSON } from './fullFlip'
 import {
   hoverEvaluator,
   orbitEvaluator,
@@ -50,7 +51,7 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
   phase7Lesson({
     id: 'hover',
     priority: 1,
-    title: 'Hover',
+    title: '定點懸停',
     description: 'Establish and hold a bounded hover inside the elevated hover zone above the takeoff pad.',
     objectives: [
       'Reach the hover zone at its reference altitude.',
@@ -94,7 +95,7 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
   phase7Lesson({
     id: 'split-s',
     priority: 3,
-    title: 'Split-S',
+    title: '翻轉下降',
     description: 'Use the elevated Split-S reference to invert, descend through the half-loop, reverse heading, and recover level.',
     objectives: [
       'Enter from sufficient altitude with bounded speed and position.',
@@ -142,7 +143,7 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
   phase7Lesson({
     id: 'orbit',
     priority: 4,
-    title: 'Orbit / 刷鍋',
+    title: '正刷鍋',
     description: 'Fly one directed geometric lap around the orbit tower while preserving radius, height, speed, and camera heading.',
     objectives: [
       'Enter the orbit at the reference height and approximately ten-metre radius.',
@@ -226,6 +227,7 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
   WIDE_GATE_LESSON,
   BASIC_RECOVERY_LESSON,
   FULL_ROLL_LESSON,
+  FULL_FLIP_LESSON,
 ]
 
 /** Current learning navigation merges hover into the existing takeoff goal. */

@@ -72,6 +72,7 @@ describe('training attempt provenance', () => {
     expect(trainingRulesVersionForLesson('wide-gate')).toBe(5)
     expect(trainingRulesVersionForLesson('basic-recovery')).toBe(6)
     expect(trainingRulesVersionForLesson('full-roll')).toBe(6)
+    expect(trainingRulesVersionForLesson('full-flip')).toBe(6)
     for (const lessonId of [null, 'takeoff', 'hover', 'straight-line', 'landing', 'direction-control', 'split-s', 'orbit']) {
       expect(trainingRulesVersionForLesson(lessonId)).toBe(4)
     }

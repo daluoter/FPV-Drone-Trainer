@@ -6,7 +6,7 @@ import { createTeachingDemonstration } from './demonstrations'
 import { createDemonstrationProgress, demonstrationProgressAt } from './demonstrationProgress'
 import { lessonById } from './lessons'
 
-const COURSE_KINDS = ['takeoff', 'straight-line', 'landing', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll'] as const
+const COURSE_KINDS = ['takeoff', 'straight-line', 'landing', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'back-flip'] as const
 
 describe('independent teaching demonstration progress', () => {
   it.each(COURSE_KINDS)('observes all %s checkpoints from the actual recording and exposes chapter seeks', (kind) => {
@@ -14,7 +14,7 @@ describe('independent teaching demonstration progress', () => {
     const demonstration = createTeachingDemonstration(settings, kind)
     const before = JSON.stringify(demonstration)
     const timeline = createDemonstrationProgress(demonstration, settings)
-    const lesson = lessonById(kind)!
+    const lesson = lessonById(demonstration.lessonId)!
     const finish = demonstrationProgressAt(timeline, timeline.durationSeconds)
     expect(timeline.mode).toBe('lesson-checkpoints')
     expect(timeline.steps.map((step) => step.id)).toEqual(lesson.checkpoints.map((step) => step.id))
@@ -26,7 +26,7 @@ describe('independent teaching demonstration progress', () => {
     expect(finish.steps.every((step) => step.startedAtSeconds !== null && step.startedAtSeconds <= step.completedAtSeconds!)).toBe(true)
     const retained = new Set(demonstration.recording.samples.map((sample) => sample.timestampSeconds))
     expect(finish.steps.every((step) => retained.has(step.completedAtSeconds!))).toBe(true)
-    expect(timeline.frames.length).toBeLessThanOrEqual(kind === 'full-roll' ? demonstration.recording.samples.length + 1 : lesson.checkpoints.length + 2)
+    expect(timeline.frames.length).toBeLessThanOrEqual(['full-roll', 'full-flip', 'back-flip'].includes(kind) ? demonstration.recording.samples.length + 1 : lesson.checkpoints.length + 2)
     expect(timeline.title).toMatch(/^L\d\d /u)
     expect(Object.isFrozen(timeline)).toBe(true)
     expect(Object.isFrozen(timeline.steps)).toBe(true)
@@ -76,6 +76,52 @@ describe('independent teaching demonstration progress', () => {
     expect(backward.steps.slice(1).every((step) => step.completedAtSeconds === null)).toBe(true)
   })
 
+  it.each(['full-flip', 'back-flip'] as const)('keeps actual %s degrees and direction synchronized with its own progress and backward seek', (kind) => {
+    const settings = createTuningPreset('beginner')
+    const demo = createTeachingDemonstration(settings, kind)
+    const timeline = createDemonstrationProgress(demo, settings)
+    const direction = kind === 'full-flip' ? 1 : -1
+    const finish = demonstrationProgressAt(timeline, timeline.durationSeconds)
+    expect(finish).toMatchObject({ kind, lessonId: 'full-flip', complete: true, completedSteps: 6 })
+    expect(finish.metrics?.flipProgressDegrees).toBeGreaterThanOrEqual(340)
+    expect(finish.metrics?.flipDirection).toBe(direction)
+    expect((finish.metrics?.flipSignedDegrees ?? 0) * direction).toBeGreaterThanOrEqual(340)
+    const inversionTime = finish.steps[3].completedAtSeconds!
+    const inversion = demonstrationProgressAt(timeline, inversionTime)
+    expect(inversion.completedSteps).toBe(4)
+    expect(inversion.metrics?.flipProgressDegrees).toBeGreaterThanOrEqual(140)
+    expect(inversion.metrics?.flipProgressDegrees).toBeLessThan(240)
+    expect(demonstrationProgressAt(timeline, inversionTime - 0.001).completedSteps).toBe(3)
+    expect(demonstrationProgressAt(timeline, inversionTime - 1e-11)).toEqual(inversion)
+    const later = demonstrationProgressAt(timeline, inversionTime + 0.1)
+    expect(later.metrics?.flipProgressDegrees).toBeGreaterThan(inversion.metrics?.flipProgressDegrees ?? 0)
+    expect(timeline.frames.length).toBeLessThanOrEqual(demo.recording.samples.length + 1)
+    expect(timeline.frames.every((frame) => !frame.metrics || Object.isFrozen(frame.metrics))).toBe(true)
+    // A later observation must not mutate the earlier instrument snapshot.
+    expect(inversion.metrics?.flipProgressDegrees).toBeLessThan(240)
+    const backward = demonstrationProgressAt(timeline, 0)
+    expect(backward.complete).toBe(false)
+    expect(backward.metrics?.flipProgressDegrees).toBe(0)
+    expect(backward.metrics?.flipDirection).toBe(0)
+    expect(backward.steps.slice(1).every((step) => step.completedAtSeconds === null)).toBe(true)
+  })
+
+  it.each(['full-flip', 'back-flip'] as const)('keeps an interrupted %s recording incomplete despite a completed final caption', (kind) => {
+    const settings = createTuningPreset('beginner')
+    const demo = createTeachingDemonstration(settings, kind)
+    const timeline = createDemonstrationProgress(demo, settings)
+    const inversion = demonstrationProgressAt(timeline, timeline.durationSeconds).steps[3].completedAtSeconds!
+    const samples = demo.recording.samples.filter((pose) => pose.timestampSeconds <= inversion)
+    const truncated = { ...demo, cues: [{ timeSeconds: 0, text: '已完成一圈與恢復', fullFlipPhase: 6 }],
+      recording: { ...demo.recording, samples, durationSeconds: samples.at(-1)!.timestampSeconds } }
+    const partial = createDemonstrationProgress(truncated, settings)
+    const finish = demonstrationProgressAt(partial, partial.durationSeconds)
+    expect(finish.complete).toBe(false)
+    expect(finish.completedSteps).toBe(4)
+    expect(finish.steps.slice(4).every((step) => step.completedAtSeconds === null)).toBe(true)
+    expect(finish.notice).toContain('尚未完成全部課程步驟')
+  })
+
   it('reveals actual L09 onset and recovery in order, including seeking backward from later exercises', () => {
     const settings = createTuningPreset('beginner')
     const demo = createTeachingDemonstration(settings, 'basic-recovery')
@@ -99,9 +145,9 @@ describe('independent teaching demonstration progress', () => {
     expect(backward.steps.slice(1).every((step) => step.completedAtSeconds === null)).toBe(true)
   })
 
-  it('follows the same paused, slowed and seeked playback clock without storage or live-session writes', () => {
+  it.each(['basic-recovery', 'full-flip', 'back-flip'] as const)('follows the paused, slowed and seeked %s playback clock without storage or live-session writes', (kind) => {
     const settings = createTuningPreset('beginner')
-    const demo = createTeachingDemonstration(settings, 'basic-recovery')
+    const demo = createTeachingDemonstration(settings, kind)
     const write = vi.spyOn(Storage.prototype, 'setItem')
     try {
       const timeline = createDemonstrationProgress(demo, settings)
@@ -126,7 +172,7 @@ describe('independent teaching demonstration progress', () => {
     }
   })
 
-  it.each(['takeoff', 'landing', 'wide-gate', 'basic-recovery', 'full-roll'] as const)('uses recorded raised-ground anchors for %s and rejects a different settings snapshot', (kind) => {
+  it.each(['takeoff', 'landing', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'back-flip'] as const)('uses recorded raised-ground anchors for %s and rejects a different settings snapshot', (kind) => {
     const defaults = createTuningPreset('standard')
     const settings = { ...defaults, drone: { ...defaults.drone, ground: { ...defaults.drone.ground, heightM: 10 }, spawnPositionM: { x: 6, y: 25, z: -3 } } }
     const demo = createTeachingDemonstration(settings, kind)

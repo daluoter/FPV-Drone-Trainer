@@ -11,7 +11,7 @@ describe('beginner flight school', () => {
     expect(screen.getByLabelText('選擇課程')).toHaveValue('takeoff')
     const choices = within(screen.getByLabelText('選擇課程')).getAllByRole('option')
     expect(choices.map((option) => option.textContent?.split(' · ')[0])).toEqual([
-      'L01', 'L02', 'L03', 'L04', 'L05', 'L06', 'L07', 'L08', 'L09', 'L10', 'L12', 'L13',
+      'L01', 'L02', 'L03', 'L04', 'L05', 'L06', 'L07', 'L08', 'L09', 'L10', 'L11', 'L13', 'L14',
     ])
     expect(choices[0]).toHaveTextContent('起飛與定點懸停')
     expect(choices.some((option) => (option as HTMLOptionElement).value === 'hover')).toBe(false)

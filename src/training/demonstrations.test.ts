@@ -13,6 +13,7 @@ import { STRAIGHT_LINE_LESSON, straightLineEvaluator } from './straightLine'
 import { takeoffEvaluator } from './takeoff'
 import { TrainingSession } from './machine'
 import { CURRENT_TRAINING_RULES_VERSION } from './attempt'
+
 import { createTrainingFieldAnchors } from './field'
 import { GROUND_CONTACT_SLOP_M } from '../simulation/dynamics'
 import { DIRECTION_CONTROL_LESSON } from './directionControl'
@@ -29,6 +30,16 @@ import {
 import { createWideGates } from '../world/wideGates'
 import { findSweptObstacleHit, OBSTACLE_CRASH_WARNING_PREFIX } from '../simulation/obstacles'
 import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample, TrainingSceneReference } from './types'
+
+
+describe('Chinese-only axis demonstration names', () => {
+  it.each([['roll', '橫滾'], ['pitch', '俯仰'], ['yaw', '偏航']] as const)('names the %s introduction without an English course suffix', (kind, title) => {
+    const demo = createTeachingDemonstration(createTuningPreset('beginner'), kind)
+    expect(demo).toMatchObject({ kind, lessonId: 'intro' })
+    expect(demo.title).toBe(`${title}：推桿、回中與反向修正`)
+    expect(demo.cues[0].text).toContain(`先看${title}`)
+  })
+})
 
 function at(samples: readonly ReplaySample[], timeSeconds: number): ReplaySample {
   const sample = samples.reduce((closest, candidate) => (

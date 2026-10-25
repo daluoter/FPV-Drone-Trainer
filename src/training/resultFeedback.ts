@@ -13,7 +13,7 @@ import {
   BASIC_RECOVERY_DRIFT_STOP_MPS as RECOVERY_DRIFT_STOP,
   BASIC_RECOVERY_DRIFT_VERTICAL_MPS as RECOVERY_DRIFT_VERTICAL,
 } from './basicRecovery'
-import { basicRecoveryStageLabel, coordinatedTurnTargetLabel, directionControlTargetLabel, figureEightTargetLabel, fullRollInterruptionReason, squareRouteTargetLabel, trainingHint, trainingObjective, wideGateCollisionCause } from './feedback'
+import { basicRecoveryStageLabel, coordinatedTurnTargetLabel, directionControlTargetLabel, figureEightTargetLabel, fullFlipInterruptionReason, fullRollInterruptionReason, squareRouteTargetLabel, trainingHint, trainingObjective, wideGateCollisionCause } from './feedback'
 import { LANDING_LIFTOFF_HEIGHT_M, LANDING_ZONE_RADIUS_M } from './landing'
 import { TAKEOFF_SETTLED_DWELL_SECONDS } from './takeoff'
 import {
@@ -28,6 +28,18 @@ import {
   FULL_ROLL_RECOVERY_DESCENT_MPS as ROLL_RECOVERY_DESCENT,
   FULL_ROLL_RECOVERY_CLIMB_MPS as ROLL_RECOVERY_CLIMB,
 } from './fullRoll'
+import {
+  FULL_FLIP_TARGET_HEIGHT_M as FLIP_TARGET_HEIGHT,
+  FULL_FLIP_MIN_PREPARATION_HEIGHT_M as FLIP_PREP_HEIGHT,
+  FULL_FLIP_MIN_HEIGHT_M as FLIP_MIN_HEIGHT,
+  FULL_FLIP_AREA_RADIUS_M as FLIP_AREA_RADIUS,
+  FULL_FLIP_HOLD_SECONDS as FLIP_HOLD_SECONDS,
+  FULL_FLIP_RECOVERY_TILT_DEGREES as FLIP_RECOVERY_TILT,
+  FULL_FLIP_MAX_BODY_RATE_DEGREES as FLIP_MAX_RATE,
+  FULL_FLIP_MAX_HORIZONTAL_SPEED_MPS as FLIP_MAX_HORIZONTAL,
+  FULL_FLIP_RECOVERY_DESCENT_MPS as FLIP_RECOVERY_DESCENT,
+  FULL_FLIP_RECOVERY_CLIMB_MPS as FLIP_RECOVERY_CLIMB,
+} from './fullFlip'
 import type { TrainingResult } from './types'
 
 export interface TrainingResultFeedback {
@@ -123,7 +135,7 @@ function fullRollResultFeedback(result: TrainingResult, scope: string): Training
   const metrics = result.metrics
   const phase = Number.isInteger(metrics.rollPhase) && metrics.rollPhase >= 0 && metrics.rollPhase <= 6 ? metrics.rollPhase : null
   if (result.outcome === 'SUCCESS' && phase === 6 && result.completedCheckpoints === 6) return {
-    observedStrength: '本次已從地面自行起飛，完成同一圈的實際倒飛、完整橫滾，以及其後的空中正飛與控制恢復。',
+    observedStrength: '本次已從地面自行起飛，完成同一圈的實際倒置、完整橫滾，以及其後的空中正飛與控制恢復。',
     observedGap: null,
     nextPractice: '以相同條件再練一次，觀察適時停止橫滾與油門配合；熟悉後再練另一側，不需要回到原位置或降落。',
     scopeNote: scope,
@@ -131,7 +143,7 @@ function fullRollResultFeedback(result: TrainingResult, scope: string): Training
   const validEpisode = metrics.rollEpisodeValid > 0.5
   const completedRoll = validEpisode && metrics.rollCompleted > 0.5
   const strength = completedRoll ? '本次已觀察到一圈完整橫滾，尚待完成其後的空中恢復。'
-    : validEpisode && metrics.rollInverted > 0.5 ? '本次已觀察到這一圈的實際倒飛姿態。'
+    : validEpisode && metrics.rollInverted > 0.5 ? '本次已觀察到這一圈的實際倒置姿態。'
       : phase !== null && phase >= 2 ? '本次已觀察到從地面自行起飛並取得練習高度。' : null
   const ended = timedOut ? '本次挑戰逾時，' : '本次'
   if (phase === null || phase === 6) return {
@@ -151,13 +163,13 @@ function fullRollResultFeedback(result: TrainingResult, scope: string): Training
   else if (metrics.insideRollArea === 0) observation = `結束時超出起飛點半徑 ${ROLL_AREA_RADIUS} m 的練習區，本圈需要重新準備與完整橫滾。`
   else if (Number.isFinite(metrics.altitudeM) && metrics.altitudeM < ROLL_MIN_HEIGHT) observation = `結束時離地 ${metrics.altitudeM.toFixed(1)} m，未保留空中恢復需要的 ${ROLL_MIN_HEIGHT} m 高度，本圈已中斷。`
   else if (!validEpisode) observation = metrics.rollInterrupted > 0.5
-    ? `先前這一圈已中斷；${fullRollInterruptionReason(metrics) ?? ''}歷史倒飛或回正標記不代替新一圈，尚未重新完成準備與完整橫滾。`
+    ? `先前這一圈已中斷；${fullRollInterruptionReason(metrics) ?? ''}歷史倒置或回正標記不代替新一圈，尚未重新完成準備與完整橫滾。`
     : '尚未完成橫滾前的短暫準備；先取得高度並減少過大旋轉、升降與漂移。'
   else if (!completedRoll) {
     const progress = Number.isFinite(metrics.rollProgressDegrees) ? `結束時本圈橫滾進度約 ${Math.max(0, Math.min(360, metrics.rollProgressDegrees)).toFixed(1)}°，` : ''
     observation = metrics.rollInverted > 0.5
-      ? `${progress}已通過本圈倒飛，但尚未沿同一方向完成一圈並回正；倒飛後反向翻回不等於完成。`
-      : `${progress}尚未觀察到這一圈的實際倒飛與完整橫滾；只推動搖桿、原地偏航或前後翻轉不能代替 Roll。`
+      ? `${progress}已通過本圈倒置，但尚未沿同一方向完成一圈並回正；倒置後反向翻回不等於完成。`
+      : `${progress}尚未觀察到這一圈的實際倒置與完整橫滾；只推動搖桿、原地偏航或前後翻轉不能代替 Roll。`
   } else {
     const observations: string[] = []
     if (Number.isFinite(metrics.tiltDegrees) && metrics.tiltDegrees > ROLL_RECOVERY_TILT) observations.push(`結束時傾角 ${metrics.tiltDegrees.toFixed(1)}°，需修回 ${ROLL_RECOVERY_TILT}° 內`)
@@ -169,8 +181,93 @@ function fullRollResultFeedback(result: TrainingResult, scope: string): Training
   }
   const action = completedRoll
     ? '下次接近正飛時提早回中減緩旋轉，再主動回平與調整油門；回中不會自動回平或煞停。'
-    : '下次選左或右的同一方向連續橫滾，實際通過倒飛並完成一圈後，再停止旋轉、修回正飛；先保留足夠高度。'
+    : '下次選左或右的同一方向連續橫滾，實際通過倒置並完成一圈後，再停止旋轉、修回正飛；先保留足夠高度。'
   return { observedStrength: strength, observedGap: `${ended}完整橫滾尚未完成。${observation}`,
+    nextPractice: `${restart}${action}`, scopeNote: scope }
+}
+
+function fullFlipResultFeedback(result: TrainingResult, scope: string): TrainingResultFeedback | null {
+  if (result.lessonId !== 'full-flip') return null
+  const restart = '本次練習已結束；按「再練一次」會清空本次步驟，從地面重新開始。'
+  const message = result.message ?? ''
+  const timedOut = /逾時|timed out|timeout/iu.test(message)
+  if (result.outcome !== 'SUCCESS') {
+    if (/墜毀|撞擊|crash|impact|Obstacle collision:/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: '本次發生墜毀，完整翻轉與空中恢復尚未完成。',
+      nextPractice: `先重設場景。${restart}下次先取得約 ${FLIP_TARGET_HEIGHT} m 高度，配合油門保留翻轉與恢復的高度餘裕。`,
+      scopeNote: scope,
+    }
+    if (/解除解鎖|失焦|斷線|disarm|focus|disconnect/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: '本次因解除解鎖、失去焦點或連線中斷而停止，不能據此判定翻轉操控表現。',
+      nextPractice: `${restart}確認網頁與控制器就緒，倒數完成後再明確解鎖。`,
+      scopeNote: scope,
+    }
+    if (/無效|資料中斷|時間倒退|位置跳躍|姿態跳躍|缺少有效|支撐高度不一致|不一致|重設|invalid|non-finite|telemetry.*gap|impossible.*jump|reset|rewind/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: '本次飛行資料無效、中斷或被重設，無法以這段資料判定完整翻轉表現。',
+      nextPractice: `${restart}保持網頁在前景，重新取得高度後，以實際飛行完成同方向的一圈俯仰翻轉。`,
+      scopeNote: scope,
+    }
+  }
+  if (!Number.isFinite(result.sampleCount) || result.sampleCount <= 0) return {
+    observedStrength: null,
+    observedGap: `${timedOut ? '本次挑戰逾時；' : ''}本次沒有有效的已解鎖飛行樣本，無法判定翻轉表現。`,
+    nextPractice: `${restart}確認畫面與控制器就緒，倒數完成後明確解鎖。`,
+    scopeNote: scope,
+  }
+  const metrics = result.metrics
+  const phase = Number.isInteger(metrics.flipPhase) && metrics.flipPhase >= 0 && metrics.flipPhase <= 6 ? metrics.flipPhase : null
+  if (result.outcome === 'SUCCESS' && phase === 6 && result.completedCheckpoints === 6
+    && metrics.flipEpisodeValid > 0.5 && metrics.flipInverted > 0.5 && metrics.flipCompleted > 0.5) return {
+    observedStrength: `本次已從地面自行起飛，完成同一圈的實際倒置與${metrics.flipDirection === 1 ? '前翻' : metrics.flipDirection === -1 ? '後翻' : '俯仰翻轉'}一整圈，以及其後的空中正飛與控制恢復。`,
+    observedGap: null,
+    nextPractice: '以相同條件再練一次，觀察適時停止翻轉與油門配合；熟悉後再練另一方向，不需要回到原位置或降落。',
+    scopeNote: scope,
+  }
+  const validEpisode = metrics.flipEpisodeValid > 0.5
+  const completedFlip = validEpisode && metrics.flipCompleted > 0.5
+  const strength = completedFlip ? '本次已觀察到一圈完整翻轉，尚待完成其後的空中恢復。'
+    : validEpisode && metrics.flipInverted > 0.5 ? '本次已觀察到這一圈的實際倒置姿態。'
+      : phase !== null && phase >= 2 ? '本次已觀察到從地面自行起飛並取得練習高度。' : null
+  const ended = timedOut ? '本次挑戰逾時，' : '本次'
+  if (phase === null || phase === 6) return {
+    observedStrength: null,
+    observedGap: `${ended}完整翻轉的分段資料不足，無法判定這一圈的旋轉與恢復過程。`,
+    nextPractice: `${restart}先取得高度，再依提示完成一圈俯仰翻轉及空中恢復。`,
+    scopeNote: scope,
+  }
+  if (phase <= 1) return {
+    observedStrength: null,
+    observedGap: `${ended}尚未完成從地面自行起飛並取得翻轉練習高度。`,
+    nextPractice: `${restart}自行起飛到至少 ${FLIP_PREP_HEIGHT} m，建議約 ${FLIP_TARGET_HEIGHT} m，再準備翻轉。`,
+    scopeNote: scope,
+  }
+  let observation: string
+  if (!validEpisode && metrics.flipInterrupted > 0.5) observation = `先前這一圈已中斷；${fullFlipInterruptionReason(metrics) ?? ''}歷史倒置或回正標記不代替新一圈，尚未重新完成準備與完整翻轉。`
+  else if (metrics.groundTouching > 0.5) observation = '結束時已接地；地面停住不能算空中恢復，本圈證據已中斷。'
+  else if (metrics.insideFlipArea === 0) observation = `結束時超出起飛點半徑 ${FLIP_AREA_RADIUS} m 的練習區，本圈需要重新準備與完整翻轉。`
+  else if (Number.isFinite(metrics.altitudeM) && metrics.altitudeM < FLIP_MIN_HEIGHT) observation = `結束時離地 ${metrics.altitudeM.toFixed(1)} m，未保留空中恢復需要的 ${FLIP_MIN_HEIGHT} m 高度，本圈已中斷。`
+  else if (!validEpisode) observation = '尚未完成翻轉前的短暫準備；先取得高度並減少過大旋轉、升降與漂移。'
+  else if (!completedFlip) {
+    const progress = Number.isFinite(metrics.flipProgressDegrees) ? `結束時本圈翻轉進度約 ${Math.max(0, Math.min(360, metrics.flipProgressDegrees)).toFixed(1)}°，` : ''
+    observation = metrics.flipInverted > 0.5
+      ? `${progress}已通過本圈倒置，但尚未沿同一方向完成一圈並回正；倒置後反向翻回不等於完成。`
+      : `${progress}尚未觀察到這一圈的實際倒置與完整翻轉；只推動搖桿、原地偏航或左右橫滾不能代替俯仰翻轉。`
+  } else {
+    const observations: string[] = []
+    if (Number.isFinite(metrics.tiltDegrees) && metrics.tiltDegrees > FLIP_RECOVERY_TILT) observations.push(`結束時傾角 ${metrics.tiltDegrees.toFixed(1)}°，需修回 ${FLIP_RECOVERY_TILT}° 內`)
+    if (Number.isFinite(metrics.bodyRateDegreesPerSecond) && metrics.bodyRateDegreesPerSecond > FLIP_MAX_RATE) observations.push(`機身仍以 ${metrics.bodyRateDegreesPerSecond.toFixed(1)}°/s 旋轉，需減緩到 ${FLIP_MAX_RATE}°/s 內`)
+    if (Number.isFinite(metrics.horizontalSpeedMps) && metrics.horizontalSpeedMps > FLIP_MAX_HORIZONTAL) observations.push(`水平速度 ${metrics.horizontalSpeedMps.toFixed(1)} m/s，尚未降低到 ${FLIP_MAX_HORIZONTAL} m/s 內`)
+    if (Number.isFinite(metrics.verticalSpeedMps) && (metrics.verticalSpeedMps < -FLIP_RECOVERY_DESCENT || metrics.verticalSpeedMps > FLIP_RECOVERY_CLIMB)) observations.push(`升降速度 ${metrics.verticalSpeedMps.toFixed(1)} m/s（上＋／下−），尚未回到 −${FLIP_RECOVERY_DESCENT}～+${FLIP_RECOVERY_CLIMB} m/s`)
+    if (Number.isFinite(metrics.recoveryDwellSeconds) && metrics.recoveryDwellSeconds < FLIP_HOLD_SECONDS) observations.push(`恢復確認 ${Math.max(0, metrics.recoveryDwellSeconds).toFixed(2)}／${FLIP_HOLD_SECONDS.toFixed(2)} s，尚未連續完成`)
+    observation = observations.length ? `${observations.slice(0, 2).join('；')}。` : '已完成本圈翻轉，尚未連續確認正飛與控制恢復。'
+  }
+  const action = completedFlip
+    ? '下次接近正飛時提早回中減緩旋轉，再主動回平與調整油門；回中不會自動回平或煞停。'
+    : '下次選定前翻或後翻後，沿同一方向連續翻轉，實際通過倒置並完成一圈後，再停止旋轉、修回正飛；先保留足夠高度。'
+  return { observedStrength: strength, observedGap: `${ended}完整翻轉尚未完成。${observation}`,
     nextPractice: `${restart}${action}`, scopeNote: scope }
 }
 
@@ -781,6 +878,8 @@ function phaseProgress(result: TrainingResult): { observedGap: string; nextPract
 /** Final-sample observations and checkpoint facts, never inferred causes or a claim about the whole flight. */
 export function summarizeTrainingResult(result: TrainingResult): TrainingResultFeedback {
   const scope = scopeNote(result)
+  const flip = fullFlipResultFeedback(result, scope)
+  if (flip) return flip
   const roll = fullRollResultFeedback(result, scope)
   if (roll) return roll
   const recovery = basicRecoveryResultFeedback(result, scope)

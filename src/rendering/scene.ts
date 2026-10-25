@@ -11,6 +11,7 @@ import { createSquareRouteTargets, SQUARE_ROUTE_TARGET_RADIUS_M } from '../train
 import { createFigureEightTargets, FIGURE_EIGHT_TARGET_RADIUS_M } from '../training/figureEight'
 import { BASIC_RECOVERY_AREA_RADIUS_M, BASIC_RECOVERY_MIN_PREPARATION_HEIGHT_M, BASIC_RECOVERY_TARGET_HEIGHT_M } from '../training/basicRecovery'
 import { FULL_ROLL_AREA_RADIUS_M, FULL_ROLL_MIN_PREPARATION_HEIGHT_M, FULL_ROLL_TARGET_HEIGHT_M } from '../training/fullRoll'
+import { FULL_FLIP_AREA_RADIUS_M, FULL_FLIP_MIN_PREPARATION_HEIGHT_M, FULL_FLIP_TARGET_HEIGHT_M } from '../training/fullFlip'
 import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
 import type { Vector3 } from '../math/vector'
 import type { ReplayGhostState } from '../replay'
@@ -57,6 +58,8 @@ export interface FlightScene {
   setRecoveryStage(stage: number | null): void
   /** Color the full-roll guide without changing the drone or its control inputs. */
   setFullRollStage(stage: number | null): void
+  /** Color world-fixed pitch-flip guidance without writing flight state. */
+  setFullFlipStage(stage: number | null): void
   /** Presentation-only bounded path trace; evaluators remain renderer-independent. */
   setTrainingPath(path: readonly Vector3[]): void
   setReplayPath(path: readonly Vector3[]): void
@@ -833,9 +836,100 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     sizeM: { x: FULL_ROLL_AREA_RADIUS_M * 2, y: rollGuideTopM - FULL_ROLL_MIN_PREPARATION_HEIGHT_M, z: FULL_ROLL_AREA_RADIUS_M * 2 },
   }
 
+  // World-fixed lines provide an upright reference while the FPV camera pitches.
+  // These are visual guides; this open practice area adds no solid obstacles.
+  const flipField = new THREE.Group()
+  flipField.name = 'full-flip-field'
+  flipField.position.set(field.launch.x, config.ground.heightM + FULL_FLIP_TARGET_HEIGHT_M, field.launch.z)
+  flipField.visible = false
+  const flipFloor = new THREE.Mesh(
+    new THREE.RingGeometry(FULL_FLIP_AREA_RADIUS_M - 0.07, FULL_FLIP_AREA_RADIUS_M, 128),
+    new THREE.MeshBasicMaterial({ color: 0x8abac4, transparent: true, opacity: 0.4, side: THREE.DoubleSide, depthWrite: false }),
+  )
+  flipFloor.name = 'flip-area-boundary'
+  flipFloor.rotation.x = -Math.PI / 2
+  flipFloor.position.y = -FULL_FLIP_TARGET_HEIGHT_M + 0.025
+  flipField.add(flipFloor)
+  const flipGuideTopM = FULL_FLIP_TARGET_HEIGHT_M + 4
+  const flipHeightPole = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(10, -FULL_FLIP_TARGET_HEIGHT_M, -16), new THREE.Vector3(10, flipGuideTopM - FULL_FLIP_TARGET_HEIGHT_M, -16),
+      ...[FULL_FLIP_MIN_PREPARATION_HEIGHT_M, FULL_FLIP_TARGET_HEIGHT_M, flipGuideTopM].flatMap((height) => [
+        new THREE.Vector3(9.5, height - FULL_FLIP_TARGET_HEIGHT_M, -16), new THREE.Vector3(10.5, height - FULL_FLIP_TARGET_HEIGHT_M, -16),
+      ]),
+    ]),
+    new THREE.LineBasicMaterial({ color: 0x8abac4, transparent: true, opacity: 0.75, depthWrite: false }),
+  )
+  flipHeightPole.name = 'flip-height-pole'
+  flipField.add(flipHeightPole)
+  const flipHeightBand = new THREE.LineLoop(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-8, FULL_FLIP_MIN_PREPARATION_HEIGHT_M - FULL_FLIP_TARGET_HEIGHT_M, -16),
+      new THREE.Vector3(8, FULL_FLIP_MIN_PREPARATION_HEIGHT_M - FULL_FLIP_TARGET_HEIGHT_M, -16),
+      new THREE.Vector3(8, flipGuideTopM - FULL_FLIP_TARGET_HEIGHT_M, -16),
+      new THREE.Vector3(-8, flipGuideTopM - FULL_FLIP_TARGET_HEIGHT_M, -16),
+    ]),
+    new THREE.LineBasicMaterial({ color: 0x8abac4, transparent: true, opacity: 0.25, depthWrite: false }),
+  )
+  flipHeightBand.name = 'flip-height-band'
+  flipField.add(flipHeightBand)
+  const flipAccent = new THREE.Group()
+  flipAccent.name = 'flip-stage-guidance'
+  const flipStageMaterial = new THREE.LineBasicMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.95, depthWrite: false })
+  const flipLevel = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-8, 0, -16), new THREE.Vector3(8, 0, -16),
+      new THREE.Vector3(-8, -0.4, -16), new THREE.Vector3(-8, 0.4, -16),
+      new THREE.Vector3(8, -0.4, -16), new THREE.Vector3(8, 0.4, -16),
+      new THREE.Vector3(0, -0.2, -16), new THREE.Vector3(0, 0.2, -16),
+    ]), flipStageMaterial,
+  )
+  flipLevel.name = 'flip-level-reference'
+  const flipUpMaterial = flipStageMaterial.clone()
+  const flipUp = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0.6, -16), new THREE.Vector3(0, 2, -16),
+      new THREE.Vector3(-0.6, 1.4, -16), new THREE.Vector3(0, 2, -16),
+      new THREE.Vector3(0.6, 1.4, -16), new THREE.Vector3(0, 2, -16),
+    ]), flipUpMaterial,
+  )
+  flipUp.name = 'flip-world-up-reference'
+  // The two world-fixed arrows distinguish the launch-forward (-Z) and
+  // launch-backward (+Z) sides during a flip. They are thin visual lines,
+  // placed at the preparation height rather than a solid plane to fly through.
+  const flipDirectionY = FULL_FLIP_MIN_PREPARATION_HEIGHT_M - FULL_FLIP_TARGET_HEIGHT_M
+  const flipForwardMaterial = flipStageMaterial.clone()
+  const flipBackwardMaterial = flipStageMaterial.clone()
+  const flipForward = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, flipDirectionY, -8), new THREE.Vector3(0, flipDirectionY, -14),
+      new THREE.Vector3(-0.8, flipDirectionY, -12.4), new THREE.Vector3(0, flipDirectionY, -14),
+      new THREE.Vector3(0.8, flipDirectionY, -12.4), new THREE.Vector3(0, flipDirectionY, -14),
+    ]), flipForwardMaterial,
+  )
+  flipForward.name = 'flip-forward-reference'
+  const flipBackward = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, flipDirectionY, 8), new THREE.Vector3(0, flipDirectionY, 14),
+      new THREE.Vector3(-0.8, flipDirectionY, 12.4), new THREE.Vector3(0, flipDirectionY, 14),
+      new THREE.Vector3(0.8, flipDirectionY, 12.4), new THREE.Vector3(0, flipDirectionY, 14),
+      new THREE.Vector3(-0.8, flipDirectionY, 10.8), new THREE.Vector3(0, flipDirectionY, 12.4),
+      new THREE.Vector3(0.8, flipDirectionY, 10.8), new THREE.Vector3(0, flipDirectionY, 12.4),
+    ]), flipBackwardMaterial,
+  )
+  flipBackward.name = 'flip-backward-reference'
+  flipAccent.add(flipLevel, flipUp, flipForward, flipBackward)
+  flipField.add(flipAccent)
+  scene.add(flipField)
+  const flipReference: FlightSceneReference = {
+    id: 'flip-zone', kind: 'zone', object: flipField,
+    positionM: { x: field.launch.x, y: config.ground.heightM + FULL_FLIP_TARGET_HEIGHT_M, z: field.launch.z },
+    sizeM: { x: FULL_FLIP_AREA_RADIUS_M * 2, y: flipGuideTopM - FULL_FLIP_MIN_PREPARATION_HEIGHT_M, z: FULL_FLIP_AREA_RADIUS_M * 2 },
+  }
+
   const landingSurface: FlightSceneReference = { id: 'landing-surface', kind: 'zone', object: landingTarget, positionM: { ...field.landing }, sizeM: { x: LANDING_ZONE_RADIUS_M * 2, y: 0, z: LANDING_ZONE_RADIUS_M * 2 } }
   const launchReference: FlightSceneReference = { id: 'training-launch', kind: 'pad', object: takeoffPad, positionM: { ...field.launch } }
-  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, recoveryReference, rollReference]
+  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, recoveryReference, rollReference, flipReference]
   const referenceById = new Map(sceneReferences.map((reference) => [reference.id, reference]))
 
   const drone = createQuadVisual()
@@ -916,7 +1010,8 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     wideGateField.visible = lessonId === 'wide-gate'
     recoveryField.visible = lessonId === 'basic-recovery'
     rollField.visible = lessonId === 'full-roll'
-    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll'].includes(lessonId ?? '')
+    flipField.visible = lessonId === 'full-flip'
+    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip'].includes(lessonId ?? '')
     for (const reference of referenceSet.contract) {
       reference.object.visible = !beginner
     }
@@ -960,6 +1055,19 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     const color = stage >= 5 ? 0xb8f36b : stage >= 3 ? 0xffc978 : 0x45d7f7
     rollStageMaterial.color.set(color)
     rollUpMaterial.color.set(color)
+  }
+
+  const setFullFlipStage = (stage: number | null): void => {
+    if (stage === null || !Number.isInteger(stage) || stage < 0 || stage > 6) {
+      flipAccent.visible = false
+      return
+    }
+    flipAccent.visible = true
+    const color = stage >= 5 ? 0xb8f36b : stage >= 3 ? 0xffc978 : 0x45d7f7
+    flipStageMaterial.color.set(color)
+    flipUpMaterial.color.set(color)
+    flipForwardMaterial.color.set(color)
+    flipBackwardMaterial.color.set(color)
   }
 
   const setPath = (line: THREE.Line, path: readonly Vector3[], yOffset: number): void => {
@@ -1009,6 +1117,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     setWideGateTarget,
     setRecoveryStage,
     setFullRollStage,
+    setFullFlipStage,
     setTrainingPath,
     setReplayPath,
     dispose: () => disposeFlightScene(scene),

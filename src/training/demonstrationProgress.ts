@@ -79,7 +79,7 @@ function freezeTimeline(timeline: TeachingDemonstrationProgressTimeline): Teachi
 
 /** L00 demonstrates actions, so its chapters describe those actions rather than flight mastery. */
 function axisProgress(demonstration: TeachingDemonstration): TeachingDemonstrationProgressTimeline {
-  const name = demonstration.kind === 'roll' ? '橫滾 Roll' : demonstration.kind === 'pitch' ? '俯仰 Pitch' : '偏航 Yaw'
+  const name = demonstration.kind === 'roll' ? '橫滾' : demonstration.kind === 'pitch' ? '俯仰' : '偏航'
   const labels = ['觀察起始姿態', `小量操作${name}`, '回中，觀察旋轉停止', '反向修正姿態或方向', '回中，觀察修正結果']
   const duration = demonstration.recording.durationSeconds
   const starts = demonstration.cues.map((cue) => cue.timeSeconds)
@@ -178,13 +178,18 @@ export function createDemonstrationProgress(
     const nextIndex = completed.findIndex((value) => value === null)
     if (nextIndex >= 0 && steps[nextIndex].startedAtSeconds === null) steps[nextIndex].startedAtSeconds = time
     complete = evaluation.status === 'success' && nextIndex === -1 && time >= lesson.scoring.minimumActiveSeconds
-    // A full-roll degree instrument follows each retained observation rather
+    // Complete-turn instruments follow each retained observation rather
     // than guessing progress from captions, elapsed time or the wrapped pose.
-    if (changed || complete || demonstration.kind === 'full-roll') {
-      const metrics = demonstration.kind === 'full-roll' ? {
+    const flip = demonstration.lessonId === 'full-flip'
+    if (changed || complete || demonstration.kind === 'full-roll' || flip) {
+      const metrics: Readonly<Record<string, number>> | undefined = demonstration.kind === 'full-roll' ? {
         rollProgressDegrees: evaluation.metrics?.rollProgressDegrees ?? 0,
         rollSignedDegrees: evaluation.metrics?.rollSignedDegrees ?? 0,
         rollDirection: evaluation.metrics?.rollDirection ?? 0,
+      } : flip ? {
+        flipProgressDegrees: evaluation.metrics?.flipProgressDegrees ?? 0,
+        flipSignedDegrees: evaluation.metrics?.flipSignedDegrees ?? 0,
+        flipDirection: evaluation.metrics?.flipDirection ?? 0,
       } : undefined
       frames.push(frozenFrame(time, completed, complete, null, metrics))
     }
