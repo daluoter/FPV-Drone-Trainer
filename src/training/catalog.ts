@@ -8,6 +8,7 @@ import { WIDE_GATE_LEARNING_CONTENT } from './wideGate'
 import { BASIC_RECOVERY_LEARNING_CONTENT } from './basicRecovery'
 import { FULL_ROLL_LEARNING_CONTENT } from './fullRoll'
 import { BACK_FLIP_LEARNING_CONTENT, FRONT_FLIP_LEARNING_CONTENT, FULL_FLIP_LEARNING_CONTENT } from './fullFlip'
+import { POWER_LOOP_LEARNING_CONTENT } from './powerLoop'
 
 export interface LessonLearningContent {
   readonly code: string
@@ -71,6 +72,7 @@ const LEARNING_CONTENT: Readonly<Record<string, LessonLearningContent>> = {
   'full-flip': FULL_FLIP_LEARNING_CONTENT,
   'front-flip': FRONT_FLIP_LEARNING_CONTENT,
   'back-flip': BACK_FLIP_LEARNING_CONTENT,
+  'power-loop': POWER_LOOP_LEARNING_CONTENT,
   'split-s': {
     code: 'L14',
     title: '翻轉下降',

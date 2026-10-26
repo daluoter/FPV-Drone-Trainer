@@ -66,6 +66,7 @@ export class FlightRenderer {
   private recoveryStage: number | null = 0
   private fullRollStage: number | null = 0
   private fullFlipStage: number | null = 0
+  private powerLoopStage: number | null = 0
   public get flightScene(): FlightScene { return this.currentFlightScene }
   public readonly cameraRig: FlightCameraRig
   public readonly renderer: THREE.WebGLRenderer
@@ -185,6 +186,13 @@ export class FlightRenderer {
     this.flightScene.setFullFlipStage(stage)
   }
 
+  /** Update illustrative loop guidance without writing the live flight state. */
+  public setPowerLoopStage(stage: number | null): void {
+    if (this.disposed) return
+    this.powerLoopStage = stage
+    this.flightScene.setPowerLoopStage(stage)
+  }
+
   /** Rebuild anchors only after the owner has explicitly reset and disarmed. */
   public reconfigureScene(config: DroneConfig): void {
     if (this.disposed) return
@@ -199,6 +207,7 @@ export class FlightRenderer {
     this.currentFlightScene.setRecoveryStage(this.recoveryStage)
     this.currentFlightScene.setFullRollStage(this.fullRollStage)
     this.currentFlightScene.setFullFlipStage(this.fullFlipStage)
+    this.currentFlightScene.setPowerLoopStage(this.powerLoopStage)
     previous.dispose()
   }
 

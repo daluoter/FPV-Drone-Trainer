@@ -6,7 +6,7 @@ import { createTeachingDemonstration } from './demonstrations'
 import { createDemonstrationProgress, demonstrationProgressAt } from './demonstrationProgress'
 import { lessonById } from './lessons'
 
-const COURSE_KINDS = ['takeoff', 'straight-line', 'landing', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'front-flip', 'back-flip'] as const
+const COURSE_KINDS = ['takeoff', 'straight-line', 'landing', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'front-flip', 'back-flip', 'power-loop'] as const
 
 describe('independent teaching demonstration progress', () => {
   it.each(COURSE_KINDS)('observes all %s checkpoints from the actual recording and exposes chapter seeks', (kind) => {
@@ -26,7 +26,7 @@ describe('independent teaching demonstration progress', () => {
     expect(finish.steps.every((step) => step.startedAtSeconds !== null && step.startedAtSeconds <= step.completedAtSeconds!)).toBe(true)
     const retained = new Set(demonstration.recording.samples.map((sample) => sample.timestampSeconds))
     expect(finish.steps.every((step) => retained.has(step.completedAtSeconds!))).toBe(true)
-    expect(timeline.frames.length).toBeLessThanOrEqual(['full-roll', 'front-flip', 'back-flip'].includes(kind) ? demonstration.recording.samples.length + 1 : lesson.checkpoints.length + 2)
+    expect(timeline.frames.length).toBeLessThanOrEqual(['full-roll', 'front-flip', 'back-flip', 'power-loop'].includes(kind) ? demonstration.recording.samples.length + 1 : lesson.checkpoints.length + 2)
     expect(timeline.title).toMatch(/^L\d\d /u)
     expect(Object.isFrozen(timeline)).toBe(true)
     expect(Object.isFrozen(timeline.steps)).toBe(true)
@@ -37,6 +37,29 @@ describe('independent teaching demonstration progress', () => {
     expect(beginning.complete).toBe(false)
     expect(beginning.completedSteps).toBeLessThan(lesson.checkpoints.length)
     expect(beginning.steps.filter((step) => step.status === 'current')).toHaveLength(1)
+  })
+
+  it('keeps measured spatial-loop progress independent and restores earlier geometry on backward seeks', () => {
+    const settings = createTuningPreset('beginner')
+    const demo = createTeachingDemonstration(settings, 'power-loop')
+    const before = JSON.stringify(demo)
+    const timeline = createDemonstrationProgress(demo, settings)
+    const end = demonstrationProgressAt(timeline, timeline.durationSeconds)
+    expect(end).toMatchObject({ kind: 'power-loop', lessonId: 'power-loop', complete: true, completedSteps: 8, totalSteps: 8 })
+    expect(end.metrics?.loopProgressDegrees).toBeGreaterThanOrEqual(325)
+    expect(end.metrics?.loopHeightGainM).toBeGreaterThanOrEqual(3)
+    expect(end.metrics?.loopForwardSpanM).toBeGreaterThanOrEqual(6)
+    const inversion = demonstrationProgressAt(timeline, end.steps[4].completedAtSeconds!)
+    expect(inversion.completedSteps).toBe(5)
+    expect(inversion.metrics?.loopProgressDegrees).toBeGreaterThanOrEqual(140)
+    expect(inversion.metrics?.loopProgressDegrees).toBeLessThan(260)
+    expect(inversion.metrics?.loopHeightGainM).toBeGreaterThanOrEqual(3)
+    expect(demonstrationProgressAt(timeline, end.steps[4].completedAtSeconds! - 0.001).completedSteps).toBe(4)
+    const beginning = demonstrationProgressAt(timeline, 0)
+    expect(beginning).toMatchObject({ complete: false, completedSteps: 1, metrics: { loopPhase: 1, loopProgressDegrees: 0, loopHeightGainM: 0, loopForwardSpanM: 0 } })
+    expect(timeline.frames.length).toBeLessThanOrEqual(demo.recording.samples.length + 1)
+    expect(timeline.frames.every((frame) => !frame.metrics || Object.isFrozen(frame.metrics))).toBe(true)
+    expect(JSON.stringify(demo)).toBe(before)
   })
 
   it.each(['roll', 'pitch', 'yaw'] as const)('provides L00 %s action chapters without pretending they are flight checkpoints', (kind) => {

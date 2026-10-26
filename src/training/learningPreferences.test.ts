@@ -61,7 +61,7 @@ describe('local learning preferences', () => {
     expect(loadLearningPreferences(target).preferences).toEqual({ ...retired, lastLessonId: currentId })
     expect(target.getItem('fpv-drone-trainer.training-progress.v1')).toBeNull()
   })
-  it.each(['front-flip', 'back-flip'])('resumes the new directional %s lesson independently', (lessonId) => {
+  it.each(['front-flip', 'back-flip', 'power-loop'])('resumes the new %s lesson independently', (lessonId) => {
     const target = memory()
     const next = { ...DEFAULT_LEARNING_PREFERENCES, lastLessonId: lessonId }
     expect(saveLearningPreferences(next, target)).toEqual({ saved: true, error: null })

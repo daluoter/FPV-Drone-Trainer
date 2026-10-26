@@ -1114,3 +1114,88 @@ describe('separate forward and backward flip coaching', () => {
     expect(text).not.toContain('剛才往')
   })
 })
+
+describe('大迴旋 observations and recovery guidance', () => {
+  it('introduces actual spatial flight and eight separate stages', () => {
+    const guide = trainingRouteGuide('power-loop')
+    expect(guide).toContain('前速')
+    expect(guide).toContain('前後跨度')
+    expect(guide).toContain('原地後翻')
+    expect(guide).toContain('引導練習不限時')
+    expect(trainingObjective('power-loop', null)?.title).toBe('1／8 起飛區地面準備')
+    for (let phase = 1; phase < 8; phase += 1) {
+      expect(trainingObjective('power-loop', { metrics: { loopPhase: phase, loopEpisodeValid: 1 } })?.title)
+        .toContain(`${phase + 1}／8`)
+    }
+  })
+
+  it('shows the specific entry blocker before asking for a loop', () => {
+    const low = trainingObjective('power-loop', { metrics: { loopPhase: 2, loopEpisodeValid: 0, altitudeM: 4.3, loopForwardSpeedMps: 1.2 } })
+    expect(low?.detail).toContain('4.3 m')
+    expect(low?.detail).toContain('至少 6 m')
+    const slow = trainingHint('power-loop', { status: 'continue', metrics: { loopPhase: 2, loopEpisodeValid: 0, altitudeM: 10, loopForwardSpeedMps: 1.2 } })
+    expect(slow).toContain('1.2 m/s')
+    expect(slow).toContain('至少 3 m/s')
+    expect(slow).toContain('原地後翻不算')
+  })
+
+  it('reports rise/span and rearward movement without pretending body rotation proves a loop', () => {
+    const climb = trainingObjective('power-loop', { metrics: { loopPhase: 3, loopEpisodeValid: 1, loopHeightGainM: 1.2, loopForwardSpanM: 3.1, loopProgressDegrees: 360 } })
+    expect(climb?.detail).toContain('拉升 1.2 m')
+    expect(climb?.detail).toContain('跨度 3.1 m')
+    expect(climb?.detail).toContain('原地翻一圈不會完成')
+    const crest = trainingObjective('power-loop', { metrics: { loopPhase: 4, loopEpisodeValid: 1 } })
+    expect(crest?.detail).toContain('1.5 m')
+    const descent = trainingObjective('power-loop', { metrics: { loopPhase: 5, loopEpisodeValid: 1, loopProgressDegrees: 210 } })
+    expect(descent?.detail).toContain('210.0 °')
+    expect(descent?.detail).toContain('下降至少 2 m')
+  })
+
+  it('keeps interruption facts after altitude is regained and never congratulates stale final phases', () => {
+    const detail = trainingObjective('power-loop', { metrics: { loopPhase: 7, loopEpisodeValid: 0, loopInterrupted: 1, loopInterruptionReason: 2, interruptionAltitudeM: 0.8, altitudeM: 10 } })?.detail
+    expect(detail).toContain('中斷時離地 0.8 m')
+    expect(detail).toContain('舊倒置')
+    const stale = trainingObjective('power-loop', { metrics: { loopPhase: 8, loopEpisodeValid: 0, loopInterrupted: 1, loopInterruptionReason: 1 } })
+    expect(stale?.title).not.toContain('完成')
+    expect(stale?.detail).toContain('曾接地')
+  })
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9])('explains interruption reason %s', (reason) => {
+    const objective = trainingObjective('power-loop', { metrics: { loopPhase: 5, loopEpisodeValid: 0, loopInterrupted: 1, loopInterruptionReason: reason } })
+    expect(objective?.detail).toContain('本圈已中斷')
+    expect(objective?.detail).toContain('新的一整圈')
+  })
+
+  it('reports the too-small maneuver span rather than counting approach or exit travel', () => {
+    const objective = trainingObjective('power-loop', { metrics: { loopPhase: 6, loopEpisodeValid: 0,
+      loopInterrupted: 1, loopInterruptionReason: 9, interruptionForwardSpanM: 2.4,
+      loopForwardSpanM: 0, altitudeM: 12 } })
+    expect(objective?.detail).toContain('只有 2.4 m')
+    expect(objective?.detail).toContain('尚未達到 6 m')
+    expect(objective?.detail).toContain('進場直線與回正後直飛不計入')
+    expect(objective?.detail).toContain('放慢後拉')
+    expect(objective?.title).not.toContain('完成')
+  })
+
+  it('prioritizes usable measurements and explicit recovery limits', () => {
+    expect(formatTrainingMetrics({ loopPhase: 3, loopEpisodeValid: 1, loopHeightGainM: 2.5, loopForwardSpanM: 7.2, verticalSpeedMps: 3.1 }, 'power-loop')).toEqual([
+      { key: 'loopHeightGainM', label: '本圈拉升高度', value: '2.50 m' },
+      { key: 'loopForwardSpanM', label: '本圈前後跨度', value: '7.20 m' },
+      { key: 'verticalSpeedMps', label: '升降速度（上＋／下−）', value: '3.10 m/s' },
+    ])
+    const recovering = trainingObjective('power-loop', { metrics: { loopPhase: 7, loopEpisodeValid: 1, tiltDegrees: 42, bodyRateDegreesPerSecond: 170, loopRecoveryDwellSeconds: 0.1 } })
+    expect(recovering?.detail).toContain('42.0°')
+    expect(recovering?.detail).toContain('170.0°/s')
+    expect(recovering?.detail).toContain('0.10 s／0.20 s')
+    expect(trainingObjective('power-loop', { metrics: { loopPhase: 8, loopEpisodeValid: 1, loopCompleted: 1, loopInverted: 1, loopDescended: 1 } })?.title).toContain('8／8 大迴旋與空中改出完成')
+  })
+
+  it.each([
+    ['Obstacle collision: ground', '墜毀'],
+    ['Controller disconnect', '連線中斷'],
+    ['姿態跳躍', '資料無效'],
+    ['timeout', '挑戰逾時'],
+  ])('distinguishes final failure %s', (message, expected) => {
+    expect(trainingHint('power-loop', { status: 'failure', message })).toContain(expected)
+  })
+})

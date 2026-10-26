@@ -1028,3 +1028,74 @@ describe('separate directional flip results', () => {
     expect(feedback.observedGap).not.toContain('本次觀察到')
   })
 })
+
+describe('大迴旋 result observations', () => {
+  const loopResult: TrainingResult = { ...result, lessonId: 'power-loop', totalCheckpoints: 8, completedCheckpoints: 7,
+    metrics: { loopPhase: 7, loopEpisodeValid: 1, loopInterrupted: 0, loopProgressDegrees: 360,
+      loopHeightGainM: 7, loopForwardSpanM: 12, loopReverseTravelM: 4, loopCompleted: 1, loopInverted: 1, loopDescended: 1 } }
+
+  it('only recognizes success with current continuous spatial evidence', () => {
+    const complete = summarizeTrainingResult({ ...loopResult, outcome: 'SUCCESS', completedCheckpoints: 8,
+      metrics: { ...loopResult.metrics, loopPhase: 8 } })
+    expect(complete.observedStrength).toContain('同一圈的拉升、越頂倒置、下降、向前改出')
+    expect(complete.observedGap).toBeNull()
+    for (const metrics of [
+      { ...loopResult.metrics, loopPhase: 8, loopEpisodeValid: 0 },
+      { ...loopResult.metrics, loopPhase: 8, loopInterrupted: 1 },
+      { ...loopResult.metrics, loopPhase: 8, loopHeightGainM: 0 },
+      { ...loopResult.metrics, loopPhase: 8, loopForwardSpanM: 0 },
+      { ...loopResult.metrics, loopPhase: 8, loopReverseTravelM: 0 },
+    ]) {
+      const stale = summarizeTrainingResult({ ...loopResult, outcome: 'SUCCESS', completedCheckpoints: 8, metrics })
+      expect(stale.observedStrength).toBeNull()
+      expect(stale.observedGap).toContain('證據不足')
+    }
+  })
+
+  it('reports missing real rise/span even after a full pitch turn', () => {
+    const incomplete = summarizeTrainingResult({ ...loopResult, metrics: { ...loopResult.metrics, loopPhase: 3, loopHeightGainM: 0.8, loopForwardSpanM: 2 } })
+    expect(incomplete.observedGap).toContain('拉升 0.8 m')
+    expect(incomplete.observedGap).toContain('前後跨度 2.0 m')
+    expect(incomplete.observedGap).toContain('原地後翻不能代替')
+    expect(incomplete.nextPractice).toContain('前速')
+  })
+
+  it('retains the interruption event instead of praising stale over-top evidence', () => {
+    const interrupted = summarizeTrainingResult({ ...loopResult, metrics: { ...loopResult.metrics, loopEpisodeValid: 0, loopInterrupted: 1, loopInterruptionReason: 2, interruptionAltitudeM: 0.5, altitudeM: 12 } })
+    expect(interrupted.observedStrength).not.toContain('越頂倒置')
+    expect(interrupted.observedGap).toContain('中斷時離地 0.5 m')
+    expect(interrupted.observedGap).toContain('舊的倒置或改出標記')
+  })
+
+  it('names the current recovery blocker', () => {
+    const recovery = summarizeTrainingResult({ ...loopResult, metrics: { ...loopResult.metrics, tiltDegrees: 49, verticalSpeedMps: -7 } })
+    expect(recovery.observedStrength).toContain('向前出口')
+    expect(recovery.observedGap).toContain('49.0°')
+    expect(recovery.observedGap).toContain('−4～+5 m/s')
+  })
+
+  it.each([
+    ['墜毀', '發生墜毀'], ['disconnect', '連線中斷'], ['位置跳躍', '資料無效'],
+  ])('does not infer skill from terminal stop %s', (message, observed) => {
+    const stopped = summarizeTrainingResult({ ...loopResult, message })
+    expect(stopped.observedStrength).toBeNull()
+    expect(stopped.observedGap).toContain(observed)
+    expect(stopped.nextPractice).toContain('再練一次')
+  })
+
+  it('explains a too-narrow completed flip from the interruption snapshot', () => {
+    const narrow = summarizeTrainingResult({ ...loopResult, metrics: { ...loopResult.metrics,
+      loopPhase: 6, loopEpisodeValid: 0, loopInterrupted: 1, loopInterruptionReason: 9,
+      loopForwardSpanM: 0, interruptionForwardSpanM: 2.4 } })
+    expect(narrow.observedStrength).not.toContain('向前出口')
+    expect(narrow.observedGap).toContain('只有 2.4 m')
+    expect(narrow.observedGap).toContain('進場直線與回正後直飛不計入')
+    expect(narrow.nextPractice).toContain('真正的拉升、越頂與下降')
+  })
+
+  it('does not infer a loop from no armed samples', () => {
+    const empty = summarizeTrainingResult({ ...loopResult, sampleCount: 0, outcome: 'SUCCESS' })
+    expect(empty.observedStrength).toBeNull()
+    expect(empty.observedGap).toContain('沒有有效')
+  })
+})

@@ -59,6 +59,62 @@ function attemptUnload(): Event {
 }
 
 describe('Free Flight native navigation confirmation', () => {
+  it('keeps the spatial L13 loop movie, eight chapters and measured dimensions separate from live progress', () => {
+    window.localStorage.clear()
+    render(<App />)
+    const canvas = screen.getByLabelText('Free Flight 3D scene')
+    fireEvent.change(screen.getByLabelText('選擇課程'), { target: { value: 'power-loop' } })
+    fireEvent.change(screen.getByLabelText('控制方式'), { target: { value: 'keyboard' } })
+    const hud = () => screen.getByRole('group', { name: '大迴旋即時狀態' })
+    expect(hud()).toHaveTextContent('即時')
+    expect(screen.getByTestId('loop-progress')).toHaveTextContent('0°')
+    const initialAltitude = screen.getByTestId('flight-altitude').textContent
+    expect(frames.renderer!.scene.getObjectByName('power-loop-field')?.visible).toBe(true)
+    expect(frames.runtime!.simulation.getStaticObstacles()).toHaveLength(0)
+    const liveSteps = screen.getByRole('list', { name: '本課步驟' }).textContent
+    const stored = () => Object.fromEntries(Object.entries(window.localStorage).filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.')))
+    const before = stored()
+    fireEvent.click(screen.getByRole('button', { name: 'L13 大迴旋示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    expect(screen.getByRole('button', { name: '0.5×' })).toHaveAttribute('aria-pressed', 'true')
+    const progress = screen.getByRole('region', { name: '示範進度' })
+    expect(progress).toHaveTextContent('L13 大迴旋')
+    const chapters = within(progress).getAllByRole('button')
+    expect(chapters).toHaveLength(8)
+    fireEvent.click(chapters[5])
+    expect(frames.runtime!.getReplayPlayback()!.isPlaying()).toBe(false)
+    expect(Number.parseFloat(screen.getByTestId('loop-progress').textContent!)).toBeGreaterThan(140)
+    expect(Number.parseFloat(screen.getByTestId('loop-height').textContent!)).toBeGreaterThanOrEqual(3)
+    const held = hud().textContent
+    frame(400)
+    expect(hud().textContent).toBe(held)
+    fireEvent.change(screen.getByRole('slider'), { target: { value: frames.runtime!.getReplayPlayback()!.durationSeconds } })
+    expect(progress).toHaveTextContent('8 / 8 個示範步驟完成')
+    expect(Number.parseFloat(screen.getByTestId('loop-progress').textContent!)).toBeGreaterThanOrEqual(325)
+    expect(Number.parseFloat(screen.getByTestId('loop-height').textContent!)).toBeGreaterThanOrEqual(3)
+    expect(Number.parseFloat(screen.getByTestId('loop-span').textContent!)).toBeGreaterThanOrEqual(6)
+    expect(Number.parseFloat(screen.getByTestId('flight-altitude').textContent!)).toBeGreaterThanOrEqual(1.5)
+    fireEvent.change(screen.getByRole('slider'), { target: { value: 0 } })
+    expect(screen.getByTestId('loop-progress')).toHaveTextContent('0°')
+    expect(screen.getByTestId('loop-height')).toHaveTextContent('0.0')
+    expect(screen.getByTestId('loop-span')).toHaveTextContent('0.0')
+    expect(progress).not.toHaveTextContent('8 / 8 個示範步驟完成')
+    expect(stored()).toEqual(before)
+    fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
+    expect(screen.getByRole('list', { name: '本課步驟' }).textContent).toBe(liveSteps)
+    expect(hud()).toHaveTextContent('即時')
+    expect(screen.getByTestId('loop-progress')).toHaveTextContent('0°')
+    fireEvent.click(screen.getByRole('button', { name: /^俯仰$/ }))
+    expect(screen.queryByRole('group', { name: '大迴旋即時狀態' })).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '示範進度' })).toHaveTextContent('L00')
+    expect(stored()).toEqual(before)
+    fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
+    expect(screen.getByLabelText('選擇課程')).toHaveValue('power-loop')
+    expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
+    expect(screen.getByTestId('flight-altitude').textContent).toBe(initialAltitude)
+    expect(screen.getByRole('button', { name: /^Arm$/ })).toBeEnabled()
+  })
+
   it.each([
     { label: 'L11 前翻示範', direction: 1, lessonId: 'front-flip', title: 'L11 前翻' },
     { label: 'L12 後翻示範', direction: -1, lessonId: 'back-flip', title: 'L12 後翻' },

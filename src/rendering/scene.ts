@@ -12,6 +12,7 @@ import { createFigureEightTargets, FIGURE_EIGHT_TARGET_RADIUS_M } from '../train
 import { BASIC_RECOVERY_AREA_RADIUS_M, BASIC_RECOVERY_MIN_PREPARATION_HEIGHT_M, BASIC_RECOVERY_TARGET_HEIGHT_M } from '../training/basicRecovery'
 import { FULL_ROLL_AREA_RADIUS_M, FULL_ROLL_MIN_PREPARATION_HEIGHT_M, FULL_ROLL_TARGET_HEIGHT_M } from '../training/fullRoll'
 import { FULL_FLIP_AREA_RADIUS_M, FULL_FLIP_MIN_PREPARATION_HEIGHT_M, FULL_FLIP_TARGET_HEIGHT_M } from '../training/fullFlip'
+import { POWER_LOOP_AREA_RADIUS_M, POWER_LOOP_TARGET_HEIGHT_M } from '../training/powerLoop'
 import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
 import type { Vector3 } from '../math/vector'
 import type { ReplayGhostState } from '../replay'
@@ -60,6 +61,8 @@ export interface FlightScene {
   setFullRollStage(stage: number | null): void
   /** Color world-fixed pitch-flip guidance without writing flight state. */
   setFullFlipStage(stage: number | null): void
+  /** Highlight an illustrative vertical-loop segment without changing flight. */
+  setPowerLoopStage(stage: number | null): void
   /** Presentation-only bounded path trace; evaluators remain renderer-independent. */
   setTrainingPath(path: readonly Vector3[]): void
   setReplayPath(path: readonly Vector3[]): void
@@ -927,9 +930,72 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     sizeM: { x: FULL_FLIP_AREA_RADIUS_M * 2, y: flipGuideTopM - FULL_FLIP_MIN_PREPARATION_HEIGHT_M, z: FULL_FLIP_AREA_RADIUS_M * 2 },
   }
 
+  // These dashed outlines illustrate the shape and order of a vertical loop.
+  // They are non-solid references, not gates or a mandatory scored flight path.
+  // The evaluator measures the learner's own entry plane and actual movement.
+  const loopField = new THREE.Group()
+  loopField.name = 'power-loop-field'
+  loopField.position.set(field.launch.x, config.ground.heightM + POWER_LOOP_TARGET_HEIGHT_M, field.launch.z)
+  loopField.visible = false
+  const loopFloor = new THREE.Mesh(
+    new THREE.RingGeometry(POWER_LOOP_AREA_RADIUS_M - 0.07, POWER_LOOP_AREA_RADIUS_M, 128),
+    new THREE.MeshBasicMaterial({ color: 0x8abac4, transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false }),
+  )
+  loopFloor.name = 'loop-area-boundary'
+  loopFloor.rotation.x = -Math.PI / 2
+  loopFloor.position.y = -POWER_LOOP_TARGET_HEIGHT_M + 0.025
+  loopField.add(loopFloor)
+  for (const [side, x] of [['left', -5], ['right', 5]] as const) {
+    const points = Array.from({ length: 97 }, (_, index) => {
+      const angle = index / 96 * Math.PI * 2
+      return new THREE.Vector3(x, 8 - 8 * Math.cos(angle), -18 - 8 * Math.sin(angle))
+    })
+    const outline = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(points),
+      new THREE.LineDashedMaterial({ color: 0x8abac4, transparent: true, opacity: 0.45, dashSize: 0.8, gapSize: 0.7, depthWrite: false }),
+    )
+    outline.name = `loop-outline-${side}`
+    outline.computeLineDistances()
+    loopField.add(outline)
+  }
+  const loopHeightPole = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([
+      ...[-7, 7].flatMap((x) => [
+        new THREE.Vector3(x, -POWER_LOOP_TARGET_HEIGHT_M, -18), new THREE.Vector3(x, 16, -18),
+        ...[0, 8, 16].flatMap((y) => [new THREE.Vector3(x - 0.5, y, -18), new THREE.Vector3(x + 0.5, y, -18)]),
+      ]),
+    ]),
+    new THREE.LineBasicMaterial({ color: 0x8abac4, transparent: true, opacity: 0.4, depthWrite: false }),
+  )
+  loopHeightPole.name = 'loop-height-poles'
+  loopField.add(loopHeightPole)
+  const loopAccent = new THREE.Group()
+  loopAccent.name = 'loop-stage-guidance'
+  loopAccent.position.set(0, 0, -18)
+  const loopStageMaterial = new THREE.LineBasicMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.95, depthWrite: false })
+  const loopStageReference = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-5, 0, 0), new THREE.Vector3(5, 0, 0),
+      new THREE.Vector3(-5, -0.5, 0), new THREE.Vector3(-5, 0.5, 0),
+      new THREE.Vector3(5, -0.5, 0), new THREE.Vector3(5, 0.5, 0),
+      new THREE.Vector3(0, 0.6, 0), new THREE.Vector3(0, 2, 0),
+      new THREE.Vector3(-0.6, 1.4, 0), new THREE.Vector3(0, 2, 0),
+      new THREE.Vector3(0.6, 1.4, 0), new THREE.Vector3(0, 2, 0),
+    ]), loopStageMaterial,
+  )
+  loopStageReference.name = 'loop-stage-reference'
+  loopAccent.add(loopStageReference)
+  loopField.add(loopAccent)
+  scene.add(loopField)
+  const loopReference: FlightSceneReference = {
+    id: 'loop-zone', kind: 'zone', object: loopField,
+    positionM: { x: field.launch.x, y: config.ground.heightM + POWER_LOOP_TARGET_HEIGHT_M, z: field.launch.z },
+    sizeM: { x: POWER_LOOP_AREA_RADIUS_M * 2, y: 16, z: POWER_LOOP_AREA_RADIUS_M * 2 },
+  }
+
   const landingSurface: FlightSceneReference = { id: 'landing-surface', kind: 'zone', object: landingTarget, positionM: { ...field.landing }, sizeM: { x: LANDING_ZONE_RADIUS_M * 2, y: 0, z: LANDING_ZONE_RADIUS_M * 2 } }
   const launchReference: FlightSceneReference = { id: 'training-launch', kind: 'pad', object: takeoffPad, positionM: { ...field.launch } }
-  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, recoveryReference, rollReference, flipReference]
+  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, recoveryReference, rollReference, flipReference, loopReference]
   const referenceById = new Map(sceneReferences.map((reference) => [reference.id, reference]))
 
   const drone = createQuadVisual()
@@ -1011,7 +1077,8 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     recoveryField.visible = lessonId === 'basic-recovery'
     rollField.visible = lessonId === 'full-roll'
     flipField.visible = ['full-flip', 'front-flip', 'back-flip'].includes(lessonId ?? '')
-    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip'].includes(lessonId ?? '')
+    loopField.visible = lessonId === 'power-loop'
+    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop'].includes(lessonId ?? '')
     for (const reference of referenceSet.contract) {
       reference.object.visible = !beginner
     }
@@ -1070,6 +1137,21 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     flipBackwardMaterial.color.set(color)
   }
 
+  const setPowerLoopStage = (stage: number | null): void => {
+    if (stage === null || !Number.isInteger(stage) || stage < 0 || stage > 8) {
+      loopAccent.visible = false
+      return
+    }
+    loopAccent.visible = true
+    loopStageMaterial.color.set(stage >= 7 ? 0xb8f36b : stage >= 3 ? 0xffc978 : 0x45d7f7)
+    const [y, z] = stage <= 2 ? [0, -18]
+      : stage === 3 ? [8, -26]
+        : stage === 4 ? [16, -18]
+          : stage === 5 ? [8, -10]
+            : stage === 6 ? [0, -18] : [0, -24]
+    loopAccent.position.set(0, y, z)
+  }
+
   const setPath = (line: THREE.Line, path: readonly Vector3[], yOffset: number): void => {
     const maximumPoints = 1_200
     const stride = Math.max(1, Math.ceil(path.length / maximumPoints))
@@ -1118,6 +1200,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     setRecoveryStage,
     setFullRollStage,
     setFullFlipStage,
+    setPowerLoopStage,
     setTrainingPath,
     setReplayPath,
     dispose: () => disposeFlightScene(scene),

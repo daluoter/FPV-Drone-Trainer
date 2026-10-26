@@ -61,6 +61,31 @@ function context(overrides: Partial<TrainingAttemptContext> = {}): TrainingAttem
 }
 
 describe('training progress persistence', () => {
+  it('adds an independent L13 record without crediting old L13 orbit or L12 back flips', () => {
+    const storage = new MemoryStorage()
+    const scope = context({ rulesVersion: 6, mode: 'practice' })
+    const store = new TrainingProgressStore(storage)
+    for (const lessonId of ['orbit', 'back-flip']) {
+      expect(store.recordResult(result({ lessonId, sessionId: `${lessonId}:historical`, attemptContext: scope })).saved).toBe(true)
+    }
+    const key = trainingAttemptContextKey(scope)
+    const envelope = JSON.parse(storage.getItem(key)!)
+    delete envelope.progress.lessons['power-loop']
+    const oldRaw = JSON.stringify(envelope)
+    storage.setItem(key, oldRaw)
+    const loaded = new TrainingProgressStore(storage).loadCurrent(scope)
+    expect(loaded.errors).toEqual([])
+    expect(loaded.progress.lessons['power-loop']).toEqual({ recent: null, best: null, completed: false, attempts: 0 })
+    expect(storage.getItem(key)).toBe(oldRaw)
+    expect(store.recordResult(result({ lessonId: 'power-loop', sessionId: 'loop:complete', attemptContext: scope,
+      completedCheckpoints: 8, totalCheckpoints: 8, metrics: { loopPhase: 8, loopHeightGainM: 12, loopForwardSpanM: 18 } })).saved).toBe(true)
+    const reloaded = new TrainingProgressStore(storage).loadCurrent(scope)
+    expect(reloaded.progress.lessons['power-loop']).toMatchObject({ completed: true, attempts: 1, best: { sessionId: 'loop:complete', totalCheckpoints: 8 } })
+    for (const lessonId of ['orbit', 'back-flip']) expect(reloaded.progress.lessons[lessonId]).toEqual(loaded.progress.lessons[lessonId])
+    expect(new TrainingProgressStore(storage).loadCurrent({ ...scope, inputSource: 'keyboard' }).progress.lessons['power-loop'].completed).toBe(false)
+    expect(new TrainingProgressStore(storage).loadCurrent({ ...scope, mode: 'challenge' }).progress.lessons['power-loop'].completed).toBe(false)
+  })
+
   it('keeps stable-ID progress and raw scopes intact after merging hover into L01 and renumbering courses', () => {
     const storage = new MemoryStorage()
     const store = new TrainingProgressStore(storage)
@@ -89,7 +114,7 @@ describe('training progress persistence', () => {
     expect(loaded.progress.lessons['basic-recovery']).toMatchObject({ completed: true, attempts: 1, best: { sessionId: 'old-L10:passed', totalCheckpoints: 8 } })
 
     const active = LEARNING_LESSONS.map(({ id }) => ({ id, code: lessonLearningContent(id)?.code, progress: loaded.progress.lessons[id] }))
-    expect(active).toHaveLength(14)
+    expect(active).toHaveLength(15)
     expect(active.some(({ id }) => id === 'hover')).toBe(false)
     expect(active.some(({ id }) => id === 'full-flip')).toBe(false)
     expect(active.find(({ id }) => id === 'takeoff')).toMatchObject({ code: 'L01', progress: { completed: true, attempts: 2 } })

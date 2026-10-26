@@ -13,7 +13,7 @@ import {
   BASIC_RECOVERY_DRIFT_STOP_MPS as RECOVERY_DRIFT_STOP,
   BASIC_RECOVERY_DRIFT_VERTICAL_MPS as RECOVERY_DRIFT_VERTICAL,
 } from './basicRecovery'
-import { basicRecoveryStageLabel, coordinatedTurnTargetLabel, directionControlTargetLabel, figureEightTargetLabel, fullFlipInterruptionReason, fullRollInterruptionReason, squareRouteTargetLabel, trainingHint, trainingObjective, wideGateCollisionCause } from './feedback'
+import { basicRecoveryStageLabel, coordinatedTurnTargetLabel, directionControlTargetLabel, figureEightTargetLabel, fullFlipInterruptionReason, fullRollInterruptionReason, powerLoopInterruptionReason, powerLoopStageLabel, squareRouteTargetLabel, trainingHint, trainingObjective, wideGateCollisionCause } from './feedback'
 import { LANDING_LIFTOFF_HEIGHT_M, LANDING_ZONE_RADIUS_M } from './landing'
 import { TAKEOFF_SETTLED_DWELL_SECONDS } from './takeoff'
 import {
@@ -185,6 +185,75 @@ function fullRollResultFeedback(result: TrainingResult, scope: string): Training
     : '下次選左或右的同一方向連續橫滾，實際通過倒置並完成一圈後，再停止旋轉、修回正飛；先保留足夠高度。'
   return { observedStrength: strength, observedGap: `${ended}完整橫滾尚未完成。${observation}`,
     nextPractice: `${restart}${action}`, scopeNote: scope }
+}
+
+function powerLoopResultFeedback(result: TrainingResult, scope: string): TrainingResultFeedback | null {
+  if (result.lessonId !== 'power-loop') return null
+  const restart = '本次練習已結束；按「再練一次」會清空本次步驟，從地面重新開始。'
+  const message = result.message ?? ''
+  const timedOut = /逾時|timed out|timeout/iu.test(message)
+  if (result.outcome !== 'SUCCESS') {
+    if (/墜毀|撞擊|crash|impact|Obstacle collision:/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: '本次發生墜毀，大迴旋與空中改出尚未完成。',
+      nextPractice: `先重設場景。${restart}下次保留約 10 m 進場高度，下降時提早拉平並補油止降。`,
+      scopeNote: scope,
+    }
+    if (/解除解鎖|上鎖|失焦|失去焦點|斷線|disarm|focus|disconnect/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: '本次因解除解鎖、失去焦點或連線中斷而停止，不能據此判定大迴旋操控表現。',
+      nextPractice: `${restart}確認網頁與控制器就緒，倒數後再明確解鎖。`,
+      scopeNote: scope,
+    }
+    if (/無效|資料中斷|時間倒退|跳躍|不一致|重設|invalid|non-finite|telemetry.*gap|impossible.*jump|reset|rewind/iu.test(message)) return {
+      observedStrength: null,
+      observedGap: '本次飛行資料無效、中斷或被重設，無法判定連續的大迴旋航跡。',
+      nextPractice: `${restart}保持網頁在前景，以實際飛行走完拉升、越頂、下降與改出。`,
+      scopeNote: scope,
+    }
+  }
+  if (!Number.isFinite(result.sampleCount) || result.sampleCount <= 0) return {
+    observedStrength: null,
+    observedGap: '本次沒有有效的已解鎖飛行樣本，無法判定大迴旋表現。',
+    nextPractice: `${restart}確認畫面與控制器就緒，再明確解鎖自行起飛。`,
+    scopeNote: scope,
+  }
+  const metrics = result.metrics
+  const phase = Number.isInteger(metrics.loopPhase) && metrics.loopPhase >= 0 && metrics.loopPhase <= 8 ? metrics.loopPhase : null
+  const valid = metrics.loopEpisodeValid > 0.5 && !(metrics.loopInterrupted > 0.5)
+  const spatialProof = metrics.loopHeightGainM >= 3 && metrics.loopForwardSpanM >= 6 && metrics.loopReverseTravelM >= 1.5
+    && metrics.loopCompleted > 0.5 && metrics.loopInverted > 0.5 && metrics.loopDescended > 0.5
+  if (result.outcome === 'SUCCESS' && phase === 8 && result.completedCheckpoints === 8 && valid && spatialProof) return {
+    observedStrength: '本次已從地面自行起飛，建立前速並完成同一圈的拉升、越頂倒置、下降、向前改出及空中恢復。',
+    observedGap: null,
+    nextPractice: '以相同條件再練一次，觀察進場速度、拉升高度、倒置時油門與提早改出的配合；不需要回原點或降落。',
+    scopeNote: scope,
+  }
+  const ended = timedOut ? '本次挑戰逾時；' : ''
+  if (phase === null || phase === 8) return {
+    observedStrength: null,
+    observedGap: `${ended}大迴旋的連續分段或空間航跡證據不足，不能只以完成標記判定通過。`,
+    nextPractice: `${restart}依提示完成前進、拉升、越頂、下降及空中改出。`,
+    scopeNote: scope,
+  }
+  let observation: string
+  if (!valid && metrics.loopInterrupted > 0.5) observation = `先前這一圈已中斷；${powerLoopInterruptionReason(metrics) ?? ''}舊的倒置或改出標記不能代替新的一圈。`
+  else if (phase <= 1) observation = '尚未從地面自行起飛並取得進場高度。'
+  else if (phase === 2) observation = `尚未建立有效前速${Number.isFinite(metrics.loopForwardSpeedMps) ? `，結束時為 ${metrics.loopForwardSpeedMps.toFixed(1)} m/s` : ''}；至少需 3 m/s，再開始拉升。`
+  else if (phase === 3) observation = `實際拉升或前後跨度尚未足夠${Number.isFinite(metrics.loopHeightGainM) ? `；本圈拉升 ${metrics.loopHeightGainM.toFixed(1)} m` : ''}${Number.isFinite(metrics.loopForwardSpanM) ? `、前後跨度 ${metrics.loopForwardSpanM.toFixed(1)} m` : ''}。原地後翻不能代替空間迴圈。`
+  else if (phase === 4) observation = `尚未完成越頂倒置與向來路方向移動${Number.isFinite(metrics.loopReverseTravelM) ? `；越頂後退行程 ${metrics.loopReverseTravelM.toFixed(1)} m，需至少 1.5 m` : ''}。`
+  else if (phase === 5) observation = '已到越頂階段，尚未實際沿迴圈下降到距最高點至少 2 m。'
+  else if (phase === 6) observation = '已進入下降，尚未完成同方向的一圈並向前拉平改出；反向翻回或原地回平不能代替出口。'
+  else observation = trainingObjective('power-loop', { metrics })?.detail ?? '已走出出口，尚未連續完成空中恢復確認。'
+  const strength = valid && phase >= 7 ? '本次已觀察到這一圈的空間迴圈與向前出口，尚待確認空中恢復。'
+    : valid && phase >= 5 ? '本次已觀察到這一圈的拉升與越頂倒置。'
+      : phase >= 2 ? '本次已觀察到從地面自行起飛並取得練習高度。' : null
+  return {
+    observedStrength: strength,
+    observedGap: `${ended}尚未完成「${powerLoopStageLabel(phase)}」。${observation}`,
+    nextPractice: `${restart}${valid && phase >= 7 ? '下次接近正飛時提早回中減緩旋轉，再主動拉平與調整油門；回中不會自動回平。' : '先保留高度並建立前速，沿同一後拉方向完成真正的拉升、越頂與下降，再向前改出。'}`,
+    scopeNote: scope,
+  }
 }
 
 function fullFlipResultFeedback(result: TrainingResult, scope: string): TrainingResultFeedback | null {
@@ -895,6 +964,8 @@ function phaseProgress(result: TrainingResult): { observedGap: string; nextPract
 /** Final-sample observations and checkpoint facts, never inferred causes or a claim about the whole flight. */
 export function summarizeTrainingResult(result: TrainingResult): TrainingResultFeedback {
   const scope = scopeNote(result)
+  const loop = powerLoopResultFeedback(result, scope)
+  if (loop) return loop
   const flip = fullFlipResultFeedback(result, scope)
   if (flip) return flip
   const roll = fullRollResultFeedback(result, scope)

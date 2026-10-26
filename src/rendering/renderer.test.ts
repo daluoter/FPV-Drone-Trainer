@@ -392,4 +392,43 @@ describe('FlightRenderer lifecycle and failure contract', () => {
     }
   })
 
+  it('retains loop stage and ground-relative guides across scene rebuilds on the same canvas', () => {
+    const rendererStub = createRendererStub()
+    const canvas = document.createElement('canvas')
+    const renderer = new FlightRenderer(canvas, { rendererFactory: () => rendererStub })
+    try {
+      renderer.setLessonTarget('power-loop')
+      renderer.setPowerLoopStage(4)
+      const previous = renderer.flightScene
+      const disposePrevious = vi.spyOn(previous, 'dispose')
+      renderer.reconfigureScene({ ...DEFAULT_DRONE_CONFIG,
+        ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 30, z: -3 } })
+      expect(renderer.scene.getObjectByName('power-loop-field')?.visible).toBe(true)
+      const guide = renderer.scene.getObjectByName('loop-stage-reference') as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      expect(guide.material.color.getHex()).toBe(0xffc978)
+      expect(renderer.scene.getObjectByName('loop-stage-guidance')?.position.toArray()).toEqual([0, 16, -18])
+      expect(renderer.flightScene.getReference('loop-zone')?.positionM).toEqual({ x: 6, y: 15, z: -3 })
+      expect(renderer.scene.getObjectByName('full-flip-field')?.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('wide-gate-field')?.visible).toBe(false)
+      expect(renderer.canvas).toBe(canvas)
+      expect(renderer.renderer).toBe(rendererStub)
+      expect(disposePrevious).toHaveBeenCalledOnce()
+      renderer.setPowerLoopStage(8)
+      expect(guide.material.color.getHex()).toBe(0xb8f36b)
+      renderer.setPowerLoopStage(null)
+      renderer.reconfigureScene(DEFAULT_DRONE_CONFIG)
+      expect(renderer.scene.getObjectByName('loop-stage-guidance')?.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('power-loop-field')?.visible).toBe(true)
+      renderer.setPowerLoopStage(2)
+      renderer.render(createInitialDroneState(DEFAULT_DRONE_CONFIG))
+      expect(renderer.getStatus()).toEqual({ kind: 'ready' })
+      expect(rendererStub.render).toHaveBeenCalledOnce()
+      renderer.setLessonTarget('wide-gate')
+      expect(renderer.scene.getObjectByName('power-loop-field')?.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('wide-gate-field')?.visible).toBe(true)
+    } finally {
+      renderer.dispose()
+    }
+  })
+
 })

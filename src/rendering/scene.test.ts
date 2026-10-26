@@ -206,6 +206,7 @@ describe('flight scene reference contract', () => {
         'recovery-zone',
         'roll-zone',
         'flip-zone',
+        'loop-zone',
       ])
       expect(scene.getReference('hover-zone')?.kind).toBe('zone')
       expect(scene.getReference('hover-zone')?.positionM).toEqual({ x: 0, y: 3, z: 0 })
@@ -864,7 +865,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('roll-zone')!
-      expect(scene.sceneReferences.at(-2)?.id).toBe('roll-zone')
+      expect(scene.sceneReferences.at(-3)?.id).toBe('roll-zone')
       expect(reference.kind).toBe('zone')
       expect(reference.positionM).toEqual({ x: 6, y: 15, z: -3 })
       expect(reference.object.position.toArray()).toEqual([6, 15, -3])
@@ -960,7 +961,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('flip-zone')!
-      expect(scene.sceneReferences.at(-1)?.id).toBe('flip-zone')
+      expect(scene.sceneReferences.at(-2)?.id).toBe('flip-zone')
       expect(reference.kind).toBe('zone')
       expect(reference.positionM).toEqual({ x: 6, y: 15, z: -3 })
       expect(reference.object.position.toArray()).toEqual([6, 15, -3])
@@ -1005,6 +1006,99 @@ describe('flight scene reference contract', () => {
   it('disposes every full-flip guide including its hidden world-up marker', () => {
     const scene = createFlightScene()
     const resources = ['flip-area-boundary', 'flip-height-pole', 'flip-height-band', 'flip-level-reference', 'flip-world-up-reference', 'flip-forward-reference', 'flip-backward-reference'].flatMap((name) => {
+      const object = scene.scene.getObjectByName(name) as THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      return [object.geometry, object.material]
+    })
+    const dispose = resources.map((resource) => vi.spyOn(resource, 'dispose'))
+    scene.dispose()
+    for (const spy of dispose) expect(spy).toHaveBeenCalledOnce()
+  })
+
+  it('shows a non-solid illustrative loop without changing actual drone state or evaluator anchors', () => {
+    const scene = createFlightScene()
+    const field = scene.scene.getObjectByName('power-loop-field')!
+    const accent = scene.scene.getObjectByName('loop-stage-guidance')!
+    const guide = scene.scene.getObjectByName('loop-stage-reference') as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
+    const before = scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM: { ...positionM }, sizeM }))
+    const drone = scene.drone.position.toArray()
+    const ghost = scene.ghost.position.toArray()
+    try {
+      expect(field.visible).toBe(false)
+      scene.setLessonTarget('power-loop')
+      expect(field.visible).toBe(true)
+      for (const name of ['full-flip-field', 'full-roll-field', 'basic-recovery-field', 'wide-gate-field', 'figure-eight-targets', 'square-route-targets', 'coordinated-turn-targets', 'straight-line-targets', 'landing-target', 'takeoff-height-target']) {
+        expect(scene.scene.getObjectByName(name)?.visible).toBe(false)
+      }
+      for (const id of ['hover-zone', 'orbit-poi', 'split-s-reference']) expect(scene.getReference(id)?.object.visible).toBe(false)
+      for (const [stage, color, y, z] of [[0, 0x45d7f7, 0, -18], [2, 0x45d7f7, 0, -18], [3, 0xffc978, 8, -26], [4, 0xffc978, 16, -18], [5, 0xffc978, 8, -10], [6, 0xffc978, 0, -18], [7, 0xb8f36b, 0, -24], [8, 0xb8f36b, 0, -24]]) {
+        scene.setPowerLoopStage(stage)
+        expect(accent.visible).toBe(true)
+        expect(guide.material.color.getHex()).toBe(color)
+        expect(accent.position.toArray()).toEqual([0, y, z])
+      }
+      for (const stage of [null, -1, 9, 1.5, Number.NaN]) {
+        scene.setPowerLoopStage(stage)
+        expect(accent.visible).toBe(false)
+        expect(field.visible).toBe(true)
+        expect(scene.scene.getObjectByName('loop-outline-left')?.visible).toBe(true)
+      }
+      expect(scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM, sizeM }))).toEqual(before)
+      expect(scene.drone.position.toArray()).toEqual(drone)
+      expect(scene.ghost.position.toArray()).toEqual(ghost)
+      scene.setLessonTarget('back-flip')
+      expect(field.visible).toBe(false)
+      expect(scene.scene.getObjectByName('full-flip-field')?.visible).toBe(true)
+      scene.setLessonTarget(null)
+      expect(field.visible).toBe(false)
+      expect(scene.getReference('hover-zone')?.object.visible).toBe(true)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('anchors the illustrative loop to raised ground and keeps its outlines world-fixed and non-solid', () => {
+    const defaults = createDefaultDroneConfig()
+    const config = { ...defaults, ground: { ...defaults.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 30, z: -3 } }
+    const original = JSON.stringify(config)
+    const scene = createFlightScene(config)
+    try {
+      const reference = scene.getReference('loop-zone')!
+      expect(scene.sceneReferences.at(-1)?.id).toBe('loop-zone')
+      expect(reference.positionM).toEqual({ x: 6, y: 15, z: -3 })
+      expect(reference.object.position.toArray()).toEqual([6, 15, -3])
+      expect(reference.sizeM).toEqual({ x: 240, y: 16, z: 240 })
+      const floor = scene.scene.getObjectByName('loop-area-boundary') as THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>
+      expect(floor.geometry.parameters.outerRadius).toBe(120)
+      expect(floor.getWorldPosition(floor.position.clone()).y).toBeCloseTo(5.025)
+      const meshes: THREE.Object3D[] = []
+      reference.object.traverse((object) => { if ((object as THREE.Mesh).isMesh) meshes.push(object) })
+      expect(meshes).toEqual([floor])
+      expect(floor.material.transparent).toBe(true)
+      const outlines = ['left', 'right'].map((side) => scene.scene.getObjectByName(`loop-outline-${side}`) as THREE.Line<THREE.BufferGeometry, THREE.LineDashedMaterial>)
+      for (const [index, outline] of outlines.entries()) {
+        const points = outline.geometry.getAttribute('position')
+        const heights = Array.from({ length: points.count }, (_, i) => points.getY(i) + reference.positionM.y)
+        const depths = Array.from({ length: points.count }, (_, i) => points.getZ(i) + reference.positionM.z)
+        expect(Math.min(...heights)).toBe(15)
+        expect(Math.max(...heights)).toBe(31)
+        expect(Math.min(...depths)).toBe(-29)
+        expect(Math.max(...depths)).toBe(-13)
+        expect(points.getX(0)).toBe(index === 0 ? -5 : 5)
+        expect(outline.material.isLineDashedMaterial).toBe(true)
+        expect(outline.geometry.getAttribute('lineDistance')).toBeDefined()
+      }
+      const before = outlines.map((outline) => outline.getWorldQuaternion(outline.quaternion.clone()).toArray())
+      scene.applyState({ ...createInitialDroneState(config), orientation: { x: -1, y: 0, z: 0, w: 0 } })
+      expect(outlines.map((outline) => outline.getWorldQuaternion(outline.quaternion.clone()).toArray())).toEqual(before)
+      expect(JSON.stringify(config)).toBe(original)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('disposes all loop outline, boundary, height and stage resources exactly once', () => {
+    const scene = createFlightScene()
+    const resources = ['loop-area-boundary', 'loop-outline-left', 'loop-outline-right', 'loop-height-poles', 'loop-stage-reference'].flatMap((name) => {
       const object = scene.scene.getObjectByName(name) as THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>
       return [object.geometry, object.material]
     })

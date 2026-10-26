@@ -17,7 +17,7 @@ import {
 import Mode2StickOverlay from '../training/StickOverlay'
 import { trainingHint, trainingObjective, wideGateCollisionCause } from '../training/feedback'
 import { createResultReplaySnapshot, type ResultReplayMarker, type ResultReplaySnapshot } from '../training/resultReplay'
-import { createTeachingDemonstration, teachingCueAt, teachingTargetAt, teachingRecoveryPhaseAt, teachingFullRollPhaseAt, teachingFullFlipPhaseAt, type TeachingDemonstration, type TeachingDemonstrationKind } from '../training/demonstrations'
+import { createTeachingDemonstration, teachingCueAt, teachingTargetAt, teachingRecoveryPhaseAt, teachingFullRollPhaseAt, teachingFullFlipPhaseAt, teachingPowerLoopPhaseAt, type TeachingDemonstration, type TeachingDemonstrationKind } from '../training/demonstrations'
 import { DIRECTION_CONTROL_TARGET_IDS } from '../training/directionControl'
 import { COORDINATED_TURN_TARGET_IDS } from '../training/coordinatedTurn'
 import { SQUARE_ROUTE_TARGET_IDS } from '../training/squareRoute'
@@ -378,7 +378,11 @@ export default function FreeFlight({
       ? demonstration ? teachingFullFlipPhaseAt(demonstration, telemetry.replay.currentTimeSeconds) : null
       : trainingState?.lastEvaluation?.metrics?.flipPhase ?? 0
     rendererRef.current?.setFullFlipStage?.(flipPhase)
-  }, [trainingState?.lessonId, trainingState?.lastEvaluation?.metrics?.directionTargetIndex, trainingState?.lastEvaluation?.metrics?.turnTargetIndex, trainingState?.lastEvaluation?.metrics?.squareTargetIndex, trainingState?.lastEvaluation?.metrics?.eightTargetIndex, trainingState?.lastEvaluation?.metrics?.gateTargetIndex, trainingState?.lastEvaluation?.metrics?.recoveryPhase, trainingState?.lastEvaluation?.metrics?.rollPhase, trainingState?.lastEvaluation?.metrics?.flipPhase, rendererRetryKey, telemetry?.replay.active, telemetry?.replay.currentTimeSeconds, demonstration])
+    const loopPhase = lessonId !== 'power-loop' ? null : telemetry?.replay.active
+      ? demonstration ? teachingPowerLoopPhaseAt(demonstration, telemetry.replay.currentTimeSeconds) : null
+      : trainingState?.lastEvaluation?.metrics?.loopPhase ?? 0
+    rendererRef.current?.setPowerLoopStage?.(loopPhase)
+  }, [trainingState?.lessonId, trainingState?.lastEvaluation?.metrics?.directionTargetIndex, trainingState?.lastEvaluation?.metrics?.turnTargetIndex, trainingState?.lastEvaluation?.metrics?.squareTargetIndex, trainingState?.lastEvaluation?.metrics?.eightTargetIndex, trainingState?.lastEvaluation?.metrics?.gateTargetIndex, trainingState?.lastEvaluation?.metrics?.recoveryPhase, trainingState?.lastEvaluation?.metrics?.rollPhase, trainingState?.lastEvaluation?.metrics?.flipPhase, trainingState?.lastEvaluation?.metrics?.loopPhase, rendererRetryKey, telemetry?.replay.active, telemetry?.replay.currentTimeSeconds, demonstration])
 
   useEffect(() => {
     rendererRef.current?.setTrainingPath(trainingPath.map((sample) => sample.state.positionM))
@@ -538,7 +542,7 @@ export default function FreeFlight({
       setDemonstrationSettings(recordedSettings)
       setDemonstration(demo)
       setDemoError(null)
-      runtime.setReplaySpeed(kind === 'basic-recovery' || kind === 'full-roll' || kind === 'full-flip' || kind === 'front-flip' || kind === 'back-flip' ? 0.5 : 1)
+      runtime.setReplaySpeed(kind === 'basic-recovery' || kind === 'full-roll' || kind === 'full-flip' || kind === 'front-flip' || kind === 'back-flip' || kind === 'power-loop' ? 0.5 : 1)
       runtime.playReplay()
       setTelemetry(runtime.getTelemetry())
     } catch {
@@ -578,7 +582,9 @@ export default function FreeFlight({
   const recoveryMotion = showRecoveryHud && recoveryMotionState ? measureBasicRecoveryMotion(recoveryMotionState) : null
   const showRollHud = telemetry?.replay.active ? demonstration?.lessonId === 'full-roll' : trainingState?.lessonId === 'full-roll'
   const showFlipHud = isFlipLesson(telemetry?.replay.active ? demonstration?.lessonId : trainingState?.lessonId)
-  const showMotionHud = showRecoveryHud || showRollHud || showFlipHud
+  const showLoopHud = (telemetry?.replay.active ? demonstration?.lessonId : trainingState?.lessonId) === 'power-loop'
+  const loopMetrics = telemetry?.replay.active ? demonstrationProgress?.metrics : trainingState?.lastEvaluation?.metrics
+  const showMotionHud = showRecoveryHud || showRollHud || showFlipHud || showLoopHud
   const rollMotion = showRollHud && recoveryMotionState ? measureBasicRecoveryMotion(recoveryMotionState) : null
   const rollProgress = telemetry?.replay.active ? demonstrationProgress?.metrics?.rollProgressDegrees : trainingState?.lastEvaluation?.metrics?.rollProgressDegrees
   const rollRate = showRollHud && recoveryMotionState ? -recoveryMotionState.angularVelocityBodyRadPerSec.z * 180 / Math.PI : undefined
@@ -609,7 +615,7 @@ export default function FreeFlight({
 
       <div className="school-demo-bar school-demo-toolbar" aria-label="四軸與課程示範">
         <strong>L00 看懂四軸</strong>
-        {([['roll', '橫滾'], ['pitch', '俯仰'], ['yaw', '偏航'], ['takeoff', '起飛與懸停示範'], ['straight-line', '直線示範'], ['landing', '降落示範'], ['direction-control', '方向示範'], ['coordinated-turn', '轉彎示範'], ['square-route', '方形示範'], ['figure-eight', '八字示範'], ['wide-gate', '穿門示範'], ['basic-recovery', '恢復示範'], ['full-roll', '橫滾示範'], ['front-flip', '前翻示範'], ['back-flip', '後翻示範']] as const).map(([kind, label]) => {
+        {([['roll', '橫滾'], ['pitch', '俯仰'], ['yaw', '偏航'], ['takeoff', '起飛與懸停示範'], ['straight-line', '直線示範'], ['landing', '降落示範'], ['direction-control', '方向示範'], ['coordinated-turn', '轉彎示範'], ['square-route', '方形示範'], ['figure-eight', '八字示範'], ['wide-gate', '穿門示範'], ['basic-recovery', '恢復示範'], ['full-roll', '橫滾示範'], ['front-flip', '前翻示範'], ['back-flip', '後翻示範'], ['power-loop', '大迴旋示範']] as const).map(([kind, label]) => {
           const course = lessonLearningContent(kind)
           return <button className="lab-button lab-button-small" type="button" key={kind} disabled={trainingSettingsLocked || Boolean(telemetry?.armed) || renderingState !== 'ready'} onClick={() => startDemonstration(kind)}>{course ? `${course.code} ${label}` : label}</button>
         })}
@@ -665,6 +671,14 @@ export default function FreeFlight({
                   <span>機身傾角<b data-testid="flip-tilt">{format(flipMotion?.tiltDegrees, 1)}°</b></span>
                 </div>
               </div>}
+              {showLoopHud && <div className="flight-recovery-hud" role="group" aria-label="大迴旋即時狀態">
+                <strong>{telemetry?.replay.active ? '回放大迴旋數值' : '即時大迴旋數值'}</strong>
+                <div>
+                  <span>俯仰進度<b data-testid="loop-progress">{format(loopMetrics?.loopProgressDegrees ?? 0, 0)}°</b></span>
+                  <span>迴圈高度<b data-testid="loop-height">{format(loopMetrics?.loopHeightGainM ?? 0, 1)} m</b></span>
+                  <span>前後跨度<b data-testid="loop-span">{format(loopMetrics?.loopForwardSpanM ?? 0, 1)} m</b></span>
+                </div>
+              </div>}
             </div>
             {renderingState !== 'ready' && (
               <div className="flight-rendering-error" role="alert" data-testid="flight-rendering-error">
@@ -689,7 +703,7 @@ export default function FreeFlight({
               : demonstration ? demonstration.title : '飛行回放'} · 真人飛行已停止</div>}
             {trainingState?.phase === 'ACTIVE' && <div tabIndex={0} aria-label="目前練習提示" className={`school-viewport-hint${recovery ? ' is-recovering' : ''}`}>{recovery
               ? <><strong>重練原因（當時數值）：{recovery.message}</strong><span>{recovery.hint}</span></>
-              : currentObjective && trainingState.lastEvaluation?.recovery !== 'restart' ? <><strong>{currentObjective.title}</strong><span>{trainingState.lessonId === 'direction-control' || trainingState.lessonId === 'coordinated-turn' || trainingState.lessonId === 'square-route' || trainingState.lessonId === 'figure-eight' || trainingState.lessonId === 'wide-gate' || trainingState.lessonId === 'basic-recovery' || trainingState.lessonId === 'full-roll' || isFlipLesson(trainingState.lessonId) || !trainingState.lastEvaluation?.hint ? currentObjective.detail : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</span></> : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>}
+              : currentObjective && trainingState.lastEvaluation?.recovery !== 'restart' ? <><strong>{currentObjective.title}</strong><span>{trainingState.lessonId === 'direction-control' || trainingState.lessonId === 'coordinated-turn' || trainingState.lessonId === 'square-route' || trainingState.lessonId === 'figure-eight' || trainingState.lessonId === 'wide-gate' || trainingState.lessonId === 'basic-recovery' || trainingState.lessonId === 'full-roll' || isFlipLesson(trainingState.lessonId) || trainingState.lessonId === 'power-loop' || !trainingState.lastEvaluation?.hint ? currentObjective.detail : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</span></> : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>}
           </div>
           <div className="flight-controls" aria-label="Flight controls">
             <div className="flight-control-group">

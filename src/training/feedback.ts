@@ -58,6 +58,19 @@ import {
   FULL_FLIP_TIME_LIMIT_SECONDS as FLIP_TIME_LIMIT,
 } from './fullFlip'
 import {
+  POWER_LOOP_TARGET_HEIGHT_M as LOOP_TARGET_HEIGHT,
+  POWER_LOOP_MIN_ENTRY_HEIGHT_M as LOOP_ENTRY_HEIGHT,
+  POWER_LOOP_MIN_HEIGHT_M as LOOP_MIN_HEIGHT,
+  POWER_LOOP_AREA_RADIUS_M as LOOP_AREA_RADIUS,
+  POWER_LOOP_MIN_ENTRY_SPEED_MPS as LOOP_ENTRY_SPEED,
+  POWER_LOOP_MIN_HEIGHT_GAIN_M as LOOP_HEIGHT_GAIN,
+  POWER_LOOP_MIN_FORWARD_SPAN_M as LOOP_SPAN,
+  POWER_LOOP_MIN_REVERSE_TRAVEL_M as LOOP_REVERSE,
+  POWER_LOOP_HOLD_SECONDS as LOOP_HOLD,
+  POWER_LOOP_RECOVERY_TILT_DEGREES as LOOP_RECOVERY_TILT,
+  POWER_LOOP_TIME_LIMIT_SECONDS as LOOP_TIME_LIMIT,
+} from './powerLoop'
+import {
   STRAIGHT_LINE_BRAKE_ZONE_START_M,
   STRAIGHT_LINE_GATE_RADIUS_M,
   STRAIGHT_LINE_ROUTE_LENGTH_M,
@@ -143,6 +156,13 @@ const METRICS: Readonly<Record<string, MetricDefinition>> = {
   rollDirection: { label: '橫滾方向', unit: '', digits: 0 },
   flipProgressDegrees: { label: '本圈翻轉進度', unit: '/ 360°', digits: 1 },
   flipDirection: { label: '翻轉方向', unit: '', digits: 0 },
+  loopForwardSpeedMps: { label: '迴圈進場方向速度', unit: 'm/s', digits: 2 },
+  loopProgressDegrees: { label: '本圈俯仰轉角', unit: '/ 360°', digits: 1 },
+  loopPathTurnDegrees: { label: '垂直航跡轉角', unit: '°', digits: 1 },
+  loopHeightGainM: { label: '本圈拉升高度', unit: 'm', digits: 2 },
+  loopForwardSpanM: { label: '本圈前後跨度', unit: 'm', digits: 2 },
+  loopReverseTravelM: { label: '越頂後退行程', unit: 'm', digits: 2 },
+  loopRecoveryDwellSeconds: { label: '正飛恢復確認', unit: 's', digits: 2 },
   interruptionFlipDirection: { label: '中斷時翻轉方向', unit: '', digits: 0 },
   interruptionFlipProgressDegrees: { label: '中斷時翻轉進度', unit: '°', digits: 1 },
   positionErrorM: { label: '位置偏差', unit: 'm', digits: 2 },
@@ -169,6 +189,14 @@ const LESSON_METRICS: Readonly<Record<string, readonly string[]>> = {
 }
 
 function metricPriorities(metrics: Readonly<Record<string, number>>, lessonId: string | null): readonly string[] {
+  if (lessonId === 'power-loop') {
+    if (metrics.loopPhase <= 1 || metrics.groundTouching > 0.5) return ['altitudeM', 'groundTouching', 'loopForwardSpeedMps']
+    if (metrics.insideLoopArea === 0) return ['launchDistanceM', 'altitudeM', 'loopProgressDegrees']
+    if (!(metrics.loopEpisodeValid > 0.5)) return ['altitudeM', 'loopForwardSpeedMps', 'tiltDegrees']
+    if (metrics.loopPhase <= 3) return ['loopHeightGainM', 'loopForwardSpanM', 'verticalSpeedMps']
+    if (metrics.loopPhase <= 5) return ['loopProgressDegrees', 'loopReverseTravelM', 'verticalSpeedMps']
+    return ['loopProgressDegrees', 'tiltDegrees', 'loopRecoveryDwellSeconds']
+  }
   if (lessonId === 'full-roll') {
     if (metrics.rollPhase <= 1 || metrics.groundTouching > 0.5) return ['altitudeM', 'groundTouching', 'rollProgressDegrees']
     if (metrics.insideRollArea === 0) return ['launchDistanceM', 'altitudeM', 'rollProgressDegrees']
@@ -281,12 +309,12 @@ export function formatTrainingMetrics(
     const displayed = definition.transform?.(value) ?? value
     return [{
       key,
-      label: (lessonId === 'basic-recovery' || lessonId === 'full-roll' || isFullFlipLesson(lessonId)) && key === 'verticalSpeedMps' ? '升降速度（上＋／下−）'
-        : (lessonId === 'basic-recovery' || lessonId === 'full-roll' || isFullFlipLesson(lessonId)) && key === 'altitudeM' ? '離地高度'
+      label: (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'power-loop' || isFullFlipLesson(lessonId)) && key === 'verticalSpeedMps' ? '升降速度（上＋／下−）'
+        : (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'power-loop' || isFullFlipLesson(lessonId)) && key === 'altitudeM' ? '離地高度'
         : isFullFlipLesson(lessonId) && key === 'preparationDwellSeconds' ? '翻轉準備確認'
         : isFullFlipLesson(lessonId) && key === 'recoveryDwellSeconds' ? '正飛恢復確認'
         : lessonId === 'full-roll' && key === 'preparationDwellSeconds' ? '橫滾準備確認'
-        : lessonId === 'full-roll' && key === 'recoveryDwellSeconds' ? '正飛恢復確認'
+        : (lessonId === 'full-roll' || lessonId === 'power-loop') && key === 'recoveryDwellSeconds' ? '正飛恢復確認'
         : lessonId === 'wide-gate' && key === 'gatesPassed' ? '已通過寬門'
         : lessonId === 'wide-gate' && key === 'nextGateDistanceM' ? '距目前門平面（前＋／後−）' : definition.label,
       value: key === 'groundTouching' ? value > 0.5 ? '已接地' : '尚未接地'
@@ -296,6 +324,7 @@ export function formatTrainingMetrics(
         : lessonId === 'full-roll' && key === 'rollDirection' ? value === 1 ? '向右' : value === -1 ? '向左' : '尚未選定'
         : lessonId === 'full-roll' && key === 'preparationDwellSeconds' ? `${displayed.toFixed(2)} / ${ROLL_PREP_SECONDS.toFixed(2)} s`
         : lessonId === 'full-roll' && key === 'recoveryDwellSeconds' ? `${displayed.toFixed(2)} / ${ROLL_HOLD_SECONDS.toFixed(2)} s`
+        : lessonId === 'power-loop' && key === 'loopRecoveryDwellSeconds' ? `${displayed.toFixed(2)} / ${LOOP_HOLD.toFixed(2)} s`
         : `${displayed.toFixed(definition.digits)}${definition.unit ? ` ${definition.unit}` : ''}`,
     }]
   }).slice(0, maximum)
@@ -348,6 +377,7 @@ const LESSON_HINTS: Readonly<Record<string, string>> = {
   'full-flip': `從地面自行起飛到約 ${FLIP_TARGET_HEIGHT} m，短暫準備後選擇前翻或後翻，沿俯仰軸完成一圈，再停止旋轉並恢復正飛與控制。`,
   'front-flip': `本課練前翻。從地面自行起飛到約 ${FLIP_TARGET_HEIGHT} m，短暫準備後向前翻一圈，再恢復正飛與控制；後翻不計入本課。`,
   'back-flip': `本課練後翻。從地面自行起飛到約 ${FLIP_TARGET_HEIGHT} m，短暫準備後向後翻一圈，再恢復正飛與控制；前翻不計入本課。`,
+  'power-loop': `地面自行起飛至約 ${LOOP_TARGET_HEIGHT} m，建立前速後拉升、越頂、下降再拉平；需真正飛出空間迴圈，原地後翻不能代替。`,
   'split-s': '先確認進入高度，再依序完成倒置、下降半圈與恢復正向。',
   orbit: '沿目標周圍保持同一繞行方向，先穩住半徑與高度。',
 }
@@ -496,6 +526,71 @@ function fullRollObjective(metrics: Readonly<Record<string, number>>): TrainingO
     title,
     detail: `${progress}已完成本圈橫滾，現在停止旋轉並恢復正飛。${blockers.length ? `${blockers.slice(0, 2).join('；')}。` : `將機身主動帶回 ${ROLL_RECOVERY_TILT}° 內，以小量油門止住過快升降。`}${dwell}保持空中、至少 ${ROLL_MIN_HEIGHT} m 高度，連續確認 ${ROLL_HOLD_SECONDS} 秒即可；不要求回原位置或降落。Acro 回中只停止旋轉，回平與減速仍需自行修正。`,
   }
+}
+
+const POWER_LOOP_STAGE_LABELS = ['起飛區地面準備', '自行起飛至練習高度', '建立前進速度', '拉升並展開迴圈', '越頂通過倒置', '沿迴圈下降', '拉平向前改出', '恢復正飛與控制'] as const
+
+export function powerLoopStageLabel(phase: number): string {
+  return Number.isInteger(phase) && phase >= 0 && phase < POWER_LOOP_STAGE_LABELS.length
+    ? POWER_LOOP_STAGE_LABELS[phase] : '目前大迴旋練習'
+}
+
+/** Report the event that invalidated this episode, even after the learner regains altitude. */
+export function powerLoopInterruptionReason(metrics: Readonly<Record<string, number>>): string | null {
+  if (!(metrics.loopInterrupted > 0.5)) return null
+  const height = fact(metrics, 'interruptionAltitudeM', 'm')
+  const distance = fact(metrics, 'interruptionLaunchDistanceM', 'm')
+  switch (metrics.loopInterruptionReason) {
+    case 1: return '這一圈曾接地，地面停住不能代替空中改出。'
+    case 2: return `中斷時${height ? `離地 ${height}` : '高度不足'}，低於空中改出需要的 ${LOOP_MIN_HEIGHT} m。`
+    case 3: return `中斷時${distance ? `距起飛點 ${distance}` : '已離開練習區'}，超出半徑 ${LOOP_AREA_RADIUS} m。`
+    case 4: return '這一圈累積過多橫滾或偏航，已偏離垂直迴圈；下次主要用俯仰拉升與改出，減少左右翻轉及轉頭。'
+    case 5: return '這一圈持續過轉；接近正飛時提早回中減緩旋轉，並沿出口向前飛。'
+    case 6: return '這一圈向前翻或反向折返過多；下次帶前速拉機頭向上，保持同一後拉方向經過頂點再改出。'
+    case 7: return `尚未展開拉升便失去進場高度${height ? `，中斷時離地 ${height}` : ''}；先升回至少 ${LOOP_ENTRY_HEIGHT} m，再建立前速。`
+    case 8: return '這一圈的實際航跡停住或反向折返，空間迴圈證據已中斷；先重新建立前速，再連續拉升、越頂與下降，原地翻轉不能代替。'
+    case 9: return `這一圈實際前後跨度${Number.isFinite(metrics.interruptionForwardSpanM) ? `只有 ${metrics.interruptionForwardSpanM.toFixed(1)} m` : '不足'}，尚未達到 ${LOOP_SPAN} m；進場直線與回正後直飛不計入迴圈大小。下次先帶前速，再放慢後拉，讓拉升、越頂與下降真正展開，重新完成一整圈。`
+    default: return null
+  }
+}
+
+function powerLoopEntry(metrics: Readonly<Record<string, number>>): string {
+  if (Number.isFinite(metrics.altitudeM) && metrics.altitudeM < LOOP_ENTRY_HEIGHT) return `目前離地 ${metrics.altitudeM.toFixed(1)} m；先取得至少 ${LOOP_ENTRY_HEIGHT} m、建議約 ${LOOP_TARGET_HEIGHT} m 高度，再建立前速。`
+  if (Number.isFinite(metrics.loopForwardSpeedMps) && metrics.loopForwardSpeedMps < LOOP_ENTRY_SPEED) return `目前前進速度 ${metrics.loopForwardSpeedMps.toFixed(1)} m/s；稍微前傾配合油門，建立至少 ${LOOP_ENTRY_SPEED} m/s 前速，再拉機頭向上。原地後翻不算大迴旋。`
+  return `在至少 ${LOOP_ENTRY_HEIGHT} m 高度建立 ${LOOP_ENTRY_SPEED} m/s 以上的前進速度，再配合油門拉機頭向上，讓實際航線開始向上彎。`
+}
+
+function powerLoopObjective(metrics: Readonly<Record<string, number>>): TrainingObjective {
+  const phase = Number.isInteger(metrics.loopPhase) && metrics.loopPhase >= 0 && metrics.loopPhase <= 8 ? metrics.loopPhase : 0
+  if (phase === 8 && metrics.loopEpisodeValid > 0.5 && !(metrics.loopInterrupted > 0.5)
+    && metrics.loopCompleted > 0.5 && metrics.loopInverted > 0.5 && metrics.loopDescended > 0.5) return {
+    title: '8／8 大迴旋與空中改出完成',
+    detail: '已觀察到同一圈的前進、拉升、越頂倒置、下降及向前改出，並恢復空中控制；可解除解鎖，不需回原點或降落。',
+  }
+  const title = `${Math.min(8, phase + 1)}／8 ${powerLoopStageLabel(Math.min(7, phase))}`
+  if (phase === 0) return { title, detail: '先在起飛區實際接地，保持低油門，再明確解鎖；本課由地面自行起飛。' }
+  if (phase === 1) return { title, detail: `自行起飛至至少 ${LOOP_ENTRY_HEIGHT} m，建議約 ${LOOP_TARGET_HEIGHT} m；先保留上升、下降與改出的高度餘裕。` }
+  const reprepare = '先前步驟保留，但需重新建立進場並完成新的一整圈；舊倒置、下降或回正標記不代替本圈證據。'
+  if (!(metrics.loopEpisodeValid > 0.5) || metrics.loopInterrupted > 0.5) return {
+    title,
+    detail: `${metrics.loopInterrupted > 0.5 ? `本圈已中斷。${powerLoopInterruptionReason(metrics) ?? ''}${reprepare}` : ''}${powerLoopEntry(metrics)}`,
+  }
+  const rise = fact(metrics, 'loopHeightGainM', 'm')
+  const span = fact(metrics, 'loopForwardSpanM', 'm')
+  const turn = fact(metrics, 'loopProgressDegrees', '°')
+  const observed = `${rise ? `本圈拉升 ${rise}。` : ''}${span ? `前後跨度 ${span}。` : ''}`
+  if (phase === 2) return { title, detail: powerLoopEntry(metrics) }
+  if (phase === 3) return { title, detail: `${observed}帶前速後拉機頭並配合油門，把飛行路線帶向上；本圈至少需拉升 ${LOOP_HEIGHT_GAIN} m、前後跨度 ${LOOP_SPAN} m。只在原地翻一圈不會完成空間迴圈。` }
+  if (phase === 4) return { title, detail: `${observed}繼續同方向後拉通過頂點及實際倒置，適度收油，讓航線越頂往來路方向移動；需有至少 ${LOOP_REVERSE} m 的越頂後退行程。` }
+  if (phase === 5) return { title, detail: `${turn ? `本圈俯仰轉角 ${turn}。` : ''}已越頂；沿同一迴圈進入下降，保留下方空間，距最高點實際下降至少 2 m 後再拉平。避免在頂點反向翻回。` }
+  if (phase === 6) return { title, detail: `${turn ? `本圈俯仰轉角 ${turn}。` : ''}繼續完成迴圈，接近正飛時提早回中減緩旋轉並補油，讓飛機沿原進場方向向前改出；只轉回水平但沒有前進出口，仍未完成。` }
+  const blockers: string[] = []
+  if (Number.isFinite(metrics.tiltDegrees) && metrics.tiltDegrees > LOOP_RECOVERY_TILT) blockers.push(`傾角 ${metrics.tiltDegrees.toFixed(1)}°，先主動修回 ${LOOP_RECOVERY_TILT}° 內`)
+  if (Number.isFinite(metrics.bodyRateDegreesPerSecond) && metrics.bodyRateDegreesPerSecond > 140) blockers.push(`機身仍以 ${metrics.bodyRateDegreesPerSecond.toFixed(1)}°/s 旋轉，先減緩至 140°/s 內`)
+  if (Number.isFinite(metrics.verticalSpeedMps) && (metrics.verticalSpeedMps < -4 || metrics.verticalSpeedMps > 5)) blockers.push(`升降速度 ${metrics.verticalSpeedMps.toFixed(1)} m/s，調整油門回到 −4～+5 m/s`)
+  if (Number.isFinite(metrics.horizontalSpeedMps) && metrics.horizontalSpeedMps > 15) blockers.push(`水平速度 ${metrics.horizontalSpeedMps.toFixed(1)} m/s，先降低至 15 m/s 內`)
+  const dwell = fact(metrics, 'loopRecoveryDwellSeconds', 's', 2)
+  return { title, detail: `已走出本圈出口，現在恢復正飛與控制。${blockers.length ? `${blockers.slice(0, 2).join('；')}。` : `保持接近水平，止住過快升降並減緩旋轉。`}${dwell ? `恢復確認 ${dwell}／${LOOP_HOLD.toFixed(2)} s。` : ''}保持離地至少 ${LOOP_MIN_HEIGHT} m，連續確認 ${LOOP_HOLD} 秒；不用精準懸停、回原點或降落。回中不會自動回平。` }
 }
 
 const FULL_FLIP_STAGE_LABELS = ['起飛區地面準備', '自行起飛至練習高度', '翻轉前短暫準備', '通過倒置姿態', '完成一圈翻轉', '恢復正飛與控制'] as const
@@ -921,6 +1016,7 @@ export function trainingObjective(
   evaluation: Pick<TrainingEvaluation, 'metrics'> | null | undefined,
 ): TrainingObjective | null {
   const metrics = evaluation?.metrics ?? {}
+  if (lessonId === 'power-loop') return powerLoopObjective(metrics)
   if (lessonId === 'full-roll') return fullRollObjective(metrics)
   if (isFullFlipLesson(lessonId)) return fullFlipObjective(metrics, lessonId)
   if (lessonId === 'basic-recovery') return basicRecoveryObjective(metrics)
@@ -969,6 +1065,7 @@ export function trainingObjective(
 
 /** Short route instructions remain visible before a lesson starts. */
 export function trainingRouteGuide(lessonId: string | null): string | null {
+  if (lessonId === 'power-loop') return `地面自行起飛至至少 ${LOOP_ENTRY_HEIGHT} m（建議約 ${LOOP_TARGET_HEIGHT} m）→ 建立至少 ${LOOP_ENTRY_SPEED} m/s 前速 → 拉升 → 越頂倒置 → 下降 → 向前拉平改出 → 空中恢復 ${LOOP_HOLD} 秒。需真正飛出有高度與前後位移的垂直迴圈：拉升至少 ${LOOP_HEIGHT_GAIN} m、前後跨度至少 ${LOOP_SPAN} m、越頂後退至少 ${LOOP_REVERSE} m，且從頂點下降。原地後翻、純上下升降或反向拼湊不能代替。淡色迴圈是參考，不要求完美圓形、回原點、穿障礙或降落。練習區半徑 ${LOOP_AREA_RADIUS} m，改出保留至少 ${LOOP_MIN_HEIGHT} m；中斷後重新進場完成新一圈。引導練習不限時，挑戰 ${LOOP_TIME_LIMIT} 秒。`
   if (lessonId === 'full-roll') return `地面自行起飛至至少 ${ROLL_PREP_HEIGHT} m（建議約 ${ROLL_TARGET_HEIGHT} m）→ 短暫準備 ${ROLL_PREP_SECONDS} 秒 → 選左或右連續橫滾一圈 → 回中減緩旋轉、主動修回正飛 → 空中恢復控制 ${ROLL_HOLD_SECONDS} 秒。沿機頭到機尾的軸翻轉，需觀察到本圈實際倒置與完整橫滾；反向翻回、原地偏航或前後翻轉不代替 Roll。練習區為起飛點半徑 ${ROLL_AREA_RADIUS} m，恢復時保留至少 ${ROLL_MIN_HEIGHT} m 高度，不要求回原位置或降落。接地、過低或離區中斷本圈後，先重新準備，再完整做一圈；先前步驟保留。引導練習不限時，挑戰 ${ROLL_TIME_LIMIT} 秒。`
   if (fullFlipRequiredDirection(lessonId ?? '') !== 0) return `本課練${flipCourseDirection(lessonId)}。地面自行起飛至至少 ${FLIP_PREP_HEIGHT} m（建議約 ${FLIP_TARGET_HEIGHT} m）→ 短暫準備 ${FLIP_PREP_SECONDS} 秒 → 沿俯仰軸連續${flipCourseDirection(lessonId)}一整圈 → 回中減緩旋轉、主動修回正飛 → 空中恢復控制 ${FLIP_HOLD_SECONDS} 秒。必須觀察到指定方向的實際倒置與完整一圈；反方向翻轉不計入本課，先回正重新準備後再練。練習區為起飛點半徑 ${FLIP_AREA_RADIUS} m，恢復時保留至少 ${FLIP_MIN_HEIGHT} m 高度，不要求回原位置或降落。中斷後先前步驟保留，但需完整做新的一圈。引導練習不限時，挑戰 ${FLIP_TIME_LIMIT} 秒。`
   if (isFullFlipLesson(lessonId)) return `地面自行起飛至至少 ${FLIP_PREP_HEIGHT} m（建議約 ${FLIP_TARGET_HEIGHT} m）→ 短暫準備 ${FLIP_PREP_SECONDS} 秒 → 選前翻或後翻連續翻轉一圈 → 回中減緩旋轉、主動修回正飛 → 空中恢復控制 ${FLIP_HOLD_SECONDS} 秒。沿機身左右兩側的俯仰軸翻轉，需觀察到本圈實際倒置與完整翻轉；反向翻回、原地偏航或左右橫滾不能代替完整前後翻轉。練習區為起飛點半徑 ${FLIP_AREA_RADIUS} m，恢復時保留至少 ${FLIP_MIN_HEIGHT} m 高度，不要求回原位置或降落。接地、過低或離區中斷本圈後，先重新準備，再完整做一圈；先前步驟保留。引導練習不限時，挑戰 ${FLIP_TIME_LIMIT} 秒。`
@@ -992,6 +1089,18 @@ export function trainingHint(
 ): string {
   const hint = evaluation?.hint?.trim()
   const message = evaluation?.message?.trim()
+  if (lessonId === 'power-loop' && evaluation?.status === 'failure') {
+    const restart = '本次練習已結束；按「再練一次」會清空本次步驟，從地面重新開始。'
+    if (/墜毀|撞擊|crash|impact|Obstacle collision:/iu.test(message ?? '')) return `本次發生墜毀，大迴旋練習已停止；先重設場景。${restart}`
+    if (/解除解鎖|上鎖|失焦|失去焦點|斷線|disarm|focus|disconnect/iu.test(message ?? '')) return `本次因解除解鎖、失去焦點或連線中斷而停止；確認網頁與控制器就緒後重試。${restart}`
+    if (/無效|資料中斷|時間倒退|跳躍|不一致|重設|invalid|non-finite|telemetry.*gap|impossible.*jump|reset|rewind/iu.test(message ?? '')) return `本次飛行資料無效、中斷或被重設，無法判定大迴旋表現；保持網頁在前景後重試。${restart}`
+    if (/逾時|timed out|timeout/iu.test(message ?? '')) return `本次大迴旋挑戰逾時。${restart}`
+    return `本次大迴旋尚未完成。${restart}`
+  }
+  if (lessonId === 'power-loop' && evaluation?.status === 'continue' && evaluation.metrics && evaluation.recovery !== 'restart') {
+    const objective = powerLoopObjective(evaluation.metrics)
+    return `${objective.title}：${objective.detail}`
+  }
   if (lessonId === 'full-roll' && evaluation?.status === 'failure') {
     const restart = '本次練習已結束；按「再練一次」會清空本次步驟，從地面重新開始。'
     if (/墜毀|撞擊|crash|impact|Obstacle collision:/iu.test(message ?? '')) return `本次發生墜毀，完整橫滾練習已停止；先按 Reset 重設。${restart}`

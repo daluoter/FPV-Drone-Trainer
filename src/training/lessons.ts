@@ -8,6 +8,7 @@ import { WIDE_GATE_LESSON } from './wideGate'
 import { BASIC_RECOVERY_LESSON } from './basicRecovery'
 import { FULL_ROLL_LESSON } from './fullRoll'
 import { BACK_FLIP_LESSON, FRONT_FLIP_LESSON, FULL_FLIP_LESSON } from './fullFlip'
+import { POWER_LOOP_LESSON } from './powerLoop'
 import {
   hoverEvaluator,
   orbitEvaluator,
@@ -230,6 +231,7 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
   FULL_FLIP_LESSON,
   FRONT_FLIP_LESSON,
   BACK_FLIP_LESSON,
+  POWER_LOOP_LESSON,
 ]
 
 /** Legacy hover and combined-flip definitions remain available only for history. */
