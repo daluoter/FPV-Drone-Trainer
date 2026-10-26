@@ -104,7 +104,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if response is None or response.status != 200:
                 raise AssertionError("The production entry page did not return HTTP 200.")
             expect(page).to_have_title("FPV Drone Trainer")
-            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.26.1")
+            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.26.2")
             report["release"] = page.get_by_test_id("app-release").inner_text()
 
             asset_urls = page.locator("script[src], link[rel='stylesheet'][href]").evaluate_all(
@@ -215,7 +215,13 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 bounds = control.bounding_box()
                 if not bounds or bounds['y'] < 0 or bounds['y'] + bounds['height'] > 720:
                     raise AssertionError(f"Essential learning control is outside the 1280x720 viewport: {bounds}")
-            checks.append("essential flight and lesson controls fit desktop viewport")
+            toolbar_layout = flight.locator(".school-demo-toolbar").evaluate(
+                "bar => ({viewportWidth: innerWidth, pageWidth: document.documentElement.scrollWidth, visibleWidth: bar.clientWidth, scrollWidth: bar.scrollWidth})"
+            )
+            if toolbar_layout["pageWidth"] > toolbar_layout["viewportWidth"] + 1:
+                raise AssertionError(f"The demonstration toolbar causes body overflow: {toolbar_layout}")
+            report["demonstration_toolbar_layout"] = toolbar_layout
+            checks.append("essential flight and lesson controls fit desktop viewport without body overflow")
 
 
             page.locator("#flight-input-source").select_option("keyboard")
@@ -288,8 +294,8 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 title = re.sub(r"^L\d{2}\s*[·：:]?\s*", "", option.strip())
                 if re.search(r"[A-Za-z]", title):
                     raise AssertionError(f"A visible course title still contains English: {option}")
-            expect(flight.locator(".school-demo-toolbar").get_by_role("button")).to_have_count(16)
-            checks.append("Chinese-only course titles, fifteen active lessons and sixteen distinct demonstrations")
+            expect(flight.locator(".school-demo-toolbar").get_by_role("button")).to_have_count(17)
+            checks.append("Chinese-only course titles, fifteen active lessons and seventeen distinct demonstrations")
             progress_before_waiting = training_progress(page)
             training.get_by_role("button", name="開始課程", exact=True).click()
             expect(phase).to_have_text("倒數準備")
@@ -1355,6 +1361,142 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             checks.append("L13 loop dimensions fit desktop, short desktop and mobile without overlapping altitude/XYZ or playback banner")
             checks.append("L13 selection persists across reload while L00 pitch illustration and prior saved results remain independent")
 
+            lesson.select_option("split-s")
+            expect(training.get_by_role("heading", name="翻轉下降", exact=True)).to_be_visible()
+            split_hud = flight.get_by_role("group", name="翻轉下降即時狀態", exact=True)
+            split_fields = {
+                "roll_degrees": flight.get_by_test_id("split-roll"),
+                "pitch_degrees": flight.get_by_test_id("split-pitch"),
+                "height_loss_m": flight.get_by_test_id("split-descent"),
+            }
+
+            def split_motion() -> dict:
+                values = {}
+                for key, field in split_fields.items():
+                    expect(field).to_be_visible()
+                    match = re.match(r"^[+-]?\d+(?:\.\d+)?", field.inner_text())
+                    if not match:
+                        raise AssertionError(f"L14 roll-then-dive readout is not numeric: {key}.")
+                    values[key] = float(match.group())
+                return values
+
+            original_split_canvas = canvas.element_handle()
+            before_split_demo = training_progress(page)
+            prior_split_steps = training.get_by_role("list", name="本課步驟", exact=True).get_by_role("listitem").all_text_contents()
+            if len(prior_split_steps) != 8:
+                raise AssertionError("L14 does not expose eight ground-to-descending-reversal checkpoints.")
+            expect(split_hud).to_contain_text("即時")
+            flight.get_by_role("button", name="L14 翻轉下降示範", exact=True).click()
+            expect(flight.get_by_role("button", name="0.5×", exact=True)).to_have_attribute("aria-pressed", "true")
+            expect(arm).to_be_disabled()
+            expect(lesson).to_be_disabled()
+            flight.get_by_role("button", name="Pause", exact=True).click()
+            expect(split_hud).to_contain_text("回放")
+            timeline.press("Home")
+            demonstration_snapshot("L14", 8)
+            expect(altitude).to_have_text("0.0 m")
+            home_split = split_motion()
+            if any(abs(value) > .05 for value in home_split.values()):
+                raise AssertionError(f"L14 does not begin with supported ground and zero roll, pitch and descent: {home_split}")
+            timeline.press("End")
+            demonstration_snapshot("L14", 8, complete=True)
+            end_split = split_motion()
+            if end_split["roll_degrees"] < 140 or end_split["pitch_degrees"] < 145 or end_split["height_loss_m"] < 3:
+                raise AssertionError(f"L14 completion does not show the roll, pitch and actual descent: {end_split}")
+            if float(altitude.inner_text().split()[0]) < 1.5:
+                raise AssertionError("L14 ends on the ground instead of recovering in flight.")
+            held_split_position = position_hud.inner_text()
+            page.wait_for_timeout(200)
+            if split_motion() != end_split or position_hud.inner_text() != held_split_position:
+                raise AssertionError("L14 paused ghost or recorded maneuver measurements kept advancing.")
+            if screenshot:
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l14-demonstration-end.png"))
+                flight.get_by_role("button", name="Chase", exact=True).click()
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l14-demonstration-chase.png"))
+                flight.get_by_role("button", name="Free / debug", exact=True).click()
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l14-demonstration-free.png"))
+                flight.get_by_role("button", name="FPV", exact=True).click()
+            split_chapters = demo_progress.get_by_role("list", name="示範步驟", exact=True).get_by_role("button")
+            split_chapters.nth(4).click()
+            expect(flight.get_by_role("button", name="Play", exact=True)).to_be_enabled()
+            expect(demo_progress).to_contain_text("4 / 8 個示範步驟完成")
+            inverted_split = split_motion()
+            if inverted_split["roll_degrees"] < 140:
+                raise AssertionError(f"L14 inversion chapter lacks an actual half roll: {inverted_split}")
+            split_chapter_time = float(timeline.input_value())
+            page.wait_for_timeout(200)
+            if abs(float(timeline.input_value()) - split_chapter_time) > .02 or split_motion() != inverted_split:
+                raise AssertionError("L14 chapter seeking did not pause its own clock and measured dimensions.")
+            report["split_s_course"] = {
+                "lesson_id": "split-s", "course_code": "L14", "home": home_split, "end": end_split,
+                "inverted": {"time_seconds": split_chapter_time, **inverted_split},
+            }
+            if screenshot:
+                page.locator(".free-flight-layout").evaluate("layout => window.scrollTo({top: layout.getBoundingClientRect().top + window.scrollY - 8, behavior: 'instant'})")
+                page.screenshot(path=str(artifact_dir / "l14-demonstration-inverted.png"))
+            report["split_s_hud_layouts"] = {}
+            for width, height in ((1280, 720), (1280, 600), (375, 720)):
+                page.set_viewport_size({"width": width, "height": height})
+                position_hud.scroll_into_view_if_needed()
+                viewport_bounds = flight.locator(".free-flight-viewport").bounding_box()
+                split_bounds = split_hud.bounding_box()
+                if not viewport_bounds or not split_bounds:
+                    raise AssertionError(f"L14 instruments have no layout bounds at {width}x{height}.")
+                if (split_bounds['x'] < viewport_bounds['x']
+                        or split_bounds['x'] + split_bounds['width'] > viewport_bounds['x'] + viewport_bounds['width']
+                        or split_bounds['y'] < viewport_bounds['y']
+                        or split_bounds['y'] + split_bounds['height'] > viewport_bounds['y'] + viewport_bounds['height']):
+                    raise AssertionError(f"L14 instruments overflow the viewport at {width}x{height}.")
+                for other, label in ((position_hud.bounding_box(), "position HUD"), (flight.locator(".flight-safe-overlay").bounding_box(), "playback banner")):
+                    if not other:
+                        raise AssertionError(f"L14 {label} has no bounds at {width}x{height}.")
+                    overlap_x = min(split_bounds['x'] + split_bounds['width'], other['x'] + other['width']) - max(split_bounds['x'], other['x'])
+                    overlap_y = min(split_bounds['y'] + split_bounds['height'], other['y'] + other['height']) - max(split_bounds['y'], other['y'])
+                    if overlap_x > 0 and overlap_y > 0:
+                        raise AssertionError(f"L14 instruments overlap {label} at {width}x{height}.")
+                if page.evaluate("document.documentElement.scrollWidth > innerWidth + 1"):
+                    raise AssertionError(f"L14 controls or demonstration toolbar overflow the page at {width}x{height}.")
+                report["split_s_hud_layouts"][f"{width}x{height}"] = {"split_hud": split_bounds, "viewport": viewport_bounds}
+                if screenshot and width == 375:
+                    flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l14-hud-375.png"))
+            page.set_viewport_size({"width": 1280, "height": 720})
+            split_chapters.nth(3).click()
+            expect(demo_progress).to_contain_text("3 / 8 個示範步驟完成")
+            timeline.press("Home")
+            demonstration_snapshot("L14", 8)
+            expect(altitude).to_have_text("0.0 m")
+            if split_motion() != home_split:
+                raise AssertionError("L14 Home seek does not restore its own initial dimensions.")
+            timeline.press("End")
+            demonstration_snapshot("L14", 8, complete=True)
+            flight.get_by_role("button", name="結束示範", exact=True).click()
+            expect(arm).to_be_enabled()
+            expect(disarm).to_be_disabled()
+            expect(split_hud).to_contain_text("即時")
+            expect(demo_progress).to_have_count(0)
+            expect(training.get_by_role("list", name="本課步驟", exact=True).get_by_role("listitem")).to_have_text(prior_split_steps)
+            if not original_split_canvas or not original_split_canvas.evaluate("element => element === document.querySelector('#free-flight canvas')"):
+                raise AssertionError("L14 demonstration replaced the shared live flight canvas.")
+            if training_progress(page) != before_split_demo:
+                raise AssertionError("L14 demonstration wrote a live attempt or saved result.")
+            flight.get_by_role("button", name="橫滾", exact=True).click()
+            flight.get_by_role("button", name="Pause", exact=True).click()
+            timeline.press("End")
+            demonstration_snapshot("L00", 5, complete=True)
+            expect(split_hud).to_have_count(0)
+            flight.get_by_role("button", name="結束示範", exact=True).click()
+            expect(split_hud).to_be_visible()
+            expect(lesson).to_have_value("split-s")
+            if training_progress(page) != before_split_demo:
+                raise AssertionError("L00 roll illustration changed the selected L14 result.")
+            page.reload(wait_until="networkidle")
+            expect(lesson).to_have_value("split-s")
+            source.select_option("keyboard")
+            expect(training.locator(".school-progress")).to_contain_text("已練 0 次")
+            checks.append("L14 physical half roll and descending pitch half-loop demo, measured rotation and height loss, eight independent chapters, half-speed, pause and rewind with live-result isolation")
+            checks.append("L14 roll and descent instruments fit desktop, short desktop and mobile without overlapping altitude/XYZ or playback banner")
+            checks.append("L14 selection persists across reload while L00 roll illustration and prior saved results remain independent")
+
             # Ground-based lessons wait on actual supported ground and remain
             # safe after arm at zero throttle while the learner prepares to lift off.
             hud = flight.get_by_role("checkbox", name="Developer HUD", exact=True)
@@ -1363,7 +1505,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 has=page.get_by_text("Position m", exact=True)
             ).locator("code")
             report["ground_start_positions"] = {}
-            for lesson_id in ("landing", "straight-line", "direction-control", "coordinated-turn", "square-route", "figure-eight", "wide-gate", "basic-recovery", "full-roll", "front-flip", "back-flip", "power-loop"):
+            for lesson_id in ("landing", "straight-line", "direction-control", "coordinated-turn", "square-route", "figure-eight", "wide-gate", "basic-recovery", "full-roll", "front-flip", "back-flip", "power-loop", "split-s"):
                 lesson.select_option(lesson_id)
                 training.get_by_role("button", name="開始課程", exact=True).click()
                 coords = [float(value.strip()) for value in position.inner_text().split(",")]
@@ -1391,7 +1533,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 expect(source).to_be_enabled()
             hud.uncheck()
             lesson.select_option("basic-recovery")
-            checks.append("L02/L03/L04/L05/L06/L07/L08/L09/L10/L11/L12 actual ground start, safe low-throttle arm and visible stage guidance")
+            checks.append("L02/L03/L04/L05/L06/L07/L08/L09/L10/L11/L12/L13/L14 actual ground start, safe low-throttle arm and visible stage guidance")
 
             fullscreen = flight.locator(".school-fullscreen")
             fullscreen.click()

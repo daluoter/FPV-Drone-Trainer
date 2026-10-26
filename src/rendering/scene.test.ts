@@ -7,6 +7,7 @@ import { createCoordinatedTurnTargets, COORDINATED_TURN_TARGET_RADIUS_M } from '
 import { createSquareRouteTargets, SQUARE_ROUTE_TARGET_RADIUS_M } from '../training/squareRoute'
 import { createFigureEightTargets, FIGURE_EIGHT_TARGET_RADIUS_M } from '../training/figureEight'
 import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
+import { SPLIT_S_MIN_HEIGHT_M, SPLIT_S_TARGET_HEIGHT_M } from '../training/splitS'
 
 import { createFlightScene } from './scene'
 
@@ -207,6 +208,7 @@ describe('flight scene reference contract', () => {
         'roll-zone',
         'flip-zone',
         'loop-zone',
+        'split-zone',
       ])
       expect(scene.getReference('hover-zone')?.kind).toBe('zone')
       expect(scene.getReference('hover-zone')?.positionM).toEqual({ x: 0, y: 3, z: 0 })
@@ -865,7 +867,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('roll-zone')!
-      expect(scene.sceneReferences.at(-3)?.id).toBe('roll-zone')
+      expect(scene.sceneReferences.at(-4)?.id).toBe('roll-zone')
       expect(reference.kind).toBe('zone')
       expect(reference.positionM).toEqual({ x: 6, y: 15, z: -3 })
       expect(reference.object.position.toArray()).toEqual([6, 15, -3])
@@ -961,7 +963,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('flip-zone')!
-      expect(scene.sceneReferences.at(-2)?.id).toBe('flip-zone')
+      expect(scene.sceneReferences.at(-3)?.id).toBe('flip-zone')
       expect(reference.kind).toBe('zone')
       expect(reference.positionM).toEqual({ x: 6, y: 15, z: -3 })
       expect(reference.object.position.toArray()).toEqual([6, 15, -3])
@@ -1063,7 +1065,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('loop-zone')!
-      expect(scene.sceneReferences.at(-1)?.id).toBe('loop-zone')
+      expect(scene.sceneReferences.at(-2)?.id).toBe('loop-zone')
       expect(reference.positionM).toEqual({ x: 6, y: 15, z: -3 })
       expect(reference.object.position.toArray()).toEqual([6, 15, -3])
       expect(reference.sizeM).toEqual({ x: 240, y: 16, z: 240 })
@@ -1099,6 +1101,106 @@ describe('flight scene reference contract', () => {
   it('disposes all loop outline, boundary, height and stage resources exactly once', () => {
     const scene = createFlightScene()
     const resources = ['loop-area-boundary', 'loop-outline-left', 'loop-outline-right', 'loop-height-poles', 'loop-stage-reference'].flatMap((name) => {
+      const object = scene.scene.getObjectByName(name) as THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      return [object.geometry, object.material]
+    })
+    const dispose = resources.map((resource) => vi.spyOn(resource, 'dispose'))
+    scene.dispose()
+    for (const spy of dispose) expect(spy).toHaveBeenCalledOnce()
+  })
+
+  it('guides ground entry, inverted descent and reversed exit without changing flight or legacy anchors', () => {
+    const scene = createFlightScene()
+    const field = scene.scene.getObjectByName('split-s-field')!
+    const accent = scene.scene.getObjectByName('split-stage-guidance')!
+    const guide = scene.scene.getObjectByName('split-stage-reference') as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
+    const before = scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM: { ...positionM }, sizeM }))
+    const drone = scene.drone.position.toArray()
+    const ghost = scene.ghost.position.toArray()
+    try {
+      expect(field.visible).toBe(false)
+      scene.setLessonTarget('split-s')
+      expect(field.visible).toBe(true)
+      for (const name of ['power-loop-field', 'full-flip-field', 'full-roll-field', 'basic-recovery-field', 'wide-gate-field', 'figure-eight-targets', 'square-route-targets', 'coordinated-turn-targets', 'straight-line-targets', 'landing-target', 'takeoff-height-target']) {
+        expect(scene.scene.getObjectByName(name)?.visible).toBe(false)
+      }
+      for (const id of ['hover-zone', 'orbit-poi', 'split-s-reference']) expect(scene.getReference(id)?.object.visible).toBe(false)
+      for (const [stage, color, y, z] of [[0, 0x45d7f7, -SPLIT_S_TARGET_HEIGHT_M + 0.1, 0], [1, 0x45d7f7, 0, -24], [2, 0x45d7f7, 0, -24], [3, 0xffc978, 0, -24], [4, 0xffc978, -6, -30], [5, 0xffc978, -12, -24], [6, 0xffc978, -12, -19], [7, 0xb8f36b, -12, -14], [8, 0xb8f36b, -12, -14]]) {
+        scene.setSplitSStage(stage)
+        expect(accent.visible).toBe(true)
+        expect(guide.material.color.getHex()).toBe(color)
+        expect(accent.position.toArray()).toEqual([0, y, z])
+        expect(accent.rotation.y).toBe(stage >= 5 ? Math.PI : 0)
+      }
+      for (const stage of [null, -1, 9, 1.5, Number.NaN]) {
+        scene.setSplitSStage(stage)
+        expect(accent.visible).toBe(false)
+        expect(field.visible).toBe(true)
+        expect(scene.scene.getObjectByName('split-outline-left')?.visible).toBe(true)
+      }
+      expect(scene.sceneReferences.map(({ id, positionM, sizeM }) => ({ id, positionM, sizeM }))).toEqual(before)
+      expect(scene.drone.position.toArray()).toEqual(drone)
+      expect(scene.ghost.position.toArray()).toEqual(ghost)
+      scene.setLessonTarget('power-loop')
+      expect(field.visible).toBe(false)
+      expect(scene.scene.getObjectByName('power-loop-field')?.visible).toBe(true)
+      scene.setLessonTarget(null)
+      expect(field.visible).toBe(false)
+      expect(scene.getReference('split-s-reference')?.object.visible).toBe(true)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('anchors split descent guides above configured ground without solid obstacles or a forced airborne spawn', () => {
+    const defaults = createDefaultDroneConfig()
+    const config = { ...defaults, ground: { ...defaults.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 35, z: -3 } }
+    const original = JSON.stringify(config)
+    const scene = createFlightScene(config)
+    try {
+      const reference = scene.getReference('split-zone')!
+      expect(scene.sceneReferences.at(-1)?.id).toBe('split-zone')
+      expect(reference.positionM).toEqual({ x: 6, y: 5 + SPLIT_S_TARGET_HEIGHT_M, z: -3 })
+      expect(reference.object.position.toArray()).toEqual([6, 5 + SPLIT_S_TARGET_HEIGHT_M, -3])
+      expect(reference.sizeM).toEqual({ x: 300, y: SPLIT_S_TARGET_HEIGHT_M - SPLIT_S_MIN_HEIGHT_M, z: 300 })
+      const floor = scene.scene.getObjectByName('split-area-boundary') as THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>
+      expect(floor.geometry.parameters.outerRadius).toBe(150)
+      expect(floor.getWorldPosition(floor.position.clone()).y).toBeCloseTo(5.025)
+      const meshes: THREE.Object3D[] = []
+      reference.object.traverse((object) => { if ((object as THREE.Mesh).isMesh) meshes.push(object) })
+      expect(meshes).toEqual([floor])
+      expect(floor.material.transparent).toBe(true)
+      for (const [index, side] of ['left', 'right'].entries()) {
+        const outline = scene.scene.getObjectByName(`split-outline-${side}`) as THREE.Line<THREE.BufferGeometry, THREE.LineDashedMaterial>
+        const points = outline.geometry.getAttribute('position')
+        const heights = Array.from({ length: points.count }, (_, i) => points.getY(i) + reference.positionM.y)
+        const depths = Array.from({ length: points.count }, (_, i) => points.getZ(i) + reference.positionM.z)
+        expect(Math.max(...heights)).toBe(5 + SPLIT_S_TARGET_HEIGHT_M)
+        expect(Math.min(...heights)).toBe(5 + SPLIT_S_TARGET_HEIGHT_M - 12)
+        expect(Math.min(...depths)).toBe(-33)
+        expect(Math.max(...depths)).toBe(-27)
+        expect(points.getX(0)).toBe(index === 0 ? -5 : 5)
+        expect(outline.material.isLineDashedMaterial).toBe(true)
+        expect(outline.geometry.getAttribute('lineDistance')).toBeDefined()
+      }
+      const exit = scene.scene.getObjectByName('split-reversed-exit') as THREE.LineSegments<THREE.BufferGeometry>
+      const exitPoints = exit.geometry.getAttribute('position')
+      expect(exitPoints.getZ(1)).toBeGreaterThan(exitPoints.getZ(0))
+      const before = reference.object.quaternion.toArray()
+      scene.applyState({ ...createInitialDroneState(config), orientation: { x: 1, y: 0, z: 0, w: 0 } })
+      expect(reference.object.quaternion.toArray()).toEqual(before)
+      scene.setSplitSStage(0)
+      const groundGuide = scene.scene.getObjectByName('split-stage-guidance')!
+      expect(groundGuide.getWorldPosition(groundGuide.position.clone()).y).toBeCloseTo(5.1)
+      expect(JSON.stringify(config)).toBe(original)
+    } finally {
+      scene.dispose()
+    }
+  })
+
+  it('disposes every split descent outline, floor, height band and direction marker exactly once', () => {
+    const scene = createFlightScene()
+    const resources = ['split-area-boundary', 'split-outline-left', 'split-outline-right', 'split-height-poles', 'split-entry-height-band', 'split-reversed-exit', 'split-stage-reference'].flatMap((name) => {
       const object = scene.scene.getObjectByName(name) as THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>
       return [object.geometry, object.material]
     })

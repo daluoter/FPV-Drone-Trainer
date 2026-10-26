@@ -67,6 +67,17 @@ describe('local learning preferences', () => {
     expect(saveLearningPreferences(next, target)).toEqual({ saved: true, error: null })
     expect(loadLearningPreferences(target).preferences).toEqual(next)
   })
+  it('keeps a saved split-s selection stable while its rule-4 scores remain untouched', () => {
+    const original = JSON.stringify({ ...DEFAULT_LEARNING_PREFERENCES, lastLessonId: 'split-s', introCompleted: true, mode: 'practice' })
+    const target = memory(original)
+    const oldKey = 'fpv-drone-trainer.training-progress.v1'
+    const oldScores = '{"schemaVersion":1,"lessons":{"split-s":{"completed":true,"attempts":2}}}'
+    target.setItem(oldKey, oldScores)
+    expect(loadLearningPreferences(target)).toMatchObject({ loaded: true, error: null,
+      preferences: { lastLessonId: 'split-s', introCompleted: true, mode: 'practice' } })
+    expect(target.getItem(LEARNING_PREFERENCES_KEY)).toBe(original)
+    expect(target.getItem(oldKey)).toBe(oldScores)
+  })
   it('reports inaccessible storage without throwing or disabling practice', () => {
     const target = { getItem: () => null, setItem: () => { throw new Error('quota') }, removeItem: () => undefined }
     expect(saveLearningPreferences(DEFAULT_LEARNING_PREFERENCES, target).saved).toBe(false)

@@ -1,6 +1,9 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import App from './App'
+import { TrainingProgressStore } from '../training/progress'
+import { fingerprintTrainingSettings, trainingAttemptContextKey } from '../training/attempt'
+import { createTuningPreset } from '../tuning'
 import { DEFAULT_LEARNING_PREFERENCES, LEARNING_PREFERENCES_KEY, saveLearningPreferences } from '../training/learningPreferences'
 
 describe('beginner flight school', () => {
@@ -30,6 +33,30 @@ describe('beginner flight school', () => {
     expect(screen.getByRole('list', { name: '本課步驟' }).querySelectorAll('.is-complete')).toHaveLength(0)
     expect(window.localStorage.getItem(LEARNING_PREFERENCES_KEY)).toBe(original)
     expect(Object.keys(window.localStorage).filter((key) => key.startsWith('fpv-drone-trainer.training-progress.'))).toEqual([])
+  })
+
+  it('preserves the old airborne split-s result without completing the new ground-start L14', () => {
+    const scope = { rulesVersion: 4, physicsVersion: 1, presetId: 'beginner',
+      settingsFingerprint: fingerprintTrainingSettings(createTuningPreset('beginner')),
+      inputSource: 'controller', mode: 'practice', assistance: 'none' } as const
+    const store = new TrainingProgressStore(window.localStorage)
+    expect(store.recordResult({ lessonId: 'split-s', sessionId: 'split-s:airborne-prototype', outcome: 'SUCCESS',
+      score: 100, elapsedSeconds: 10, sampleCount: 600, completedCheckpoints: 5, totalCheckpoints: 5,
+      startedAtSeconds: 0, completedAtSeconds: 10, metrics: { headingChangeDegrees: 180 },
+      message: 'Historical airborne prototype', hint: null, attemptContext: scope }).saved).toBe(true)
+    const key = trainingAttemptContextKey(scope)
+    const raw = window.localStorage.getItem(key)
+    saveLearningPreferences({ ...DEFAULT_LEARNING_PREFERENCES, lastLessonId: 'split-s', introCompleted: true })
+    render(<App />)
+    expect(screen.getByLabelText('選擇課程')).toHaveValue('split-s')
+    expect(screen.getByRole('heading', { name: '翻轉下降' })).toBeInTheDocument()
+    const steps = screen.getByRole('list', { name: '本課步驟' })
+    expect(within(steps).getAllByRole('listitem')).toHaveLength(8)
+    expect(steps.querySelectorAll('.is-complete')).toHaveLength(0)
+    expect(screen.getByText(/本次條件已練 0 次/)).toBeInTheDocument()
+    expect(window.localStorage.getItem(key)).toBe(raw)
+    expect(store.load(scope).progress.lessons['split-s']).toMatchObject({ completed: true, attempts: 1,
+      best: { sessionId: 'split-s:airborne-prototype', totalCheckpoints: 5 } })
   })
 
   it('keeps the same canvas while changing workspace and opens calibration on request', () => {

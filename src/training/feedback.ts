@@ -71,6 +71,18 @@ import {
   POWER_LOOP_TIME_LIMIT_SECONDS as LOOP_TIME_LIMIT,
 } from './powerLoop'
 import {
+  SPLIT_S_TARGET_HEIGHT_M as SPLIT_TARGET_HEIGHT,
+  SPLIT_S_MIN_ENTRY_HEIGHT_M as SPLIT_ENTRY_HEIGHT,
+  SPLIT_S_MIN_HEIGHT_M as SPLIT_MIN_HEIGHT,
+  SPLIT_S_AREA_RADIUS_M as SPLIT_AREA_RADIUS,
+  SPLIT_S_MIN_ENTRY_SPEED_MPS as SPLIT_ENTRY_SPEED,
+  SPLIT_S_MIN_HEIGHT_LOSS_M as SPLIT_HEIGHT_LOSS,
+  SPLIT_S_MIN_REVERSE_TRAVEL_M as SPLIT_REVERSE,
+  SPLIT_S_HOLD_SECONDS as SPLIT_HOLD,
+  SPLIT_S_RECOVERY_TILT_DEGREES as SPLIT_RECOVERY_TILT,
+  SPLIT_S_TIME_LIMIT_SECONDS as SPLIT_TIME_LIMIT,
+} from './splitS'
+import {
   STRAIGHT_LINE_BRAKE_ZONE_START_M,
   STRAIGHT_LINE_GATE_RADIUS_M,
   STRAIGHT_LINE_ROUTE_LENGTH_M,
@@ -156,6 +168,13 @@ const METRICS: Readonly<Record<string, MetricDefinition>> = {
   rollDirection: { label: '橫滾方向', unit: '', digits: 0 },
   flipProgressDegrees: { label: '本圈翻轉進度', unit: '/ 360°', digits: 1 },
   flipDirection: { label: '翻轉方向', unit: '', digits: 0 },
+  splitRollProgressDegrees: { label: '本段橫滾轉角', unit: '/ 180°', digits: 1 },
+  splitPitchProgressDegrees: { label: '倒置後俯仰轉角', unit: '/ 180°', digits: 1 },
+  splitHeightLossM: { label: '本段下降高度', unit: 'm', digits: 2 },
+  splitHeadingChangeDegrees: { label: '相對進場航向變化', unit: '°', digits: 1 },
+  splitReverseTravelM: { label: '反向飛行行程', unit: 'm', digits: 2 },
+  splitForwardSpeedMps: { label: '沿原進場方向速度', unit: 'm/s', digits: 2 },
+  splitRecoveryDwellSeconds: { label: '正飛恢復確認', unit: 's', digits: 2 },
   loopForwardSpeedMps: { label: '迴圈進場方向速度', unit: 'm/s', digits: 2 },
   loopProgressDegrees: { label: '本圈俯仰轉角', unit: '/ 360°', digits: 1 },
   loopPathTurnDegrees: { label: '垂直航跡轉角', unit: '°', digits: 1 },
@@ -189,6 +208,14 @@ const LESSON_METRICS: Readonly<Record<string, readonly string[]>> = {
 }
 
 function metricPriorities(metrics: Readonly<Record<string, number>>, lessonId: string | null): readonly string[] {
+  if (lessonId === 'split-s' && Number.isFinite(metrics.splitPhase)) {
+    if (metrics.splitPhase <= 1 || metrics.groundTouching > 0.5) return ['altitudeM', 'groundTouching', 'splitForwardSpeedMps']
+    if (metrics.insideSplitArea === 0) return ['launchDistanceM', 'altitudeM', 'splitPitchProgressDegrees']
+    if (!(metrics.splitEpisodeValid > 0.5)) return ['altitudeM', 'splitForwardSpeedMps', 'tiltDegrees']
+    if (metrics.splitPhase <= 3) return ['splitRollProgressDegrees', 'altitudeM', 'verticalSpeedMps']
+    if (metrics.splitPhase <= 5) return ['splitPitchProgressDegrees', 'splitHeightLossM', 'splitReverseTravelM']
+    return ['splitHeadingChangeDegrees', 'tiltDegrees', 'splitRecoveryDwellSeconds']
+  }
   if (lessonId === 'power-loop') {
     if (metrics.loopPhase <= 1 || metrics.groundTouching > 0.5) return ['altitudeM', 'groundTouching', 'loopForwardSpeedMps']
     if (metrics.insideLoopArea === 0) return ['launchDistanceM', 'altitudeM', 'loopProgressDegrees']
@@ -309,8 +336,8 @@ export function formatTrainingMetrics(
     const displayed = definition.transform?.(value) ?? value
     return [{
       key,
-      label: (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'power-loop' || isFullFlipLesson(lessonId)) && key === 'verticalSpeedMps' ? '升降速度（上＋／下−）'
-        : (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'power-loop' || isFullFlipLesson(lessonId)) && key === 'altitudeM' ? '離地高度'
+      label: (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'power-loop' || lessonId === 'split-s' || isFullFlipLesson(lessonId)) && key === 'verticalSpeedMps' ? '升降速度（上＋／下−）'
+        : (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'power-loop' || lessonId === 'split-s' || isFullFlipLesson(lessonId)) && key === 'altitudeM' ? '離地高度'
         : isFullFlipLesson(lessonId) && key === 'preparationDwellSeconds' ? '翻轉準備確認'
         : isFullFlipLesson(lessonId) && key === 'recoveryDwellSeconds' ? '正飛恢復確認'
         : lessonId === 'full-roll' && key === 'preparationDwellSeconds' ? '橫滾準備確認'
@@ -526,6 +553,73 @@ function fullRollObjective(metrics: Readonly<Record<string, number>>): TrainingO
     title,
     detail: `${progress}已完成本圈橫滾，現在停止旋轉並恢復正飛。${blockers.length ? `${blockers.slice(0, 2).join('；')}。` : `將機身主動帶回 ${ROLL_RECOVERY_TILT}° 內，以小量油門止住過快升降。`}${dwell}保持空中、至少 ${ROLL_MIN_HEIGHT} m 高度，連續確認 ${ROLL_HOLD_SECONDS} 秒即可；不要求回原位置或降落。Acro 回中只停止旋轉，回平與減速仍需自行修正。`,
   }
+}
+
+const SPLIT_S_STAGE_LABELS = ['起飛區地面準備', '自行起飛至進場高度', '建立前進速度', '橫滾至倒置', '沿下降半迴圈下拉', '反轉實際飛行方向', '拉平反向改出', '恢復正飛與控制'] as const
+
+export function splitSStageLabel(phase: number): string {
+  return Number.isInteger(phase) && phase >= 0 && phase < SPLIT_S_STAGE_LABELS.length
+    ? SPLIT_S_STAGE_LABELS[phase] : '目前翻轉下降練習'
+}
+
+/** Interruption snapshots describe the stopped maneuver, not the later recovered position. */
+export function splitSInterruptionReason(metrics: Readonly<Record<string, number>>): string | null {
+  if (!(metrics.splitInterrupted > 0.5)) return null
+  const height = fact(metrics, 'interruptionAltitudeM', 'm')
+  const distance = fact(metrics, 'interruptionLaunchDistanceM', 'm')
+  switch (metrics.splitInterruptionReason) {
+    case 1: return '這段翻轉下降曾接地，地面停住不能代替空中改出。'
+    case 2: return `中斷時${height ? `離地 ${height}` : '高度不足'}，低於空中改出需要的 ${SPLIT_MIN_HEIGHT} m；下次先保留高度，提早拉平止降。`
+    case 3: return `中斷時${distance ? `距起飛點 ${distance}` : '已離開練習區'}，超出半徑 ${SPLIT_AREA_RADIUS} m。`
+    case 4: return '翻轉下降混入過多其他軸旋轉；先以橫滾翻至倒置，再以後拉俯仰走出下降半迴圈，不以偏航轉頭代替。'
+    case 5: return '本段旋轉過量，已超出半橫滾與下降半迴圈範圍；接近倒置及正飛時提早回中減緩旋轉。'
+    case 6: return '本段反向翻回或折返，連續動作已中斷；先重新準備，再橫滾至倒置，沿同一後拉方向下降並改出。'
+    case 7: return `尚未開始翻轉便失去進場高度${height ? `，中斷時離地 ${height}` : ''}；先升回至少 ${SPLIT_ENTRY_HEIGHT} m，再建立前速。`
+    case 8: return '倒置後的實際下降或反向飛行證據中斷；原地翻轉、只轉機頭或分段拼湊不能代替下降半迴圈。'
+    default: return null
+  }
+}
+
+function splitSEntry(metrics: Readonly<Record<string, number>>): string {
+  if (Number.isFinite(metrics.altitudeM) && metrics.altitudeM < SPLIT_ENTRY_HEIGHT) return `目前離地 ${metrics.altitudeM.toFixed(1)} m；先升至至少 ${SPLIT_ENTRY_HEIGHT} m，建議約 ${SPLIT_TARGET_HEIGHT} m，再建立前進速度。下降半迴圈需要足夠下方空間。`
+  if (Number.isFinite(metrics.splitForwardSpeedMps) && metrics.splitForwardSpeedMps < SPLIT_ENTRY_SPEED) return `目前前進速度 ${metrics.splitForwardSpeedMps.toFixed(1)} m/s；稍微前傾配合油門，建立至少 ${SPLIT_ENTRY_SPEED} m/s 前速，再翻成倒置。`
+  if (Number.isFinite(metrics.tiltDegrees) && metrics.tiltDegrees > SPLIT_RECOVERY_TILT) return `目前傾角 ${metrics.tiltDegrees.toFixed(1)}°；先主動帶回 ${SPLIT_RECOVERY_TILT}° 內，再重新準備進場。`
+  return `在至少 ${SPLIT_ENTRY_HEIGHT} m 高度、接近水平，建立至少 ${SPLIT_ENTRY_SPEED} m/s 前速後短暫準備；接著選左或右橫滾至倒置。`
+}
+
+function splitSObjective(metrics: Readonly<Record<string, number>>): TrainingObjective {
+  let phase = Number.isInteger(metrics.splitPhase) && metrics.splitPhase >= 0 && metrics.splitPhase <= 8 ? metrics.splitPhase : 0
+  const valid = metrics.splitEpisodeValid > 0.5 && !(metrics.splitInterrupted > 0.5)
+  if (valid && phase >= 3 && phase < 8) phase = !(metrics.splitInverted > 0.5) ? 3
+    : !(metrics.splitDescended > 0.5) ? 4 : !(metrics.splitReversed > 0.5) ? 5 : !(metrics.splitCompleted > 0.5) ? 6 : 7
+  if (phase === 8 && valid && metrics.splitCompleted > 0.5 && metrics.splitInverted > 0.5 && metrics.splitDescended > 0.5 && metrics.splitReversed > 0.5) return {
+    title: '8／8 翻轉下降與反向改出完成',
+    detail: '已觀察到同一段橫滾倒置、下降半迴圈、反轉實際飛行方向及正飛改出，並恢復空中控制；可解除解鎖，不需回原點或降落。',
+  }
+  const title = `${Math.min(8, phase + 1)}／8 ${splitSStageLabel(Math.min(7, phase))}`
+  if (phase === 0) return { title, detail: '先在起飛區實際接地，保持低油門，再明確解鎖；本課由地面自行起飛，不會從空中自動開始。' }
+  if (phase === 1) return { title, detail: `自行起飛至至少 ${SPLIT_ENTRY_HEIGHT} m，建議約 ${SPLIT_TARGET_HEIGHT} m；下降半迴圈會明顯掉高，先取得足夠下方空間。` }
+  const reprepare = '先前步驟保留，但需重新進場完成新的一整段；舊倒置、下降或回正標記不代替本段證據。'
+  if (!valid) return { title, detail: `${metrics.splitInterrupted > 0.5 ? `本段已中斷。${splitSInterruptionReason(metrics) ?? ''}${reprepare}` : ''}${splitSEntry(metrics)}` }
+  if (phase === 2) return { title, detail: splitSEntry(metrics) }
+  const roll = fact(metrics, 'splitRollProgressDegrees', '°')
+  const pitch = fact(metrics, 'splitPitchProgressDegrees', '°')
+  const descent = fact(metrics, 'splitHeightLossM', 'm')
+  const heading = fact(metrics, 'splitHeadingChangeDegrees', '°')
+  const rearward = fact(metrics, 'splitReverseTravelM', 'm')
+  if (phase === 3) return { title, detail: `${roll ? `本段橫滾 ${roll}。` : ''}選左或右橫滾約半圈至機腹朝天，接近倒置時回中減緩橫滾；先完成實際橫滾倒置，再向後拉俯仰。只做前翻或後翻不代替本段順序。` }
+  if (phase === 4) return { title, detail: `${pitch ? `倒置後俯仰 ${pitch}。` : ''}${descent ? `本段已下降 ${descent}。` : ''}已橫滾倒置；適度收油並持續向後拉俯仰，讓實際航跡往下繞出半迴圈，需下降至少 ${SPLIT_HEIGHT_LOSS} m。保留下方空間，不要只用偏航轉頭。` }
+  if (phase === 5) return { title, detail: `${heading ? `相對進場航向變化 ${heading}。` : ''}${rearward ? `反向行程 ${rearward}。` : ''}繼續沿下降半迴圈後拉，讓飛行方向轉向來路，並實際往回移動至少 ${SPLIT_REVERSE} m。轉機頭但仍朝原方向滑行不算反向改出。` }
+  if (phase === 6) return { title, detail: `${pitch ? `倒置後俯仰 ${pitch}。` : ''}已觀察到往來路方向飛行；繼續後拉至正飛，接近水平時提早回中減緩旋轉，補油止住過快下降。不要再加半圈翻成倒置。` }
+  if (phase === 8) return { title, detail: `缺少同一段的實際橫滾倒置、下降與反向改出證據，不能只由完成標記判定通過。${reprepare}${splitSEntry(metrics)}` }
+  const blockers: string[] = []
+  if (Number.isFinite(metrics.altitudeM) && metrics.altitudeM < SPLIT_MIN_HEIGHT) blockers.push(`離地 ${metrics.altitudeM.toFixed(1)} m，先止降保留至少 ${SPLIT_MIN_HEIGHT} m`)
+  if (Number.isFinite(metrics.tiltDegrees) && metrics.tiltDegrees > SPLIT_RECOVERY_TILT) blockers.push(`傾角 ${metrics.tiltDegrees.toFixed(1)}°，先主動修回 ${SPLIT_RECOVERY_TILT}° 內`)
+  if (Number.isFinite(metrics.bodyRateDegreesPerSecond) && metrics.bodyRateDegreesPerSecond > 140) blockers.push(`機身仍以 ${metrics.bodyRateDegreesPerSecond.toFixed(1)}°/s 旋轉，先減緩至 140°/s 內`)
+  if (Number.isFinite(metrics.verticalSpeedMps) && (metrics.verticalSpeedMps < -4 || metrics.verticalSpeedMps > 5)) blockers.push(`升降速度 ${metrics.verticalSpeedMps.toFixed(1)} m/s，調整油門回到 −4～+5 m/s`)
+  if (Number.isFinite(metrics.horizontalSpeedMps) && metrics.horizontalSpeedMps > 15) blockers.push(`水平速度 ${metrics.horizontalSpeedMps.toFixed(1)} m/s，先降低至 15 m/s 內`)
+  const dwell = fact(metrics, 'splitRecoveryDwellSeconds', 's', 2)
+  return { title, detail: `已反向正飛改出，現在恢復控制。${blockers.length ? `${blockers.slice(0, 2).join('；')}。` : '保持接近水平，減緩旋轉與過快升降。'}${dwell ? `恢復確認 ${dwell}／${SPLIT_HOLD.toFixed(2)} s。` : ''}保持離地至少 ${SPLIT_MIN_HEIGHT} m，連續確認 ${SPLIT_HOLD} 秒；不要求精準懸停、回原點或降落。回中不會自動回平。` }
 }
 
 const POWER_LOOP_STAGE_LABELS = ['起飛區地面準備', '自行起飛至練習高度', '建立前進速度', '拉升並展開迴圈', '越頂通過倒置', '沿迴圈下降', '拉平向前改出', '恢復正飛與控制'] as const
@@ -1016,6 +1110,7 @@ export function trainingObjective(
   evaluation: Pick<TrainingEvaluation, 'metrics'> | null | undefined,
 ): TrainingObjective | null {
   const metrics = evaluation?.metrics ?? {}
+  if (lessonId === 'split-s') return splitSObjective(metrics)
   if (lessonId === 'power-loop') return powerLoopObjective(metrics)
   if (lessonId === 'full-roll') return fullRollObjective(metrics)
   if (isFullFlipLesson(lessonId)) return fullFlipObjective(metrics, lessonId)
@@ -1065,6 +1160,7 @@ export function trainingObjective(
 
 /** Short route instructions remain visible before a lesson starts. */
 export function trainingRouteGuide(lessonId: string | null): string | null {
+  if (lessonId === 'split-s') return `地面自行起飛至至少 ${SPLIT_ENTRY_HEIGHT} m（建議約 ${SPLIT_TARGET_HEIGHT} m）→ 建立至少 ${SPLIT_ENTRY_SPEED} m/s 前速 → 向左或右橫滾半圈至倒置 → 後拉俯仰走下降半迴圈 → 反向飛往來路 → 拉平改出 → 空中恢復 ${SPLIT_HOLD} 秒。需先實際橫滾倒置，再下降至少 ${SPLIT_HEIGHT_LOSS} m 並往回移動至少 ${SPLIT_REVERSE} m；只偏航轉頭、原地前後翻或接地停住不能代替。練習區半徑 ${SPLIT_AREA_RADIUS} m，改出保留至少 ${SPLIT_MIN_HEIGHT} m，不要求回原點、穿窄門或降落。一般動作中斷後可重新進場，舊標記不代替新一段。引導練習不限時，挑戰 ${SPLIT_TIME_LIMIT} 秒。`
   if (lessonId === 'power-loop') return `地面自行起飛至至少 ${LOOP_ENTRY_HEIGHT} m（建議約 ${LOOP_TARGET_HEIGHT} m）→ 建立至少 ${LOOP_ENTRY_SPEED} m/s 前速 → 拉升 → 越頂倒置 → 下降 → 向前拉平改出 → 空中恢復 ${LOOP_HOLD} 秒。需真正飛出有高度與前後位移的垂直迴圈：拉升至少 ${LOOP_HEIGHT_GAIN} m、前後跨度至少 ${LOOP_SPAN} m、越頂後退至少 ${LOOP_REVERSE} m，且從頂點下降。原地後翻、純上下升降或反向拼湊不能代替。淡色迴圈是參考，不要求完美圓形、回原點、穿障礙或降落。練習區半徑 ${LOOP_AREA_RADIUS} m，改出保留至少 ${LOOP_MIN_HEIGHT} m；中斷後重新進場完成新一圈。引導練習不限時，挑戰 ${LOOP_TIME_LIMIT} 秒。`
   if (lessonId === 'full-roll') return `地面自行起飛至至少 ${ROLL_PREP_HEIGHT} m（建議約 ${ROLL_TARGET_HEIGHT} m）→ 短暫準備 ${ROLL_PREP_SECONDS} 秒 → 選左或右連續橫滾一圈 → 回中減緩旋轉、主動修回正飛 → 空中恢復控制 ${ROLL_HOLD_SECONDS} 秒。沿機頭到機尾的軸翻轉，需觀察到本圈實際倒置與完整橫滾；反向翻回、原地偏航或前後翻轉不代替 Roll。練習區為起飛點半徑 ${ROLL_AREA_RADIUS} m，恢復時保留至少 ${ROLL_MIN_HEIGHT} m 高度，不要求回原位置或降落。接地、過低或離區中斷本圈後，先重新準備，再完整做一圈；先前步驟保留。引導練習不限時，挑戰 ${ROLL_TIME_LIMIT} 秒。`
   if (fullFlipRequiredDirection(lessonId ?? '') !== 0) return `本課練${flipCourseDirection(lessonId)}。地面自行起飛至至少 ${FLIP_PREP_HEIGHT} m（建議約 ${FLIP_TARGET_HEIGHT} m）→ 短暫準備 ${FLIP_PREP_SECONDS} 秒 → 沿俯仰軸連續${flipCourseDirection(lessonId)}一整圈 → 回中減緩旋轉、主動修回正飛 → 空中恢復控制 ${FLIP_HOLD_SECONDS} 秒。必須觀察到指定方向的實際倒置與完整一圈；反方向翻轉不計入本課，先回正重新準備後再練。練習區為起飛點半徑 ${FLIP_AREA_RADIUS} m，恢復時保留至少 ${FLIP_MIN_HEIGHT} m 高度，不要求回原位置或降落。中斷後先前步驟保留，但需完整做新的一圈。引導練習不限時，挑戰 ${FLIP_TIME_LIMIT} 秒。`
@@ -1089,6 +1185,18 @@ export function trainingHint(
 ): string {
   const hint = evaluation?.hint?.trim()
   const message = evaluation?.message?.trim()
+  if (lessonId === 'split-s' && evaluation?.status === 'failure') {
+    const restart = '本次練習已結束；按「再練一次」會清空本次步驟，從地面重新開始。'
+    if (/墜毀|撞擊|crash|impact|Obstacle collision:/iu.test(message ?? '')) return `本次發生墜毀，翻轉下降已停止；先重設場景，下一次保留足夠進場高度並提早改出。${restart}`
+    if (/解除解鎖|上鎖|失焦|失去焦點|斷線|disarm|focus|disconnect/iu.test(message ?? '')) return `本次因解除解鎖、失去焦點或連線中斷而停止；確認網頁與控制器就緒後重試。${restart}`
+    if (/無效|資料中斷|時間倒退|跳躍|缺少有效|不一致|重設|invalid|non-finite|telemetry.*gap|reset|rewind/iu.test(message ?? '')) return `本次飛行資料無效、中斷或被重設，無法判定翻轉下降表現；保持網頁在前景後重試。${restart}`
+    if (/逾時|timed out|timeout/iu.test(message ?? '')) return `本次翻轉下降挑戰逾時。${restart}`
+    return `本次翻轉下降尚未完成。${restart}`
+  }
+  if (lessonId === 'split-s' && evaluation?.status === 'continue' && evaluation.metrics && evaluation.recovery !== 'restart') {
+    const objective = splitSObjective(evaluation.metrics)
+    return `${objective.title}：${objective.detail}`
+  }
   if (lessonId === 'power-loop' && evaluation?.status === 'failure') {
     const restart = '本次練習已結束；按「再練一次」會清空本次步驟，從地面重新開始。'
     if (/墜毀|撞擊|crash|impact|Obstacle collision:/iu.test(message ?? '')) return `本次發生墜毀，大迴旋練習已停止；先重設場景。${restart}`

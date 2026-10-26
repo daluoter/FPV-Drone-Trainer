@@ -14,18 +14,13 @@ export function prepareTrainingSetup(
     return { ...request, setup: { ...request.setup, spawnPositionM: { ...launch.positionM },
       staticObstacles: createWideGates(launch.positionM, surface.positionM.y).flatMap((gate) => gate.colliders) } }
   }
-  if (request.lessonId === 'landing' || request.lessonId === 'straight-line' || request.lessonId === 'direction-control' || request.lessonId === 'coordinated-turn' || request.lessonId === 'square-route' || request.lessonId === 'figure-eight' || request.lessonId === 'basic-recovery' || request.lessonId === 'full-roll' || request.lessonId === 'full-flip' || request.lessonId === 'front-flip' || request.lessonId === 'back-flip' || request.lessonId === 'power-loop') {
+  if (request.lessonId === 'landing' || request.lessonId === 'straight-line' || request.lessonId === 'direction-control' || request.lessonId === 'coordinated-turn' || request.lessonId === 'square-route' || request.lessonId === 'figure-eight' || request.lessonId === 'basic-recovery' || request.lessonId === 'full-roll' || request.lessonId === 'full-flip' || request.lessonId === 'front-flip' || request.lessonId === 'back-flip' || request.lessonId === 'power-loop' || request.lessonId === 'split-s') {
     const launch = references.find((reference) => reference.id === 'training-launch')
     if (!launch) return request
     return {
       ...request,
       setup: { ...request.setup, spawnPositionM: { ...launch.positionM } },
     }
-  }
-  const spawn = request.setup.spawnPositionM
-  const surface = references.find((reference) => reference.id === 'landing-surface')
-  if (request.lessonId === 'split-s' && spawn && surface) {
-    return { ...request, setup: { ...request.setup, spawnPositionM: { ...spawn, y: surface.positionM.y + spawn.y } } }
   }
   return request
 }

@@ -9,10 +9,10 @@ import { BASIC_RECOVERY_LESSON } from './basicRecovery'
 import { FULL_ROLL_LESSON } from './fullRoll'
 import { BACK_FLIP_LESSON, FRONT_FLIP_LESSON, FULL_FLIP_LESSON } from './fullFlip'
 import { POWER_LOOP_LESSON } from './powerLoop'
+import { SPLIT_S_LESSON } from './splitS'
 import {
   hoverEvaluator,
   orbitEvaluator,
-  splitSEvaluator,
 } from './evaluators'
 import { takeoffEvaluator } from './takeoff'
 import type { LessonDefinition, LessonSetup } from './types'
@@ -21,9 +21,6 @@ const DEFAULT_SETUP: Omit<LessonSetup, 'sceneReferenceIds'> = {
   requiresDisarmed: true,
   resetSimulation: true,
 }
-
-const SPLIT_S_SPAWN = { x: 0, y: 25, z: 0 } as const
-const SPLIT_S_ORIENTATION = { x: 0, y: 0, z: 0, w: 1 } as const
 
 function lessonSetup(
   sceneReferenceIds: readonly string[],
@@ -93,54 +90,7 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
     evaluator: hoverEvaluator,
   }),
   COORDINATED_TURN_LESSON,
-  phase7Lesson({
-    id: 'split-s',
-    priority: 3,
-    title: '翻轉下降',
-    description: 'Use the elevated Split-S reference to invert, descend through the half-loop, reverse heading, and recover level.',
-    objectives: [
-      'Enter from sufficient altitude with bounded speed and position.',
-      'Pass through a real inverted transition and descending half-loop.',
-      'Reverse heading and recover upright without an upright U-turn false positive.',
-    ],
-    setup: lessonSetup(['split-s-reference'], {
-      spawnPositionM: SPLIT_S_SPAWN,
-      spawnOrientation: SPLIT_S_ORIENTATION,
-    }),
-    checkpoints: [
-      { id: 'entry', title: 'Entry', description: 'Reach the Split-S entry reference at sufficient altitude and energy.' },
-      { id: 'inverted', title: 'Inverted', description: 'Pass through a measured inverted transition before descending.' },
-      { id: 'descent', title: 'Descent', description: 'Descend through the inverted half-loop inside the safety envelope.' },
-      { id: 'reversed', title: 'Reversed heading', description: 'Complete the heading reversal after the inverted descent.' },
-      { id: 'recovered', title: 'Recovered', description: 'Recover upright with bounded altitude, speed, and position.' },
-    ],
-    success: {
-      title: 'Split-S verified',
-      description: 'Altitude entry, inversion, descending half-loop, heading reversal, and upright recovery were all observed.',
-      criteria: ['Sufficient entry altitude', 'Actual inverted transition', 'Ordered reversal and recovery'],
-    },
-    failure: {
-      title: 'Split-S not recovered',
-      description: 'The maneuver missed a required attitude/energy phase or crossed the recovery safety floor.',
-      criteria: ['Inversion before reversal', 'Descending half-loop', 'Finite bounded recovery'],
-    },
-    scoring: {
-      maxScore: 100,
-      minimumPassingScore: 70,
-      minimumActiveSeconds: 2,
-      metricLabels: [
-        'entryAltitudeM',
-        'invertedTiltDegrees',
-        'descentRateMps',
-        'headingChangeDegrees',
-        'recoveryAltitudeErrorM',
-        'positionErrorM',
-        'speedMps',
-      ],
-    },
-    hints: ['Start high, roll fully inverted, let the heading reverse through the descent, then recover level.'],
-    evaluator: splitSEvaluator,
-  }),
+  SPLIT_S_LESSON,
   phase7Lesson({
     id: 'orbit',
     priority: 4,

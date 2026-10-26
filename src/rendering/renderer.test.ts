@@ -1,3 +1,4 @@
+import { SPLIT_S_TARGET_HEIGHT_M } from '../training/splitS'
 import * as THREE from 'three'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -426,6 +427,48 @@ describe('FlightRenderer lifecycle and failure contract', () => {
       renderer.setLessonTarget('wide-gate')
       expect(renderer.scene.getObjectByName('power-loop-field')?.visible).toBe(false)
       expect(renderer.scene.getObjectByName('wide-gate-field')?.visible).toBe(true)
+    } finally {
+      renderer.dispose()
+    }
+  })
+
+  it('retains descending half-loop stage and raised-ground anchors after rebuilding the scene', () => {
+    const rendererStub = createRendererStub()
+    const canvas = document.createElement('canvas')
+    const renderer = new FlightRenderer(canvas, { rendererFactory: () => rendererStub })
+    try {
+      renderer.setLessonTarget('split-s')
+      renderer.setSplitSStage(5)
+      const previous = renderer.flightScene
+      const disposePrevious = vi.spyOn(previous, 'dispose')
+      renderer.reconfigureScene({ ...DEFAULT_DRONE_CONFIG,
+        ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 35, z: -3 } })
+      expect(renderer.scene.getObjectByName('split-s-field')?.visible).toBe(true)
+      const guide = renderer.scene.getObjectByName('split-stage-reference') as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      expect(guide.material.color.getHex()).toBe(0xffc978)
+      const accent = renderer.scene.getObjectByName('split-stage-guidance')!
+      expect(accent.position.toArray()).toEqual([0, -12, -24])
+      expect(accent.rotation.y).toBe(Math.PI)
+      expect(renderer.flightScene.getReference('split-zone')?.positionM).toEqual({ x: 6, y: 5 + SPLIT_S_TARGET_HEIGHT_M, z: -3 })
+      expect(renderer.flightScene.getReference('split-s-reference')?.object.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('power-loop-field')?.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('wide-gate-field')?.visible).toBe(false)
+      expect(renderer.canvas).toBe(canvas)
+      expect(renderer.renderer).toBe(rendererStub)
+      expect(disposePrevious).toHaveBeenCalledOnce()
+      renderer.setSplitSStage(8)
+      expect(guide.material.color.getHex()).toBe(0xb8f36b)
+      renderer.setSplitSStage(null)
+      renderer.reconfigureScene(DEFAULT_DRONE_CONFIG)
+      expect(renderer.scene.getObjectByName('split-stage-guidance')?.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('split-s-field')?.visible).toBe(true)
+      renderer.setSplitSStage(2)
+      renderer.render(createInitialDroneState(DEFAULT_DRONE_CONFIG))
+      expect(renderer.getStatus()).toEqual({ kind: 'ready' })
+      expect(rendererStub.render).toHaveBeenCalledOnce()
+      renderer.setLessonTarget('power-loop')
+      expect(renderer.scene.getObjectByName('split-s-field')?.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('power-loop-field')?.visible).toBe(true)
     } finally {
       renderer.dispose()
     }

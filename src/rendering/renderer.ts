@@ -67,6 +67,7 @@ export class FlightRenderer {
   private fullRollStage: number | null = 0
   private fullFlipStage: number | null = 0
   private powerLoopStage: number | null = 0
+  private splitSStage: number | null = 0
   public get flightScene(): FlightScene { return this.currentFlightScene }
   public readonly cameraRig: FlightCameraRig
   public readonly renderer: THREE.WebGLRenderer
@@ -193,6 +194,13 @@ export class FlightRenderer {
     this.flightScene.setPowerLoopStage(stage)
   }
 
+  /** Update the descending half-loop guide without changing live flight. */
+  public setSplitSStage(stage: number | null): void {
+    if (this.disposed) return
+    this.splitSStage = stage
+    this.flightScene.setSplitSStage(stage)
+  }
+
   /** Rebuild anchors only after the owner has explicitly reset and disarmed. */
   public reconfigureScene(config: DroneConfig): void {
     if (this.disposed) return
@@ -208,6 +216,7 @@ export class FlightRenderer {
     this.currentFlightScene.setFullRollStage(this.fullRollStage)
     this.currentFlightScene.setFullFlipStage(this.fullFlipStage)
     this.currentFlightScene.setPowerLoopStage(this.powerLoopStage)
+    this.currentFlightScene.setSplitSStage(this.splitSStage)
     previous.dispose()
   }
 

@@ -1099,3 +1099,87 @@ describe('大迴旋 result observations', () => {
     expect(empty.observedGap).toContain('沒有有效')
   })
 })
+
+describe('翻轉下降 current-rule result observations', () => {
+  const splitContext: TrainingAttemptContext = { ...currentContext, rulesVersion: 6 }
+  const metrics = { splitPhase: 7, splitEpisodeValid: 1, splitInterrupted: 0, splitInverted: 1,
+    splitDescended: 1, splitReversed: 1, splitCompleted: 1, splitRollProgressDegrees: 180,
+    splitPitchProgressDegrees: 178, splitHeightLossM: 12, splitReverseTravelM: 5, splitHeadingChangeDegrees: 178 }
+  const splitResult: TrainingResult = { ...result, lessonId: 'split-s', attemptContext: splitContext,
+    totalCheckpoints: 8, completedCheckpoints: 7, metrics }
+
+  it('recognizes a complete current sequence and rejects stale or missing spatial proof', () => {
+    const complete = summarizeTrainingResult({ ...splitResult, outcome: 'SUCCESS', completedCheckpoints: 8, metrics: { ...metrics, splitPhase: 8 } })
+    expect(complete.observedStrength).toContain('從地面自行起飛')
+    expect(complete.observedStrength).toContain('橫滾倒置、走出下降半迴圈')
+    expect(complete.observedGap).toBeNull()
+    for (const missing of ['splitEpisodeValid', 'splitInverted', 'splitDescended', 'splitReversed', 'splitCompleted', 'splitHeightLossM', 'splitReverseTravelM']) {
+      const rejected = summarizeTrainingResult({ ...splitResult, outcome: 'SUCCESS', completedCheckpoints: 8,
+        metrics: { ...metrics, splitPhase: 8, [missing]: 0 } })
+      expect(rejected.observedStrength).toBeNull()
+      expect(rejected.observedGap).toContain('證據不足')
+    }
+  })
+
+  it('retains the old airborne five-step result without claiming new ground-start completion', () => {
+    const legacy = summarizeTrainingResult({ ...splitResult, attemptContext: currentContext, outcome: 'SUCCESS',
+      completedCheckpoints: 5, totalCheckpoints: 5, metrics: { entryAltitudeM: 25, headingChangeDegrees: 180 } })
+    expect(legacy.observedStrength).toContain('5 / 5')
+    expect(legacy.observedGap).toBeNull()
+    expect(legacy.observedStrength).not.toContain('地面自行起飛')
+    expect(legacy.observedStrength).not.toContain('八步')
+    const missingCurrent = summarizeTrainingResult({ ...splitResult, outcome: 'SUCCESS', completedCheckpoints: 8, metrics: { headingChangeDegrees: 180 } })
+    expect(missingCurrent.observedStrength).toBeNull()
+    expect(missingCurrent.observedGap).toContain('證據不足')
+  })
+
+  it('reports actual descending and reverse-flight gaps rather than just a heading turn', () => {
+    const dive = summarizeTrainingResult({ ...splitResult, metrics: { ...metrics, splitPhase: 4,
+      splitDescended: 0, splitReversed: 0, splitCompleted: 0, splitHeightLossM: 0.8 } })
+    expect(dive.observedGap).toContain('本段下降 0.8 m')
+    expect(dive.observedGap).toContain('至少需 3 m')
+    const reverse = summarizeTrainingResult({ ...splitResult, metrics: { ...metrics, splitPhase: 5,
+      splitReversed: 0, splitCompleted: 0, splitReverseTravelM: 0.4 } })
+    expect(reverse.observedGap).toContain('反向行程 0.4 m')
+    expect(reverse.observedGap).toContain('只轉機頭不算')
+  })
+
+  it('follows new episode evidence after retained late checkpoints', () => {
+    const fresh = summarizeTrainingResult({ ...splitResult, metrics: { ...metrics,
+      splitInverted: 0, splitDescended: 0, splitReversed: 0, splitCompleted: 0 } })
+    expect(fresh.observedStrength).not.toContain('反向正飛改出')
+    expect(fresh.observedGap).toContain('尚未以橫滾完成倒置')
+    expect(fresh.nextPractice).toContain('先留出下方空間')
+  })
+
+  it('keeps the captured low-altitude event after the pilot climbs again', () => {
+    const stopped = summarizeTrainingResult({ ...splitResult, metrics: { ...metrics, splitEpisodeValid: 0,
+      splitInterrupted: 1, splitInterruptionReason: 2, interruptionAltitudeM: 0.6, altitudeM: 20 } })
+    expect(stopped.observedStrength).not.toContain('反向正飛改出')
+    expect(stopped.observedGap).toContain('中斷時離地 0.6 m')
+    expect(stopped.observedGap).toContain('舊倒置與下降標記')
+  })
+
+  it('names measured recovery blockers and timeout separately', () => {
+    const recovery = summarizeTrainingResult({ ...splitResult, metrics: { ...metrics, tiltDegrees: 54, verticalSpeedMps: -7 } })
+    expect(recovery.observedStrength).toContain('反向正飛改出')
+    expect(recovery.observedGap).toContain('傾角 54.0°')
+    expect(recovery.observedGap).toContain('−4～+5 m/s')
+    const timeout = summarizeTrainingResult({ ...splitResult, message: '翻轉下降挑戰逾時。' })
+    expect(timeout.observedGap).toContain('本次挑戰逾時')
+    expect(timeout.nextPractice).toContain('清空本次步驟')
+  })
+
+  it.each([['Ground impact crash', '發生墜毀'], ['disconnect', '連線中斷'], ['資料中斷', '資料無效']])('does not infer maneuver skill from terminal stop %s', (message, expected) => {
+    const stopped = summarizeTrainingResult({ ...splitResult, message })
+    expect(stopped.observedStrength).toBeNull()
+    expect(stopped.observedGap).toContain(expected)
+    expect(stopped.nextPractice).toContain('再練一次')
+  })
+
+  it('does not credit a result without armed samples', () => {
+    const empty = summarizeTrainingResult({ ...splitResult, sampleCount: 0, outcome: 'SUCCESS' })
+    expect(empty.observedStrength).toBeNull()
+    expect(empty.observedGap).toContain('沒有有效')
+  })
+})

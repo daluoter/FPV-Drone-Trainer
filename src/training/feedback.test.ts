@@ -1199,3 +1199,84 @@ describe('大迴旋 observations and recovery guidance', () => {
     expect(trainingHint('power-loop', { status: 'failure', message })).toContain(expected)
   })
 })
+
+describe('翻轉下降 measured guidance', () => {
+  const ready = { splitPhase: 3, splitEpisodeValid: 1, splitInterrupted: 0, splitInverted: 0,
+    splitDescended: 0, splitReversed: 0, splitCompleted: 0 }
+  const proofFor = (phase: number) => ({ ...ready, splitPhase: phase,
+    splitInverted: phase >= 4 ? 1 : 0, splitDescended: phase >= 5 ? 1 : 0,
+    splitReversed: phase >= 6 ? 1 : 0, splitCompleted: phase >= 7 ? 1 : 0 })
+
+  it('shows the full ground-start route and ordered roll then pitch', () => {
+    const guide = trainingRouteGuide('split-s')
+    expect(guide).toContain('地面自行起飛')
+    expect(guide).toContain('至少 15 m')
+    expect(guide).toContain('建議約 25 m')
+    expect(guide).toContain('橫滾半圈至倒置')
+    expect(guide).toContain('後拉俯仰走下降半迴圈')
+    expect(guide).toContain('引導練習不限時')
+    expect(trainingObjective('split-s', null)?.title).toBe('1／8 起飛區地面準備')
+    for (let phase = 1; phase <= 7; phase += 1) expect(trainingObjective('split-s', { metrics: proofFor(phase) })?.title).toContain(`${phase + 1}／8`)
+  })
+
+  it('names altitude, speed and attitude entry blockers using measured values', () => {
+    const detail = (metrics: Record<string, number>) => trainingObjective('split-s', { metrics: { splitPhase: 2, splitEpisodeValid: 0, ...metrics } })!.detail
+    expect(detail({ altitudeM: 9.2 })).toContain('目前離地 9.2 m')
+    expect(detail({ altitudeM: 20, splitForwardSpeedMps: 0.9 })).toContain('目前前進速度 0.9 m/s')
+    expect(detail({ altitudeM: 20, splitForwardSpeedMps: 4, tiltDegrees: 49 })).toContain('目前傾角 49.0°')
+  })
+
+  it('separates roll inversion, descending pitch and actual reverse travel', () => {
+    const roll = trainingObjective('split-s', { metrics: { ...proofFor(3), splitRollProgressDegrees: 83 } })!.detail
+    expect(roll).toContain('本段橫滾 83.0 °')
+    expect(roll).toContain('先完成實際橫滾倒置')
+    expect(roll).toContain('前翻或後翻不代替')
+    const dive = trainingObjective('split-s', { metrics: { ...proofFor(4), splitPitchProgressDegrees: 34, splitHeightLossM: 1.1 } })!.detail
+    expect(dive).toContain('本段已下降 1.1 m')
+    expect(dive).toContain('下降至少 3 m')
+    const reverse = trainingObjective('split-s', { metrics: { ...proofFor(5), splitHeadingChangeDegrees: 112, splitReverseTravelM: 0.4 } })!.detail
+    expect(reverse).toContain('航向變化 112.0 °')
+    expect(reverse).toContain('反向行程 0.4 m')
+    expect(reverse).toContain('轉機頭但仍朝原方向滑行不算')
+  })
+
+  it('follows the new episode instead of retained recovery checkpoints', () => {
+    const fresh = trainingObjective('split-s', { metrics: { ...ready, splitPhase: 7 } })!
+    expect(fresh.title).toBe('4／8 橫滾至倒置')
+    expect(fresh.detail).not.toContain('已反向正飛改出')
+    const stale = trainingObjective('split-s', { metrics: { ...proofFor(8), splitEpisodeValid: 0,
+      splitInterrupted: 1, splitInterruptionReason: 2, interruptionAltitudeM: 0.7, altitudeM: 20 } })!
+    expect(stale.title).not.toContain('完成')
+    expect(stale.detail).toContain('中斷時離地 0.7 m')
+    expect(stale.detail).toContain('舊倒置')
+  })
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8])('explains maneuver interruption reason %s and a fresh retry', (reason) => {
+    const detail = trainingObjective('split-s', { metrics: { splitPhase: 6, splitEpisodeValid: 0, splitInterrupted: 1,
+      splitInterruptionReason: reason, interruptionAltitudeM: 0.8, interruptionLaunchDistanceM: 158 } })!.detail
+    expect(detail).toContain('本段已中斷')
+    expect(detail).toContain('新的一整段')
+  })
+
+  it('uses measured dimensions and names recovery limits rather than generic failure', () => {
+    expect(formatTrainingMetrics({ ...proofFor(4), splitPitchProgressDegrees: 44, splitHeightLossM: 1.2, splitReverseTravelM: 0.5 }, 'split-s')).toEqual([
+      { key: 'splitPitchProgressDegrees', label: '倒置後俯仰轉角', value: '44.0 / 180°' },
+      { key: 'splitHeightLossM', label: '本段下降高度', value: '1.20 m' },
+      { key: 'splitReverseTravelM', label: '反向飛行行程', value: '0.50 m' },
+    ])
+    const detail = trainingObjective('split-s', { metrics: { ...proofFor(7), tiltDegrees: 51,
+      verticalSpeedMps: -8, splitRecoveryDwellSeconds: 0.1 } })!.detail
+    expect(detail).toContain('傾角 51.0°')
+    expect(detail).toContain('−4～+5 m/s')
+    expect(detail).toContain('0.10 s／0.20 s')
+    expect(trainingObjective('split-s', { metrics: proofFor(8) })?.title).toContain('8／8 翻轉下降與反向改出完成')
+    expect(trainingObjective('split-s', { metrics: { ...proofFor(8), splitInverted: 0 } })?.detail).toContain('缺少同一段')
+  })
+
+  it.each([['Ground impact crash', '墜毀'], ['失去焦點', '連線中斷'], ['位置跳躍', '資料無效'], ['timeout', '挑戰逾時']])('keeps terminal cause %s ahead of stale maneuver proof', (message, expected) => {
+    const text = trainingHint('split-s', { status: 'failure', message, metrics: proofFor(8) })
+    expect(text).toContain(expected)
+    expect(text).toContain('再練一次')
+    expect(text).not.toContain('改出完成')
+  })
+})

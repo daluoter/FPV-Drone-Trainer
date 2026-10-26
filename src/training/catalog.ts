@@ -9,6 +9,7 @@ import { BASIC_RECOVERY_LEARNING_CONTENT } from './basicRecovery'
 import { FULL_ROLL_LEARNING_CONTENT } from './fullRoll'
 import { BACK_FLIP_LEARNING_CONTENT, FRONT_FLIP_LEARNING_CONTENT, FULL_FLIP_LEARNING_CONTENT } from './fullFlip'
 import { POWER_LOOP_LEARNING_CONTENT } from './powerLoop'
+import { SPLIT_S_LEARNING_CONTENT } from './splitS'
 
 export interface LessonLearningContent {
   readonly code: string
@@ -73,24 +74,7 @@ const LEARNING_CONTENT: Readonly<Record<string, LessonLearningContent>> = {
   'front-flip': FRONT_FLIP_LEARNING_CONTENT,
   'back-flip': BACK_FLIP_LEARNING_CONTENT,
   'power-loop': POWER_LOOP_LEARNING_CONTENT,
-  'split-s': {
-    code: 'L14',
-    title: '翻轉下降',
-    level: '特技',
-    prerequisiteIds: ['coordinated-turn'],
-    objectives: ['完成實際倒飛與下降半迴圈。', '反轉航向後恢復正飛，保留足夠高度。'],
-    steps: [
-      '課程會從較高位置開始，先確認姿態與參考方向。',
-      '完整滾轉至倒飛，觀察機體確實翻面。',
-      '以俯仰帶入下降半迴圈，使航向逐漸反轉。',
-      '在安全高度內恢復正飛並降低過大速度。',
-    ],
-    commonMistakes: [
-      '尚未倒飛就偏航迴轉；水平 U 形轉彎不能代替 Split-S。',
-      '下降前高度不足，恢復時越過安全高度下限。',
-      '急拉回正造成過大速度或超出可恢復範圍。',
-    ],
-  },
+  'split-s': SPLIT_S_LEARNING_CONTENT,
   orbit: {
     code: 'L15',
     title: '正刷鍋',

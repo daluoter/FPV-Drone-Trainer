@@ -13,6 +13,7 @@ import { BASIC_RECOVERY_AREA_RADIUS_M, BASIC_RECOVERY_MIN_PREPARATION_HEIGHT_M, 
 import { FULL_ROLL_AREA_RADIUS_M, FULL_ROLL_MIN_PREPARATION_HEIGHT_M, FULL_ROLL_TARGET_HEIGHT_M } from '../training/fullRoll'
 import { FULL_FLIP_AREA_RADIUS_M, FULL_FLIP_MIN_PREPARATION_HEIGHT_M, FULL_FLIP_TARGET_HEIGHT_M } from '../training/fullFlip'
 import { POWER_LOOP_AREA_RADIUS_M, POWER_LOOP_TARGET_HEIGHT_M } from '../training/powerLoop'
+import { SPLIT_S_AREA_RADIUS_M, SPLIT_S_MIN_HEIGHT_M, SPLIT_S_TARGET_HEIGHT_M } from '../training/splitS'
 import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
 import type { Vector3 } from '../math/vector'
 import type { ReplayGhostState } from '../replay'
@@ -63,6 +64,8 @@ export interface FlightScene {
   setFullFlipStage(stage: number | null): void
   /** Highlight an illustrative vertical-loop segment without changing flight. */
   setPowerLoopStage(stage: number | null): void
+  /** Show entry, inverted descent and reversed exit without changing flight. */
+  setSplitSStage(stage: number | null): void
   /** Presentation-only bounded path trace; evaluators remain renderer-independent. */
   setTrainingPath(path: readonly Vector3[]): void
   setReplayPath(path: readonly Vector3[]): void
@@ -993,9 +996,91 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     sizeM: { x: POWER_LOOP_AREA_RADIUS_M * 2, y: 16, z: POWER_LOOP_AREA_RADIUS_M * 2 },
   }
 
+  // The descending half-loop is a world-fixed illustration, not a collision
+  // surface or a prescribed circle. The pilot can use another entry heading.
+  const splitField = new THREE.Group()
+  splitField.name = 'split-s-field'
+  splitField.position.set(field.launch.x, config.ground.heightM + SPLIT_S_TARGET_HEIGHT_M, field.launch.z)
+  splitField.visible = false
+  const splitFloor = new THREE.Mesh(
+    new THREE.RingGeometry(SPLIT_S_AREA_RADIUS_M - 0.07, SPLIT_S_AREA_RADIUS_M, 128),
+    new THREE.MeshBasicMaterial({ color: 0x8abac4, transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false }),
+  )
+  splitFloor.name = 'split-area-boundary'
+  splitFloor.rotation.x = -Math.PI / 2
+  splitFloor.position.y = -SPLIT_S_TARGET_HEIGHT_M + 0.025
+  splitField.add(splitFloor)
+  for (const [side, x] of [['left', -5], ['right', 5]] as const) {
+    const points = Array.from({ length: 49 }, (_, index) => {
+      const angle = index / 48 * Math.PI
+      return new THREE.Vector3(x, 6 * Math.cos(angle) - 6, -24 - 6 * Math.sin(angle))
+    })
+    const outline = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(points),
+      new THREE.LineDashedMaterial({ color: 0x8abac4, transparent: true, opacity: 0.5, dashSize: 0.8, gapSize: 0.7, depthWrite: false }),
+    )
+    outline.name = `split-outline-${side}`
+    outline.computeLineDistances()
+    splitField.add(outline)
+  }
+  const splitHeightPoles = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([-7, 7].flatMap((x) => [
+      new THREE.Vector3(x, -SPLIT_S_TARGET_HEIGHT_M, -24), new THREE.Vector3(x, 1, -24),
+      ...[SPLIT_S_MIN_HEIGHT_M - SPLIT_S_TARGET_HEIGHT_M, -12, 0].flatMap((y) => [
+        new THREE.Vector3(x - 0.5, y, -24), new THREE.Vector3(x + 0.5, y, -24),
+      ]),
+    ])),
+    new THREE.LineBasicMaterial({ color: 0x8abac4, transparent: true, opacity: 0.45, depthWrite: false }),
+  )
+  splitHeightPoles.name = 'split-height-poles'
+  splitField.add(splitHeightPoles)
+  const splitEntryBand = new THREE.LineLoop(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-6, 0, -20), new THREE.Vector3(-6, 0, -28),
+      new THREE.Vector3(6, 0, -28), new THREE.Vector3(6, 0, -20),
+    ]),
+    new THREE.LineDashedMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.55, dashSize: 0.7, gapSize: 0.6, depthWrite: false }),
+  )
+  splitEntryBand.name = 'split-entry-height-band'
+  splitEntryBand.computeLineDistances()
+  splitField.add(splitEntryBand)
+  const splitExit = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, -12, -24), new THREE.Vector3(0, -12, -12),
+      new THREE.Vector3(-1, -12, -14), new THREE.Vector3(0, -12, -12),
+      new THREE.Vector3(1, -12, -14), new THREE.Vector3(0, -12, -12),
+    ]),
+    new THREE.LineBasicMaterial({ color: 0xb8f36b, transparent: true, opacity: 0.55, depthWrite: false }),
+  )
+  splitExit.name = 'split-reversed-exit'
+  splitField.add(splitExit)
+  const splitAccent = new THREE.Group()
+  splitAccent.name = 'split-stage-guidance'
+  splitAccent.position.set(0, -SPLIT_S_TARGET_HEIGHT_M + 0.1, 0)
+  const splitStageMaterial = new THREE.LineBasicMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.95, depthWrite: false })
+  const splitStageReference = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-5, 0, 0), new THREE.Vector3(5, 0, 0),
+      new THREE.Vector3(-5, -0.5, 0), new THREE.Vector3(-5, 0.5, 0),
+      new THREE.Vector3(5, -0.5, 0), new THREE.Vector3(5, 0.5, 0),
+      new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -2),
+      new THREE.Vector3(-0.6, 0, -1), new THREE.Vector3(0, 0, -2),
+      new THREE.Vector3(0.6, 0, -1), new THREE.Vector3(0, 0, -2),
+    ]), splitStageMaterial,
+  )
+  splitStageReference.name = 'split-stage-reference'
+  splitAccent.add(splitStageReference)
+  splitField.add(splitAccent)
+  scene.add(splitField)
+  const splitReference: FlightSceneReference = {
+    id: 'split-zone', kind: 'zone', object: splitField,
+    positionM: { x: field.launch.x, y: config.ground.heightM + SPLIT_S_TARGET_HEIGHT_M, z: field.launch.z },
+    sizeM: { x: SPLIT_S_AREA_RADIUS_M * 2, y: SPLIT_S_TARGET_HEIGHT_M - SPLIT_S_MIN_HEIGHT_M, z: SPLIT_S_AREA_RADIUS_M * 2 },
+  }
+
   const landingSurface: FlightSceneReference = { id: 'landing-surface', kind: 'zone', object: landingTarget, positionM: { ...field.landing }, sizeM: { x: LANDING_ZONE_RADIUS_M * 2, y: 0, z: LANDING_ZONE_RADIUS_M * 2 } }
   const launchReference: FlightSceneReference = { id: 'training-launch', kind: 'pad', object: takeoffPad, positionM: { ...field.launch } }
-  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, recoveryReference, rollReference, flipReference, loopReference]
+  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, recoveryReference, rollReference, flipReference, loopReference, splitReference]
   const referenceById = new Map(sceneReferences.map((reference) => [reference.id, reference]))
 
   const drone = createQuadVisual()
@@ -1078,7 +1163,8 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     rollField.visible = lessonId === 'full-roll'
     flipField.visible = ['full-flip', 'front-flip', 'back-flip'].includes(lessonId ?? '')
     loopField.visible = lessonId === 'power-loop'
-    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop'].includes(lessonId ?? '')
+    splitField.visible = lessonId === 'split-s'
+    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s'].includes(lessonId ?? '')
     for (const reference of referenceSet.contract) {
       reference.object.visible = !beginner
     }
@@ -1152,6 +1238,22 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     loopAccent.position.set(0, y, z)
   }
 
+  const setSplitSStage = (stage: number | null): void => {
+    if (stage === null || !Number.isInteger(stage) || stage < 0 || stage > 8) {
+      splitAccent.visible = false
+      return
+    }
+    splitAccent.visible = true
+    splitStageMaterial.color.set(stage >= 7 ? 0xb8f36b : stage >= 3 ? 0xffc978 : 0x45d7f7)
+    const [y, z] = stage === 0 ? [-SPLIT_S_TARGET_HEIGHT_M + 0.1, 0]
+      : stage <= 3 ? [0, -24]
+        : stage === 4 ? [-6, -30]
+          : stage === 5 ? [-12, -24]
+            : stage === 6 ? [-12, -19] : [-12, -14]
+    splitAccent.position.set(0, y, z)
+    splitAccent.rotation.y = stage >= 5 ? Math.PI : 0
+  }
+
   const setPath = (line: THREE.Line, path: readonly Vector3[], yOffset: number): void => {
     const maximumPoints = 1_200
     const stride = Math.max(1, Math.ceil(path.length / maximumPoints))
@@ -1201,6 +1303,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     setFullRollStage,
     setFullFlipStage,
     setPowerLoopStage,
+    setSplitSStage,
     setTrainingPath,
     setReplayPath,
     dispose: () => disposeFlightScene(scene),

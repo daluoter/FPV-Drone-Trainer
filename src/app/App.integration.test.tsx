@@ -309,6 +309,7 @@ describe('integrated training/runtime UI boundaries', () => {
     { lessonId: 'front-flip', code: 'L11', steps: 6, nextCode: 'L12' },
     { lessonId: 'back-flip', code: 'L12', steps: 6, nextCode: 'L13' },
     { lessonId: 'power-loop', code: 'L13', steps: 8, nextCode: 'L14' },
+    { lessonId: 'split-s', code: 'L14', steps: 8, nextCode: 'L15' },
   ] as const)('records an ordered $code result once and restores its current-rule progress after reload', ({ lessonId, steps, nextCode }) => {
     const { unmount } = render(<App />)
     const training = trainingSection()
@@ -342,9 +343,10 @@ describe('integrated training/runtime UI boundaries', () => {
     expect(within(training).getByText(`${steps} / ${steps} 個步驟完成`)).toBeInTheDocument()
     expect(persistedAttempts(lessonId)).toBe(1)
     expect(persistedAttempts('landing')).toBe(0)
-    if (lessonId === 'power-loop') {
+    if (lessonId === 'power-loop' || lessonId === 'split-s') {
       expect(persistedAttempts('front-flip')).toBe(0)
       expect(persistedAttempts('back-flip')).toBe(0)
+      if (lessonId === 'split-s') expect(persistedAttempts('power-loop')).toBe(0)
     }
     expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
     expect(within(training).getByRole('button', { name: new RegExp(`^下一課：${nextCode}`) })).toBeEnabled()

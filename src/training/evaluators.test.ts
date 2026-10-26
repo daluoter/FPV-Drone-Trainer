@@ -30,7 +30,15 @@ const legacyTurn: LessonDefinition = {
   scoring: { maxScore: 100, minimumPassingScore: 70, minimumActiveSeconds: 2, metricLabels: ['headingChangeDegrees', 'routeCorridorErrorM'] },
   evaluator: { evaluate: evaluateCoordinatedTurn },
 }
-const prototypeLessons = DEFAULT_LESSONS.map((lesson) => lesson.id === legacyTurn.id ? legacyTurn : lesson)
+// Retain explicit historical criteria for the old airborne five-stage evaluator.
+const legacySplitS: LessonDefinition = {
+  ...DEFAULT_LESSONS.find((lesson) => lesson.id === 'split-s')!,
+  setup: { requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: ['split-s-reference'], spawnPositionM: { x: 0, y: 25, z: 0 } },
+  checkpoints: ['entry', 'inverted', 'descent', 'reversed', 'recovered'].map((id) => ({ id, title: id, description: id })),
+  scoring: { maxScore: 100, minimumPassingScore: 70, minimumActiveSeconds: 2, metricLabels: [] },
+  evaluator: { evaluate: evaluateSplitS },
+}
+const prototypeLessons = DEFAULT_LESSONS.map((lesson) => lesson.id === legacyTurn.id ? legacyTurn : lesson.id === legacySplitS.id ? legacySplitS : lesson)
 
 function context(lessonId: string, overrides: Partial<TrainingEvaluationContext> = {}): TrainingEvaluationContext {
   return {

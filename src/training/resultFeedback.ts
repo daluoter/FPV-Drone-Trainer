@@ -13,7 +13,7 @@ import {
   BASIC_RECOVERY_DRIFT_STOP_MPS as RECOVERY_DRIFT_STOP,
   BASIC_RECOVERY_DRIFT_VERTICAL_MPS as RECOVERY_DRIFT_VERTICAL,
 } from './basicRecovery'
-import { basicRecoveryStageLabel, coordinatedTurnTargetLabel, directionControlTargetLabel, figureEightTargetLabel, fullFlipInterruptionReason, fullRollInterruptionReason, powerLoopInterruptionReason, powerLoopStageLabel, squareRouteTargetLabel, trainingHint, trainingObjective, wideGateCollisionCause } from './feedback'
+import { basicRecoveryStageLabel, coordinatedTurnTargetLabel, directionControlTargetLabel, figureEightTargetLabel, fullFlipInterruptionReason, fullRollInterruptionReason, powerLoopInterruptionReason, powerLoopStageLabel, splitSInterruptionReason, splitSStageLabel, squareRouteTargetLabel, trainingHint, trainingObjective, wideGateCollisionCause } from './feedback'
 import { LANDING_LIFTOFF_HEIGHT_M, LANDING_ZONE_RADIUS_M } from './landing'
 import { TAKEOFF_SETTLED_DWELL_SECONDS } from './takeoff'
 import {
@@ -185,6 +185,66 @@ function fullRollResultFeedback(result: TrainingResult, scope: string): Training
     : '下次選左或右的同一方向連續橫滾，實際通過倒置並完成一圈後，再停止旋轉、修回正飛；先保留足夠高度。'
   return { observedStrength: strength, observedGap: `${ended}完整橫滾尚未完成。${observation}`,
     nextPractice: `${restart}${action}`, scopeNote: scope }
+}
+
+function splitSResultFeedback(result: TrainingResult, scope: string): TrainingResultFeedback | null {
+  if (result.lessonId !== 'split-s') return null
+  // Earlier airborne five-step results retain their historical meaning. They
+  // cannot be relabeled as evidence of the new ground-start eight-step course.
+  if (result.attemptContext?.rulesVersion !== 6 && !Number.isFinite(result.metrics.splitPhase)) return null
+  const restart = '本次練習已結束；按「再練一次」會清空本次步驟，從地面重新開始。'
+  const message = result.message ?? ''
+  const timedOut = /逾時|timed out|timeout/iu.test(message)
+  if (result.outcome !== 'SUCCESS') {
+    if (/墜毀|撞擊|crash|impact|Obstacle collision:/iu.test(message)) return {
+      observedStrength: null, observedGap: '本次發生墜毀，翻轉下降與空中改出尚未完成。',
+      nextPractice: `先重設場景。${restart}下次取得約 25 m 進場高度，下降時提早拉平、補油止降。`, scopeNote: scope,
+    }
+    if (/解除解鎖|上鎖|失焦|失去焦點|斷線|disarm|focus|disconnect/iu.test(message)) return {
+      observedStrength: null, observedGap: '本次因解除解鎖、失去焦點或連線中斷而停止，不能據此判定翻轉下降操控表現。',
+      nextPractice: `${restart}確認畫面與控制器就緒，倒數後再明確解鎖。`, scopeNote: scope,
+    }
+    if (/無效|資料中斷|時間倒退|跳躍|缺少有效|不一致|重設|invalid|non-finite|telemetry.*gap|reset|rewind/iu.test(message)) return {
+      observedStrength: null, observedGap: '本次飛行資料無效、中斷或被重設，無法判定連續的翻轉下降航跡。',
+      nextPractice: `${restart}保持網頁在前景，依序完成橫滾倒置、下降半迴圈與反向改出。`, scopeNote: scope,
+    }
+  }
+  if (!Number.isFinite(result.sampleCount) || result.sampleCount <= 0) return {
+    observedStrength: null, observedGap: '本次沒有有效的已解鎖飛行樣本，無法判定翻轉下降表現。',
+    nextPractice: `${restart}確認畫面與控制器就緒，再明確解鎖自行起飛。`, scopeNote: scope,
+  }
+  const metrics = result.metrics
+  let phase = Number.isInteger(metrics.splitPhase) && metrics.splitPhase >= 0 && metrics.splitPhase <= 8 ? metrics.splitPhase : null
+  const valid = metrics.splitEpisodeValid > 0.5 && !(metrics.splitInterrupted > 0.5)
+  if (valid && phase !== null && phase >= 3 && phase < 8) phase = !(metrics.splitInverted > 0.5) ? 3
+    : !(metrics.splitDescended > 0.5) ? 4 : !(metrics.splitReversed > 0.5) ? 5 : !(metrics.splitCompleted > 0.5) ? 6 : 7
+  const proof = metrics.splitCompleted > 0.5 && metrics.splitInverted > 0.5 && metrics.splitDescended > 0.5
+    && metrics.splitReversed > 0.5 && metrics.splitHeightLossM >= 3 && metrics.splitReverseTravelM >= 1.5
+  if (result.outcome === 'SUCCESS' && phase === 8 && result.completedCheckpoints === 8 && valid && proof) return {
+    observedStrength: '本次已從地面自行起飛，依序橫滾倒置、走出下降半迴圈，反轉實際飛行方向並恢復正飛控制。', observedGap: null,
+    nextPractice: '以相同條件再練一次，觀察進場高度、倒置後油門、持續後拉與提早改出的配合；不需要回原點或降落。', scopeNote: scope,
+  }
+  const ended = timedOut ? '本次挑戰逾時；' : ''
+  if (phase === null || phase === 8) return {
+    observedStrength: null, observedGap: `${ended}翻轉下降的連續分段或實際反向航跡證據不足，不能只以完成標記判定通過。`,
+    nextPractice: `${restart}先取得高度與前速，再依序橫滾倒置、後拉下降及反向改出。`, scopeNote: scope,
+  }
+  let observation: string
+  if (!valid && metrics.splitInterrupted > 0.5) observation = `先前這一段已中斷；${splitSInterruptionReason(metrics) ?? ''}舊倒置與下降標記不能代替新的一整段。`
+  else if (phase <= 1) observation = '尚未從地面自行起飛並取得足夠進場高度。'
+  else if (phase === 2) observation = `尚未建立有效前速${Number.isFinite(metrics.splitForwardSpeedMps) ? `，結束時沿原進場方向速度為 ${metrics.splitForwardSpeedMps.toFixed(1)} m/s` : ''}；至少需 3 m/s，再開始橫滾倒置。`
+  else if (phase === 3) observation = `尚未以橫滾完成倒置${Number.isFinite(metrics.splitRollProgressDegrees) ? `，本段橫滾約 ${metrics.splitRollProgressDegrees.toFixed(1)}°` : ''}；直接前後翻不能代替。`
+  else if (phase === 4) observation = `已進入倒置階段，尚未完成實際下降半迴圈${Number.isFinite(metrics.splitHeightLossM) ? `；本段下降 ${metrics.splitHeightLossM.toFixed(1)} m，至少需 3 m` : ''}。`
+  else if (phase === 5) observation = `尚未反轉實際飛行方向${Number.isFinite(metrics.splitReverseTravelM) ? `；反向行程 ${metrics.splitReverseTravelM.toFixed(1)} m，至少需 1.5 m` : ''}；只轉機頭不算向來路改出。`
+  else if (phase === 6) observation = '已觀察到反向飛行，尚未完成正飛改出；需沿同一後拉方向接回水平，不以再次橫滾回平代替下降半迴圈。'
+  else observation = trainingObjective('split-s', { metrics })?.detail ?? '已改出，尚未完成空中恢復確認。'
+  const strength = valid && metrics.splitCompleted > 0.5 && phase >= 7 ? '本次已觀察到這一段的下降半迴圈與反向正飛改出，尚待確認空中恢復。'
+    : valid && metrics.splitInverted > 0.5 && metrics.splitDescended > 0.5 && phase >= 5 ? '本次已觀察到這一段的實際橫滾倒置與下降。'
+      : phase >= 2 ? '本次已觀察到從地面自行起飛並取得進場高度。' : null
+  return {
+    observedStrength: strength, observedGap: `${ended}尚未完成「${splitSStageLabel(phase)}」。${observation}`,
+    nextPractice: `${restart}${valid && phase >= 7 ? '下次接近正飛時提早回中減緩旋轉，主動拉平並調整油門止降；回中不會自動回平。' : '先留出下方空間，建立前速，橫滾至倒置後持續後拉，真正下降並向來路方向改出。'}`, scopeNote: scope,
+  }
 }
 
 function powerLoopResultFeedback(result: TrainingResult, scope: string): TrainingResultFeedback | null {
@@ -964,6 +1024,8 @@ function phaseProgress(result: TrainingResult): { observedGap: string; nextPract
 /** Final-sample observations and checkpoint facts, never inferred causes or a claim about the whole flight. */
 export function summarizeTrainingResult(result: TrainingResult): TrainingResultFeedback {
   const scope = scopeNote(result)
+  const split = splitSResultFeedback(result, scope)
+  if (split) return split
   const loop = powerLoopResultFeedback(result, scope)
   if (loop) return loop
   const flip = fullFlipResultFeedback(result, scope)

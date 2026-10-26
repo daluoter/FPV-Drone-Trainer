@@ -49,7 +49,7 @@ describe('lesson catalog', () => {
     expect(DEFAULT_LESSONS.map((lesson) => lesson.setup.sceneReferenceIds)).toEqual([
       ['takeoff-pad', 'hover-zone'],
       ['training-launch', 'landing-surface'],
-      ['split-s-reference'],
+      ['training-launch', 'landing-surface', 'split-zone'],
       ['takeoff-pad', 'orbit-poi'],
       ['takeoff-pad'],
       ['training-launch', 'landing-surface'],
@@ -109,16 +109,12 @@ describe('lesson catalog', () => {
     expect(takeoff.scoring.minimumPassingScore).toBe(70)
   })
 
-  it('keeps the Split-S request elevated and every setup disarmed/reset-only', () => {
-    const splitS = DEFAULT_LESSONS.find((lesson) => lesson.id === 'split-s')
-    expect(splitS?.setup.spawnPositionM).toEqual({ x: 0, y: 25, z: 0 })
-    expect(splitS?.setup.spawnOrientation).toEqual({ x: 0, y: 0, z: 0, w: 1 })
-    expect(splitS?.checkpoints.map((checkpoint) => checkpoint.id)).toEqual([
-      'entry',
-      'inverted',
-      'descent',
-      'reversed',
-      'recovered',
+  it('starts L14 on real ground with eight stages and keeps every setup disarmed/reset-only', () => {
+    const splitS = lessonById('split-s')!
+    expect(splitS.setup.spawnPositionM).toBeUndefined()
+    expect(splitS.setup.spawnOrientation).toEqual({ x: 0, y: 0, z: 0, w: 1 })
+    expect(splitS.checkpoints.map(({ id }) => id)).toEqual([
+      'split-ground', 'split-liftoff', 'split-entry', 'split-inverted', 'split-descent', 'split-reversed', 'split-upright', 'split-recovered',
     ])
     expect(DEFAULT_LESSONS.every((lesson) => lesson.setup.requiresDisarmed && lesson.setup.resetSimulation)).toBe(true)
   })

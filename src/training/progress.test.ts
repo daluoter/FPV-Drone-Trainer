@@ -61,6 +61,42 @@ function context(overrides: Partial<TrainingAttemptContext> = {}): TrainingAttem
 }
 
 describe('training progress persistence', () => {
+  it('keeps airborne split-s rule-4 history separate from the ground-start rule-6 course', () => {
+    const storage = new MemoryStorage()
+    const store = new TrainingProgressStore(storage)
+    const previous = context({ rulesVersion: 4, mode: 'practice' })
+    const current = { ...previous, rulesVersion: 6 } as const
+    expect(store.recordResult(result({ lessonId: 'split-s', sessionId: 'split-s:airborne-prototype',
+      attemptContext: previous, completedCheckpoints: 5, totalCheckpoints: 5,
+      metrics: { entryAltitudeM: 25, headingChangeDegrees: 180 } })).saved).toBe(true)
+    expect(store.recordResult(result({ lessonId: 'orbit', sessionId: 'orbit:historical', attemptContext: previous })).saved).toBe(true)
+    const previousKey = trainingAttemptContextKey(previous)
+    const previousRaw = storage.getItem(previousKey)
+    const empty = { recent: null, best: null, completed: false, attempts: 0 }
+    expect(new TrainingProgressStore(storage).loadCurrent(current).progress.lessons['split-s']).toEqual(empty)
+    expect(new TrainingProgressStore(storage).load(previous).progress.lessons['split-s']).toMatchObject({
+      completed: true, attempts: 1, best: { sessionId: 'split-s:airborne-prototype', totalCheckpoints: 5 },
+    })
+    expect(storage.getItem(previousKey)).toBe(previousRaw)
+    expect(store.recordResult(result({ lessonId: 'split-s', sessionId: 'split-s:new-retry', attemptContext: current,
+      outcome: 'FAILED', score: 0, completedCheckpoints: 4, totalCheckpoints: 8, metrics: { splitPhase: 4 } })).saved).toBe(true)
+    expect(new TrainingProgressStore(storage).loadCurrent(current).progress.lessons['split-s']).toMatchObject({
+      completed: false, attempts: 1, best: null, recent: { sessionId: 'split-s:new-retry', totalCheckpoints: 8 },
+    })
+    expect(store.recordResult(result({ lessonId: 'split-s', sessionId: 'split-s:ground-start-complete', attemptContext: current,
+      completedCheckpoints: 8, totalCheckpoints: 8, metrics: { splitPhase: 8, splitHeightLossM: 12, splitHeadingChangeDegrees: 180 } })).saved).toBe(true)
+    const reloaded = new TrainingProgressStore(storage).loadCurrent(current)
+    expect(reloaded.errors).toEqual([])
+    expect(reloaded.progress.lessons['split-s']).toMatchObject({ completed: true, attempts: 2,
+      best: { sessionId: 'split-s:ground-start-complete', totalCheckpoints: 8, metrics: { splitPhase: 8 } } })
+    expect(reloaded.progress.lessons.orbit).toMatchObject({ completed: true, attempts: 1, best: { sessionId: 'orbit:historical' } })
+    expect(reloaded.progress.lessons['power-loop']).toEqual(empty)
+    expect(storage.getItem(previousKey)).toBe(previousRaw)
+    for (const variant of [{ ...current, mode: 'challenge' as const }, { ...current, inputSource: 'keyboard' as const }]) {
+      expect(new TrainingProgressStore(storage).loadCurrent(variant).progress.lessons['split-s']).toEqual(empty)
+    }
+  })
+
   it('adds an independent L13 record without crediting old L13 orbit or L12 back flips', () => {
     const storage = new MemoryStorage()
     const scope = context({ rulesVersion: 6, mode: 'practice' })
@@ -120,7 +156,8 @@ describe('training progress persistence', () => {
     expect(active.find(({ id }) => id === 'takeoff')).toMatchObject({ code: 'L01', progress: { completed: true, attempts: 2 } })
     expect(active.find(({ id }) => id === 'straight-line')).toMatchObject({ code: 'L02', progress: { best: { sessionId: 'old-L03:passed' } } })
     expect(active.find(({ id }) => id === 'basic-recovery')).toMatchObject({ code: 'L09', progress: { best: { sessionId: 'old-L10:passed' } } })
-    expect(active.find(({ id }) => id === 'split-s')).toMatchObject({ code: 'L14', progress: { best: { sessionId: 'old-L12:passed' } } })
+    expect(active.find(({ id }) => id === 'split-s')).toMatchObject({ code: 'L14', progress: { completed: false, attempts: 0, best: null } })
+    expect(store.load(baseline).progress.lessons['split-s']).toMatchObject({ completed: true, best: { sessionId: 'old-L12:passed' } })
     expect(active.find(({ id }) => id === 'orbit')).toMatchObject({ code: 'L15', progress: { best: { sessionId: 'old-L13:passed' } } })
     expect(loaded.progress.lessons['full-roll']).toMatchObject({ completed: false, attempts: 0, best: null })
     expect(keys.map((key) => storage.getItem(key))).toEqual(original)

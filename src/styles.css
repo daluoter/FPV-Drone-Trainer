@@ -2784,6 +2784,10 @@ h1 em {
 .school-demo-bar > span { color: var(--muted); }
 .school-demo-toolbar { gap: 4px; }
 .school-demo-toolbar .lab-button { padding-inline: 5px; }
+@media (min-width: 1101px) {
+  .school-demo-toolbar { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: thin; padding-bottom: 8px; }
+  .school-demo-toolbar > strong, .school-demo-toolbar > .lab-button, .school-demo-toolbar > span { flex-shrink: 0; white-space: nowrap; }
+}
 @media (max-width: 1400px) { .school-demo-toolbar > span { display: none; } }
 .school-flight .free-flight-layout { display: grid; grid-template-columns: 280px minmax(320px, 1fr) 180px; align-items: start; gap: 14px; }
 .school-flight:not(.has-lessons) .free-flight-layout { grid-template-columns: minmax(320px, 1fr) 200px; }

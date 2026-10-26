@@ -13,7 +13,7 @@ describe('reference-relative training setup', () => {
       { id: 'takeoff-pad', kind: 'pad', positionM: { x: 6, y: 5.5, z: -3 } },
       { id: 'training-launch', kind: 'pad', positionM: { x: 6, y: 5.05, z: -3 } },
     ]
-    for (const lessonId of ['landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop']) {
+    for (const lessonId of ['landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s']) {
       const original = requestFor(lessonId)
       const before = JSON.stringify(original)
       expect(prepareTrainingSetup(original, references)?.setup.spawnPositionM).toEqual({ x: 6, y: 5.05, z: -3 })
@@ -35,12 +35,6 @@ describe('reference-relative training setup', () => {
     expect(JSON.stringify(request)).toBe(original)
     expect(prepareTrainingSetup(request, references.slice(0, 1))).toBe(request)
     expect(prepareTrainingSetup(request, references.slice(1))).toBe(request)
-  })
-
-  it('preserves Split-S recovery clearance above a raised configured ground', () => {
-    expect(prepareTrainingSetup(requestFor('split-s'), [
-      { id: 'landing-surface', kind: 'zone', positionM: { x: 0, y: 30, z: 0 } },
-    ])?.setup.spawnPositionM).toEqual({ x: 0, y: 55, z: 0 })
   })
 
   it('leaves default reset requests alone and waits for missing references', () => {
