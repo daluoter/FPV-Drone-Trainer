@@ -58,6 +58,140 @@ function attemptUnload(): Event {
   return event
 }
 
+function cameraPointer(canvas: HTMLElement, type: string, x: number, y: number, button = 0, shiftKey = false): void {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y,
+    button, buttons: type === 'pointerup' || type === 'pointercancel' ? 0 : button === 2 ? 2 : 1, shiftKey })
+  Object.defineProperty(event, 'pointerId', { value: 1 })
+  Object.defineProperty(event, 'pointerType', { value: 'mouse' })
+  fireEvent(canvas, event)
+}
+
+describe('interactive free camera', () => {
+  it('orbits, pans and zooms the view while preserving live drone state, input and learning results', () => {
+    window.localStorage.clear()
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('控制方式'), { target: { value: 'keyboard' } })
+    frame(0)
+    const canvas = screen.getByLabelText('Free Flight 3D scene')
+    const renderer = frames.renderer!
+    const runtime = frames.runtime!
+    const state = JSON.stringify(runtime.simulation.getState())
+    const saved = Object.fromEntries(Object.entries(window.localStorage))
+    fireEvent.click(screen.getByRole('button', { name: 'Free / debug' }))
+    expect(canvas).toHaveAttribute('tabindex', '0')
+    expect(screen.getByLabelText('自由鏡頭操作')).toBeVisible()
+    canvas.focus()
+    const initial = renderer.getFreeCameraState()
+    cameraPointer(canvas, 'pointerdown', 100, 100)
+    cameraPointer(canvas, 'pointermove', 150, 120)
+    cameraPointer(canvas, 'pointerup', 150, 120)
+    const orbited = renderer.getFreeCameraState()
+    expect(orbited.positionM).not.toEqual(initial.positionM)
+    expect(orbited.targetM).toEqual(initial.targetM)
+    cameraPointer(canvas, 'pointerdown', 100, 100, 2)
+    cameraPointer(canvas, 'pointermove', 140, 125, 2)
+    cameraPointer(canvas, 'pointerup', 140, 125, 2)
+    const panned = renderer.getFreeCameraState()
+    expect(panned.targetM).not.toEqual(orbited.targetM)
+    fireEvent.wheel(canvas, { deltaY: -120, cancelable: true })
+    expect(renderer.getFreeCameraState().distanceM).toBeLessThan(panned.distanceM)
+    expect(JSON.stringify(runtime.simulation.getState())).toBe(state)
+    expect(runtime.keyboard.getInput()).toEqual({ roll: 0, pitch: 0, yaw: 0, throttle: 0 })
+    expect(Object.fromEntries(Object.entries(window.localStorage))).toEqual(saved)
+    fireEvent.click(screen.getByRole('button', { name: '定位飛機' }))
+    expect(renderer.getFreeCameraState().targetM).toEqual(runtime.simulation.getState().positionM)
+    fireEvent.click(screen.getByRole('button', { name: 'FPV' }))
+    expect(screen.queryByLabelText('自由鏡頭操作')).not.toBeInTheDocument()
+    const inactive = renderer.getFreeCameraState()
+    cameraPointer(canvas, 'pointerdown', 100, 100)
+    cameraPointer(canvas, 'pointermove', 180, 150)
+    cameraPointer(canvas, 'pointerup', 180, 150)
+    fireEvent.wheel(canvas, { deltaY: -120, cancelable: true })
+    expect(renderer.getFreeCameraState()).toEqual(inactive)
+  })
+
+  it('moves with focused camera keys and releases held motion on blur or mode exit without driving the drone', () => {
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => frames.now)
+    try {
+      render(<FreeFlight poller={createBrowserGamepadPoller()} profile={null} settings={createDefaultTuningSettings()} />)
+      fireEvent.change(screen.getByLabelText('控制方式'), { target: { value: 'keyboard' } })
+      frame(0)
+      const canvas = screen.getByLabelText('Free Flight 3D scene')
+      const renderer = frames.renderer!
+      const runtime = frames.runtime!
+      fireEvent.click(screen.getByRole('button', { name: 'Free / debug' }))
+      canvas.focus()
+      const initial = renderer.getFreeCameraState()
+      fireEvent.keyDown(canvas, { key: 'ArrowRight' })
+      frame(100)
+      expect(renderer.getFreeCameraState().targetM).not.toEqual(initial.targetM)
+      expect(runtime.keyboard.getInput()).toEqual({ roll: 0, pitch: 0, yaw: 0, throttle: 0 })
+      expect(runtime.getTelemetry().armed).toBe(false)
+      expect(runtime.simulation.getState().positionM).toEqual({ x: 0, y: expect.any(Number), z: 0 })
+      canvas.blur()
+      const blurred = renderer.getFreeCameraState()
+      frame(200)
+      expect(renderer.getFreeCameraState()).toEqual(blurred)
+      canvas.focus()
+      fireEvent.keyDown(canvas, { key: 'PageUp' })
+      frame(300)
+      fireEvent.click(screen.getByRole('button', { name: 'Chase' }))
+      const switched = renderer.getFreeCameraState()
+      frame(400)
+      fireEvent.keyUp(window, { key: 'PageUp' })
+      fireEvent.click(screen.getByRole('button', { name: 'Free / debug' }))
+      frame(500)
+      expect(renderer.getFreeCameraState()).toEqual(switched)
+      expect(runtime.keyboard.consumeResetRequest()).toBe(false)
+    } finally { clock.mockRestore() }
+  })
+
+  it('reframes the paused replay ghost and changes only its camera while preserving playback, live state and saved results', () => {
+    window.localStorage.clear()
+    render(<App />)
+    frame(0)
+    const canvas = screen.getByLabelText('Free Flight 3D scene')
+    const renderer = frames.renderer!
+    const runtime = frames.runtime!
+    const stored = () => Object.fromEntries(Object.entries(window.localStorage).filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.')))
+    const before = stored()
+    fireEvent.click(screen.getByRole('button', { name: 'L13 大迴旋示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    const playback = runtime.getReplayPlayback()!
+    fireEvent.change(screen.getByRole('slider'), { target: { value: playback.durationSeconds } })
+    const ghost = playback.getGhostState()!
+    const live = JSON.stringify(runtime.simulation.getState())
+    const time = playback.getState().currentTimeSeconds
+    const progress = screen.getByRole('region', { name: '示範進度' }).textContent
+    fireEvent.click(screen.getByRole('button', { name: 'Free / debug' }))
+    expect(renderer.getFreeCameraState().targetM).toEqual(ghost.positionM)
+    canvas.focus()
+    cameraPointer(canvas, 'pointerdown', 100, 100)
+    cameraPointer(canvas, 'pointermove', 145, 115)
+    cameraPointer(canvas, 'pointercancel', 145, 115)
+    const cancelled = renderer.getFreeCameraState()
+    cameraPointer(canvas, 'pointermove', 190, 150)
+    expect(renderer.getFreeCameraState()).toEqual(cancelled)
+    fireEvent.wheel(canvas, { deltaY: -120, cancelable: true })
+    fireEvent.keyDown(canvas, { key: 'Home' })
+    fireEvent.keyUp(canvas, { key: 'Home' })
+    expect(renderer.getFreeCameraState().targetM).toEqual(ghost.positionM)
+    frame(200)
+    expect(playback.isPlaying()).toBe(false)
+    expect(playback.getState().currentTimeSeconds).toBe(time)
+    expect(screen.getByRole('region', { name: '示範進度' }).textContent).toBe(progress)
+    expect(JSON.stringify(runtime.simulation.getState())).toBe(live)
+    expect(stored()).toEqual(before)
+    fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
+    frame(300)
+    fireEvent.click(screen.getByRole('button', { name: '定位飛機' }))
+    expect(renderer.getFreeCameraState().targetM).toEqual(runtime.simulation.getState().positionM)
+    expect(renderer.getFreeCameraState().targetM).not.toEqual(ghost.positionM)
+    expect(runtime.getTelemetry().armed).toBe(false)
+    expect(stored()).toEqual(before)
+  })
+})
+
 describe('Free Flight native navigation confirmation', () => {
   it('keeps the L14 roll-then-dive movie and its measured eight steps separate from live training', () => {
     window.localStorage.clear()

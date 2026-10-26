@@ -412,6 +412,7 @@ export default function FreeFlight({
 
   useEffect(() => {
     runtimeRef.current?.setCameraMode(cameraMode)
+    if (cameraMode === 'free') canvasRef.current?.focus({ preventScroll: true })
   }, [cameraMode])
 
   const retryRendering = (): void => {
@@ -638,7 +639,8 @@ export default function FreeFlight({
             <span>結束後回到練習，仍需自行解鎖。</span>
           </div>}
           <div className={`free-flight-viewport${showMotionHud ? ' has-recovery-hud' : ''}`} role="group" aria-label="Three.js Free Flight simulation viewport">
-            <canvas key={rendererRetryKey} ref={canvasRef} className="flight-canvas" aria-label="Free Flight 3D scene" />
+            <canvas key={rendererRetryKey} ref={canvasRef} className={`flight-canvas${cameraMode === 'free' ? ' is-free-camera' : ''}`} aria-label="Free Flight 3D scene"
+              tabIndex={cameraMode === 'free' ? 0 : -1} aria-describedby={cameraMode === 'free' ? 'free-camera-help' : undefined} />
             <div className="flight-viewport-overlay" aria-hidden="true">
               <span>{telemetry?.replay.active ? 'PLAYBACK GHOST' : 'LIVE SIM'} / {telemetry?.cameraMode?.toUpperCase() ?? 'FPV'}</span>
               <span>{format(telemetry?.metrics.fps, 0)} FPS · {format(telemetry?.metrics.simHz, 0)} SIM HZ</span>
@@ -758,6 +760,15 @@ export default function FreeFlight({
               </button>
             </div>
           </div>
+          {cameraMode === 'free' && <div className="free-camera-help" id="free-camera-help" role="group" aria-label="自由鏡頭操作">
+            <div><strong>自由鏡頭</strong><button className="lab-button lab-button-small" type="button" disabled={renderingState !== 'ready'} onClick={() => {
+              rendererRef.current?.focusFreeCamera?.()
+              canvasRef.current?.focus({ preventScroll: true })
+            }}>定位飛機</button></div>
+            <p>左鍵拖曳旋轉 · 右鍵或 Shift＋左鍵拖曳平移 · 滾輪拉近／拉遠。</p>
+            <p>點選 3D 畫面後：方向鍵前後左右移動，Page Up／Down 升降，Shift＋方向鍵旋轉，＋／－拉近拉遠，Home 定位飛機。</p>
+            <small>鏡頭操作不改變飛機；選用鍵盤飛行時，WASD、Q／E、R／F、X 仍是飛行及重設按鍵。</small>
+          </div>}
           {visibleResultReplay && <section className="school-result-replay" aria-label="本次結果回放">
             <strong>本次結果回放</strong>
             <p>點選步驟查看該次錄影，會停止目前飛行並暫停在標記位置。重新整理會清除錄影。</p>

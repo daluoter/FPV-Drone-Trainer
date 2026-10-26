@@ -21,6 +21,144 @@ function createRendererStub(): THREE.WebGLRenderer {
   } as unknown as THREE.WebGLRenderer
 }
 
+describe('interactive free camera renderer integration', () => {
+  function viewport(): HTMLCanvasElement {
+    const canvas = document.createElement('canvas')
+    canvas.tabIndex = 0
+    document.body.appendChild(canvas)
+    return canvas
+  }
+  function pointer(canvas: HTMLCanvasElement, type: string, x: number, y: number): void {
+    const event = new MouseEvent(type, { button: 0, clientX: x, clientY: y, bubbles: true, cancelable: true })
+    Object.defineProperty(event, 'pointerId', { value: 1 })
+    canvas.dispatchEvent(event)
+  }
+  function drag(canvas: HTMLCanvasElement): void {
+    pointer(canvas, 'pointerdown', 10, 10)
+    pointer(canvas, 'pointermove', 90, 30)
+    pointer(canvas, 'pointerup', 90, 30)
+  }
+  it('frames the current live drone, preserves exploration across camera switches and reframes explicitly', () => {
+    const canvas = viewport()
+    const renderer = new FlightRenderer(canvas, { rendererFactory: createRendererStub })
+    try {
+      const live = createInitialDroneState(DEFAULT_DRONE_CONFIG, { x: 15, y: 28, z: -35 })
+      const original = JSON.stringify(live)
+      renderer.render(createInitialDroneState(DEFAULT_DRONE_CONFIG))
+      renderer.render(live)
+      renderer.setCameraMode('free')
+      expect(renderer.getFreeCameraState().targetM).toEqual(live.positionM)
+      const initial = renderer.getFreeCameraState()
+      drag(canvas)
+      const explored = renderer.getFreeCameraState()
+      expect(explored.positionM).not.toEqual(initial.positionM)
+      expect(explored.targetM).toEqual(initial.targetM)
+      expect(JSON.parse(canvas.dataset.freeCameraPosition!)).toEqual(explored.positionM)
+      renderer.setCameraMode('fpv')
+      const next = createInitialDroneState(DEFAULT_DRONE_CONFIG, { x: -4, y: 17, z: 8 })
+      renderer.render(next)
+      renderer.setCameraMode('free')
+      expect(renderer.getFreeCameraState()).toEqual(explored)
+      renderer.reconfigureScene(DEFAULT_DRONE_CONFIG)
+      expect(renderer.getFreeCameraState()).toEqual(explored)
+      renderer.focusFreeCamera()
+      expect(renderer.getFreeCameraState().targetM).toEqual(next.positionM)
+      expect(JSON.stringify(live)).toBe(original)
+    } finally { renderer.dispose(); canvas.remove() }
+  })
+
+  it('frames the paused replay ghost and Home targets the latest seek without applying a live pose', () => {
+    const canvas = viewport()
+    const renderer = new FlightRenderer(canvas, { rendererFactory: createRendererStub })
+    try {
+      renderer.render(createInitialDroneState(DEFAULT_DRONE_CONFIG))
+      const applyLive = vi.spyOn(renderer.flightScene, 'applyState')
+      const ghost = { positionM: { x: 20, y: 40, z: -30 }, orientation: { x: 0, y: 0, z: 0, w: 1 } }
+      const original = JSON.stringify(ghost)
+      renderer.renderGhost(ghost)
+      renderer.setCameraMode('free')
+      expect(renderer.getFreeCameraState().targetM).toEqual(ghost.positionM)
+      drag(canvas)
+      const explored = renderer.getFreeCameraState()
+      const seek = { ...ghost, positionM: { x: -13, y: 12, z: 5 } }
+      renderer.renderGhost(seek)
+      expect(renderer.getFreeCameraState()).toEqual(explored)
+      canvas.focus()
+      canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }))
+      expect(renderer.getFreeCameraState().targetM).toEqual(seek.positionM)
+      expect(applyLive).not.toHaveBeenCalled()
+      expect(JSON.stringify(ghost)).toBe(original)
+    } finally { renderer.dispose(); canvas.remove() }
+  })
+
+  it('updates held camera keys on paused ghost frames without changing the ghost or consuming flight keys', () => {
+    const canvas = viewport()
+    let now = 0
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    const renderer = new FlightRenderer(canvas, { rendererFactory: createRendererStub })
+    try {
+      const ghost = { positionM: { x: 5, y: 15, z: -8 }, orientation: { x: 0, y: 0, z: 0, w: 1 } }
+      renderer.renderGhost(ghost)
+      renderer.setCameraMode('free')
+      canvas.focus()
+      const initial = renderer.getFreeCameraState()
+      canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }))
+      const pressed = renderer.getFreeCameraState()
+      expect(pressed.targetM).not.toEqual(initial.targetM)
+      now = 1_000
+      renderer.renderGhost(ghost)
+      expect(renderer.getFreeCameraState().targetM).not.toEqual(pressed.targetM)
+      canvas.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowUp', bubbles: true, ctrlKey: true }))
+      const released = renderer.getFreeCameraState()
+      now = 2_000
+      renderer.renderGhost(ghost)
+      expect(renderer.getFreeCameraState()).toEqual(released)
+      const letter = new KeyboardEvent('keydown', { key: 'r', bubbles: true, cancelable: true })
+      canvas.dispatchEvent(letter)
+      expect(letter.defaultPrevented).toBe(false)
+      expect(renderer.getFreeCameraState()).toEqual(released)
+      expect(ghost.positionM).toEqual({ x: 5, y: 15, z: -8 })
+    } finally { renderer.dispose(); canvas.remove(); clock.mockRestore() }
+  })
+
+  it('disables and releases camera input during context loss and removes handlers on disposal', () => {
+    const canvas = viewport()
+    let now = 0
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    const renderer = new FlightRenderer(canvas, { rendererFactory: createRendererStub })
+    try {
+      const state = createInitialDroneState(DEFAULT_DRONE_CONFIG)
+      renderer.render(state)
+      renderer.setCameraMode('free')
+      canvas.focus()
+      canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
+      pointer(canvas, 'pointerdown', 0, 0)
+      canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }))
+      const lost = renderer.getFreeCameraState()
+      pointer(canvas, 'pointermove', 200, 300)
+      const wheel = new WheelEvent('wheel', { deltaY: 100, cancelable: true })
+      canvas.dispatchEvent(wheel)
+      expect(wheel.defaultPrevented).toBe(false)
+      expect(renderer.getFreeCameraState()).toEqual(lost)
+      canvas.dispatchEvent(new Event('webglcontextrestored'))
+      now = 1_000
+      renderer.render(state)
+      expect(renderer.getFreeCameraState()).toEqual(lost)
+      renderer.dispose()
+      drag(canvas)
+      canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, cancelable: true }))
+      expect(renderer.getFreeCameraState()).toEqual(lost)
+      const next = new FlightRenderer(canvas, { rendererFactory: createRendererStub })
+      next.render(state)
+      next.setCameraMode('free')
+      const fresh = next.getFreeCameraState()
+      drag(canvas)
+      expect(next.getFreeCameraState()).not.toEqual(fresh)
+      next.dispose()
+    } finally { renderer.dispose(); canvas.remove(); clock.mockRestore() }
+  })
+})
+
 describe('FlightRenderer lifecycle and failure contract', () => {
   it('reuses a canvas after disposal without forcing its WebGL context lost', () => {
     const canvas = document.createElement('canvas')

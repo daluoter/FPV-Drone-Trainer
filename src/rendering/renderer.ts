@@ -2,6 +2,7 @@ import * as THREE from 'three'
 
 import { DEFAULT_DRONE_CONFIG, type DroneConfig, type DroneState } from '../drone'
 import type { ReplayGhostState } from '../replay'
+import type { Vector3 } from '../math/vector'
 import {
   activeCamera,
   createCameraRig,
@@ -13,6 +14,7 @@ import {
   type FlightCameraRig,
 } from './camera'
 import { createFlightScene, type FlightScene } from './scene'
+import { FreeCameraControls, type FreeCameraState } from './freeCameraControls'
 
 export type FlightRendererStatusKind = 'ready' | 'context-lost' | 'unavailable'
 
@@ -74,10 +76,14 @@ export class FlightRenderer {
   private readonly statusListener: ((status: FlightRendererStatus) => void) | null
   private status: FlightRendererStatus = { kind: 'ready' }
   private disposed = false
+  private readonly freeCameraControls: FreeCameraControls
+  private freeCameraEntered = false
+  private lastVisiblePositionM: Vector3 | null = null
   private readonly onContextLostBound = (event: Event): void => {
     if (this.disposed) return
     // Opt in to browser restoration; flight remains disarmed after recovery.
     event.preventDefault()
+    this.freeCameraControls.setEnabled(false)
     this.setStatus({
       kind: 'context-lost',
       message: 'The WebGL context was lost. Flight has been disarmed; retry rendering to recover.',
@@ -85,6 +91,7 @@ export class FlightRenderer {
   }
   private readonly onContextRestoredBound = (): void => {
     if (this.disposed) return
+    this.freeCameraControls.setEnabled(this.cameraRig.mode === 'free')
     this.setStatus({ kind: 'ready' })
   }
 
@@ -94,15 +101,19 @@ export class FlightRenderer {
     this.cameraRig = createCameraRig(options)
     this.statusListener = options.onStatusChange ?? null
     let renderer: THREE.WebGLRenderer | null = null
+    let controls: FreeCameraControls | null = null
     try {
       renderer = this.createWebGlRenderer(options.pixelRatio, options.rendererFactory)
       this.renderer = renderer
+      controls = new FreeCameraControls(canvas, this.cameraRig, () => this.focusFreeCamera())
+      this.freeCameraControls = controls
       this.canvas.addEventListener('webglcontextlost', this.onContextLostBound)
       this.canvas.addEventListener('webglcontextrestored', this.onContextRestoredBound)
       this.resize()
     } catch (error) {
       this.canvas.removeEventListener('webglcontextlost', this.onContextLostBound)
       this.canvas.removeEventListener('webglcontextrestored', this.onContextRestoredBound)
+      controls?.dispose()
       renderer?.dispose()
       this.flightScene.dispose()
       throw error instanceof FlightRendererInitializationError
@@ -121,7 +132,24 @@ export class FlightRenderer {
   }
 
   public setCameraMode(mode: CameraMode): void {
+    if (this.disposed) return
     this.cameraRig.mode = mode
+    if (mode === 'free' && !this.freeCameraEntered && this.lastVisiblePositionM) {
+      this.freeCameraControls.focus(this.lastVisiblePositionM)
+      this.freeCameraEntered = true
+    }
+    this.freeCameraControls.setEnabled(mode === 'free' && this.status.kind === 'ready')
+  }
+
+  /** Reframe the visible live drone or replay ghost without changing flight or playback. */
+  public focusFreeCamera(): void {
+    if (this.disposed || this.cameraRig.mode !== 'free' || !this.lastVisiblePositionM) return
+    this.freeCameraControls.focus(this.lastVisiblePositionM)
+    this.freeCameraEntered = true
+  }
+
+  public getFreeCameraState(): FreeCameraState {
+    return this.freeCameraControls.getState()
   }
 
   /** Update guidance without recreating the scene or changing simulation state. */
@@ -247,6 +275,7 @@ export class FlightRenderer {
       this.flightScene.setReplayVisible(false)
       this.flightScene.applyState(state)
       updateCameraRig(this.cameraRig, state, this.cameraRig.mode)
+      this.updateFreeCamera(state.positionM)
       this.renderer.render(this.flightScene.scene, this.camera)
     } catch (error) {
       this.setStatus({
@@ -267,6 +296,7 @@ export class FlightRenderer {
       this.flightScene.setReplayVisible(true)
       if (trajectory.length > 0) this.flightScene.setReplayPath(trajectory)
       updateCameraRig(this.cameraRig, state, this.cameraRig.mode)
+      this.updateFreeCamera(state.positionM)
       this.renderer.render(this.flightScene.scene, this.camera)
     } catch (error) {
       this.setStatus({
@@ -295,6 +325,7 @@ export class FlightRenderer {
   public dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.freeCameraControls.dispose()
     this.canvas.removeEventListener('webglcontextlost', this.onContextLostBound)
     this.canvas.removeEventListener('webglcontextrestored', this.onContextRestoredBound)
     this.flightScene.dispose()
@@ -307,7 +338,18 @@ export class FlightRenderer {
   private setStatus(status: FlightRendererStatus): void {
     if (this.status.kind === status.kind && this.status.message === status.message) return
     this.status = status
+    this.freeCameraControls.setEnabled(status.kind === 'ready' && this.cameraRig.mode === 'free')
     this.statusListener?.(status)
+  }
+
+  private updateFreeCamera(positionM: Vector3): void {
+    this.lastVisiblePositionM = { ...positionM }
+    if (this.cameraRig.mode !== 'free') return
+    if (!this.freeCameraEntered) {
+      this.freeCameraControls.focus(positionM)
+      this.freeCameraEntered = true
+    }
+    this.freeCameraControls.update()
   }
 
   private createWebGlRenderer(

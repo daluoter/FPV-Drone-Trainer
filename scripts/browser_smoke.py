@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 from pathlib import Path
@@ -104,7 +105,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if response is None or response.status != 200:
                 raise AssertionError("The production entry page did not return HTTP 200.")
             expect(page).to_have_title("FPV Drone Trainer")
-            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.26.2")
+            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.26.3")
             report["release"] = page.get_by_test_id("app-release").inner_text()
 
             asset_urls = page.locator("script[src], link[rel='stylesheet'][href]").evaluate_all(
@@ -1552,6 +1553,186 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(disarm).to_be_disabled()
             expect(arm).to_be_enabled()
             checks.append("fullscreen entry/exit or graceful browser fallback")
+
+            def free_camera_state() -> dict:
+                state = canvas.evaluate("""element => ({
+                    position: JSON.parse(element.dataset.freeCameraPosition || 'null'),
+                    target: JSON.parse(element.dataset.freeCameraTarget || 'null'),
+                    distance: Number(element.dataset.freeCameraDistance)
+                })""")
+                for field in ("position", "target"):
+                    vector = state[field]
+                    values = vector if isinstance(vector, list) else [vector.get(axis) for axis in ("x", "y", "z")] if isinstance(vector, dict) else []
+                    if len(values) != 3 or not all(isinstance(value, (int, float)) and math.isfinite(value) for value in values):
+                        raise AssertionError(f"Free camera has no finite {field}: {state}")
+                if not math.isfinite(state["distance"]) or state["distance"] <= 0:
+                    raise AssertionError(f"Free camera distance is invalid: {state}")
+                return state
+
+            def camera_drag(button: str, dx: float, dy: float, shift: bool = False) -> None:
+                canvas.scroll_into_view_if_needed()
+                bounds = canvas.bounding_box()
+                if not bounds:
+                    raise AssertionError("Free camera canvas has no bounds.")
+                x = bounds["x"] + bounds["width"] * .65
+                y = bounds["y"] + bounds["height"] * .75
+                page.mouse.move(x, y)
+                if shift:
+                    page.keyboard.down("Shift")
+                page.mouse.down(button=button)
+                try:
+                    page.mouse.move(x + dx, y + dy, steps=6)
+                finally:
+                    page.mouse.up(button=button)
+                    if shift:
+                        page.keyboard.up("Shift")
+
+            def visible_position() -> dict:
+                return {key: flight.get_by_test_id(test_id).inner_text() for key, test_id in (
+                    ("height", "flight-altitude"), ("right", "flight-position-right"),
+                    ("up", "flight-position-up"), ("z", "flight-position-z"))}
+
+            before_free_results = training_progress(page)
+            live_position = visible_position()
+            flight.get_by_role("button", name="Free / debug", exact=True).click()
+            free_help = flight.get_by_label("自由鏡頭操作", exact=True)
+            expect(free_help).to_be_visible()
+            expect(canvas).to_have_attribute("tabindex", "0")
+            flight.get_by_role("button", name="定位飛機", exact=True).click()
+            initial_camera = free_camera_state()
+            camera_drag("left", 70, 20)
+            orbited_camera = free_camera_state()
+            if orbited_camera["position"] == initial_camera["position"] or orbited_camera["target"] != initial_camera["target"]:
+                raise AssertionError("Left drag did not orbit around the retained free-camera target.")
+            camera_drag("right", 45, 20)
+            panned_camera = free_camera_state()
+            if panned_camera["target"] == orbited_camera["target"]:
+                raise AssertionError("Right drag did not pan the free-camera target.")
+            camera_drag("left", -30, 15, shift=True)
+            shifted_camera = free_camera_state()
+            if shifted_camera["target"] == panned_camera["target"]:
+                raise AssertionError("Shift-left drag did not pan the free camera.")
+            bounds = canvas.bounding_box()
+            page.mouse.move(bounds["x"] + bounds["width"] * .8, bounds["y"] + bounds["height"] * .8)
+            scroll_before_wheel = page.evaluate("scrollY")
+            page.mouse.wheel(0, -240)
+            page.wait_for_timeout(100)
+            zoomed_camera = free_camera_state()
+            if zoomed_camera["distance"] >= shifted_camera["distance"]:
+                raise AssertionError("Wheel up did not move the free camera closer.")
+            if abs(page.evaluate("scrollY") - scroll_before_wheel) > 1:
+                raise AssertionError("Free-camera wheel input scrolled the page instead of the camera.")
+            if visible_position() != live_position or training_progress(page) != before_free_results:
+                raise AssertionError("Free-camera mouse navigation changed the drone or a saved result.")
+            expect(arm).to_be_enabled()
+            expect(disarm).to_be_disabled()
+            report["interactive_free_camera"] = {"initial": initial_camera, "orbited": orbited_camera,
+                "panned": panned_camera, "zoomed": zoomed_camera}
+            if screenshot:
+                canvas.screenshot(path=str(artifact_dir / "interactive-free-camera-live.png"))
+            checks.append("live Free camera supports real mouse orbit, right or Shift pan and wheel dolly without changing drone or saved results")
+
+            canvas.focus()
+            keyboard_before = free_camera_state()
+            page.keyboard.down("ArrowRight")
+            page.wait_for_timeout(150)
+            page.keyboard.up("ArrowRight")
+            keyboard_moved = free_camera_state()
+            if keyboard_moved["target"] == keyboard_before["target"]:
+                raise AssertionError("Focused arrow keys did not move the free camera.")
+            canvas.press("Shift+ArrowLeft")
+            keyboard_orbit = free_camera_state()
+            if keyboard_orbit["position"] == keyboard_moved["position"] or keyboard_orbit["target"] != keyboard_moved["target"]:
+                raise AssertionError("Shift-arrow keys did not orbit the free camera.")
+            canvas.press("PageUp")
+            if free_camera_state()["target"] == keyboard_orbit["target"]:
+                raise AssertionError("PageUp did not move the free camera vertically.")
+            canvas.press("Home")
+            homed_camera = free_camera_state()
+            if homed_camera["target"] != initial_camera["target"]:
+                raise AssertionError("Home did not refocus the current live drone.")
+            page.keyboard.down("ArrowRight")
+            page.wait_for_timeout(80)
+            flight.get_by_role("button", name="Chase", exact=True).click()
+            switched_camera = free_camera_state()
+            page.wait_for_timeout(150)
+            page.keyboard.up("ArrowRight")
+            if free_camera_state() != switched_camera:
+                raise AssertionError("Held free-camera motion continued after a camera-mode change.")
+            if visible_position() != live_position or training_progress(page) != before_free_results:
+                raise AssertionError("Camera keyboard navigation drove or reset the live drone.")
+            flight.get_by_role("button", name="FPV", exact=True).click()
+            expect(free_help).to_have_count(0)
+            inactive_camera = free_camera_state()
+            camera_drag("left", 45, 20)
+            if free_camera_state() != inactive_camera:
+                raise AssertionError("The FPV view still consumed free-camera drag commands.")
+            checks.append("focused camera keys move and orbit without flight-input conflicts and release held motion on mode exit")
+
+            # A free camera is also useful while examining a paused maneuver:
+            # navigation must leave the movie clock, ghost and live lesson alone.
+            flight.get_by_role("button", name="L13 大迴旋示範", exact=True).click()
+            flight.get_by_role("button", name="Pause", exact=True).click()
+            timeline.press("End")
+            demonstration_snapshot("L13", 8, complete=True)
+            paused_time = float(timeline.input_value())
+            paused_position = visible_position()
+            paused_progress = demo_progress.inner_text()
+            flight.get_by_role("button", name="Free / debug", exact=True).click()
+            flight.get_by_role("button", name="定位飛機", exact=True).click()
+            replay_camera = free_camera_state()
+            target = replay_camera["target"]
+            target_values = target if isinstance(target, list) else [target[axis] for axis in ("x", "y", "z")]
+            if target_values[1] < 1.5 or target_values[2] > -10:
+                raise AssertionError(f"Refocus used the old ground spawn instead of the paused replay ghost: {replay_camera}")
+            camera_drag("left", -55, 20)
+            canvas.focus()
+            canvas.press("PageUp")
+            canvas.press("Home")
+            page.wait_for_timeout(150)
+            if abs(float(timeline.input_value()) - paused_time) > .02 or demo_progress.inner_text() != paused_progress:
+                raise AssertionError("Free-camera navigation resumed or seeked the paused demonstration.")
+            if visible_position() != paused_position or training_progress(page) != before_free_results:
+                raise AssertionError("Free-camera replay inspection changed the ghost or live saved progress.")
+            expect(flight.get_by_role("button", name="Play", exact=True)).to_be_enabled()
+            report["free_camera_paused_replay"] = {"time_seconds": paused_time, "reframed": replay_camera}
+            if screenshot:
+                canvas.screenshot(path=str(artifact_dir / "interactive-free-camera-replay.png"))
+            checks.append("free camera and refocus inspect the current paused ghost without replay clock, checkpoint or live-progress writes")
+
+            report["free_camera_help_layouts"] = {}
+            for width, height in ((1280, 720), (1280, 600), (375, 720)):
+                page.set_viewport_size({"width": width, "height": height})
+                free_help.scroll_into_view_if_needed()
+                helper_bounds = free_help.bounding_box()
+                if not helper_bounds or helper_bounds["x"] < 0 or helper_bounds["x"] + helper_bounds["width"] > width + 1:
+                    raise AssertionError(f"Free-camera instructions overflow {width}x{height}: {helper_bounds}")
+                for other in (position_hud.bounding_box(), flight.locator(".flight-safe-overlay").bounding_box()):
+                    if not other:
+                        raise AssertionError("Free-camera position or playback banner has no bounds.")
+                    overlap_x = min(helper_bounds['x'] + helper_bounds['width'], other['x'] + other['width']) - max(helper_bounds['x'], other['x'])
+                    overlap_y = min(helper_bounds['y'] + helper_bounds['height'], other['y'] + other['height']) - max(helper_bounds['y'], other['y'])
+                    if overlap_x > 0 and overlap_y > 0:
+                        raise AssertionError(f"Free-camera instructions overlap flight instruments at {width}x{height}.")
+                if page.evaluate("document.documentElement.scrollWidth > innerWidth + 1"):
+                    raise AssertionError(f"Free-camera controls cause body overflow at {width}x{height}.")
+                report["free_camera_help_layouts"][f"{width}x{height}"] = helper_bounds
+                if screenshot and width == 375:
+                    page.screenshot(path=str(artifact_dir / "interactive-free-camera-mobile.png"))
+            page.set_viewport_size({"width": 1280, "height": 720})
+            flight.get_by_role("button", name="結束示範", exact=True).click()
+            page.wait_for_timeout(100)
+            flight.get_by_role("button", name="定位飛機", exact=True).click()
+            restored_camera = free_camera_state()
+            restored_target = restored_camera["target"]
+            restored_values = restored_target if isinstance(restored_target, list) else [restored_target[axis] for axis in ("x", "y", "z")]
+            # Replay exit restores the configured free-flight spawn (0.5 m),
+            # which settles through ordinary physics; it is not a lesson setup.
+            if abs(restored_values[0]) > .01 or abs(restored_values[2]) > .01 or not (0 <= restored_values[1] < 1):
+                raise AssertionError("Refocus after replay exit did not return to the current live drone.")
+            if training_progress(page) != before_free_results:
+                raise AssertionError("Exiting camera inspection wrote a training result.")
+            checks.append("free-camera instructions fit desktop, short desktop and mobile and recenter live state after replay exit")
 
             for camera_name in ("Chase", "Free / debug", "FPV"):
                 camera = flight.get_by_role("button", name=camera_name, exact=True)

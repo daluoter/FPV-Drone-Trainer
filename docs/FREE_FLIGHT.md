@@ -16,7 +16,7 @@ The field uses the documented axes: world/body +X is right, +Y is up and -Z is t
 
 - FPV is rigidly mounted at body-local `(0, 0.08, -0.11)` m, with a 20° local pitch and 90° FOV. The shared drone geometry contract also reserves the configured FOV/near-plane envelope for ground support; cameras remain presentation-only and do not clamp simulation poses.
 - Chase follows a body-relative rear/above offset and looks at the aircraft.
-- Free/debug starts at a safe world-space vantage point and remains independent of the quad pose after initialization.
+- Free/debug first frames the currently displayed live or replay aircraft, then remains independent of its pose. Mouse orbit/pan/zoom and focused-canvas keyboard navigation change only camera presentation; switching away and back preserves the explored view, while **定位飛機** or Home explicitly reframes the current aircraft. See [the free-camera controls](FREE_CAMERA.md).
 - `FlightRenderer.resize()` updates all camera aspects and renderer size; `dispose()` releases scene geometries/materials, WebGL resources and context loss hooks.
 
 ## Arm and runtime safety
@@ -32,6 +32,8 @@ The Controller Lab hands the selected compatible profile to Free Flight. RC armi
 The last condition is an **arm-time handoff only**. Once armed, intended stick movement is passed through normalized RC, Actual Rates, SI rate PID, mixer, motor response and simulation without reapplying the neutral/low-throttle condition. Disconnect, connection-session change, profile/source change, invalid processed input, window blur and hidden documents disarm and require a new explicit Arm action. Reset uses the simulation reset path and remains disarmed. Finite-size ground support prevents body, prop and FPV near-plane penetration. A hard downward contact (4 m/s normal speed) or 50° supported tip-over resolves the pose, stops all motor thrust, zeros velocity and latches a crash; the status/HUD show CRASHED, Arm is blocked, and explicit Reset is required before re-arming. This simplified threshold model is documented in [`PHYSICS.md`](PHYSICS.md), not a damage/realism claim. A renderer that is unavailable or has lost its WebGL context disarms the runtime, blocks Arm, and presents a visible retry action; restoring the context still requires an explicit re-arm.
 
 The developer keyboard fallback is opt-in in the Free Flight source selector. W/S, A/D, Q/E and R/F produce normalized RC values through the same controller/rates/PID path. Blur releases keys. X requests reset; there are no keyboard pose or Euler-angle shortcuts.
+
+Free-camera shortcuts use a separate key set and require the free viewport to have focus: arrows move horizontally, Page Up/Down move vertically, Shift+arrows orbit, +/- zoom, and Home reframes. Editable controls do not receive camera shortcuts. Mode exit, focus loss, hidden pages and renderer disposal release camera keys/pointer capture; they do not add an animation loop or write a flight command. A paused replay can be inspected without moving its clock.
 
 ## Replay boundary
 

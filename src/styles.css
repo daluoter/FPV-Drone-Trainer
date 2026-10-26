@@ -2796,6 +2796,13 @@ h1 em {
 .school-flight .flight-viewport-overlay { display: flex; gap: 8px; line-height: 1.5; }
 .school-flight .flight-controls { padding: 10px; gap: 12px; }
 .school-flight .flight-controls label, .school-flight .flight-control-group > span { font-size: 11px; }
+.flight-canvas.is-free-camera { cursor: grab; touch-action: none; }
+.flight-canvas.is-free-camera:active { cursor: grabbing; }
+.flight-canvas.is-free-camera:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.free-camera-help { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); font-size: 11px; line-height: 1.6; }
+.free-camera-help > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.free-camera-help p { margin: 5px 0; }
+.free-camera-help small { color: var(--muted); font-size: inherit; }
 .school-flight .flight-replay-card { margin-top: 10px; padding: 12px; }
 .school-flight .flight-replay-note { font-size: 11px; line-height: 1.6; }
 .school-flight .flight-side-panel { min-width: 0; }

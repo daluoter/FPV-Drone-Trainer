@@ -8,9 +8,25 @@ import {
   createCameraRig,
   updateCameraRig,
   updateCameraRigOptions,
+  setFreeCameraTransform,
 } from './camera'
 
 describe('Free Flight camera contracts', () => {
+  it('initializes the free camera from the first Free view rather than an earlier FPV position', () => {
+    const rig = createCameraRig()
+    const orientation = quaternionFromRotationVector({ x: 0, y: 0, z: 0 })
+    updateCameraRig(rig, { positionM: { x: 0, y: 0.1, z: 0 }, orientation }, 'fpv')
+    expect(rig.freeInitialized).toBe(false)
+    const current = { positionM: { x: 20, y: 35, z: -40 }, orientation }
+    updateCameraRig(rig, current, 'free')
+    expect(rig.free.position.toArray()).toEqual([24, 38, -34])
+    setFreeCameraTransform(rig, { x: 7, y: 12, z: 3 }, { x: 3, y: 9, z: -3 })
+    const transform = rig.free.position.clone()
+    setFreeCameraTransform(rig, { x: Number.NaN, y: 0, z: 0 }, current.positionM)
+    updateCameraRig(rig, current, 'free')
+    expect(rig.free.position.equals(transform)).toBe(true)
+  })
+
   it('keeps the FPV mount rigid in body coordinates and applies the configured angle', () => {
     const orientation = quaternionFromRotationVector({ x: 0, y: Math.PI / 2, z: 0 })
     const transform = calculateFpvCameraTransform({

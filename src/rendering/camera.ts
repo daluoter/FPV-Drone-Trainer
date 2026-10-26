@@ -188,7 +188,7 @@ export function updateCameraRig(
   rig.mode = mode
   applyFpvCamera(rig.fpv, state, rig)
   applyChaseCamera(rig.chase, state, rig)
-  if (!rig.freeInitialized) {
+  if (mode === 'free' && !rig.freeInitialized) {
     initializeFreeCamera(rig.free, state)
     rig.freeInitialized = true
   }
@@ -200,6 +200,7 @@ export function setFreeCameraTransform(
   position: Vector3,
   target: Vector3,
 ): void {
+  if (![position.x, position.y, position.z, target.x, target.y, target.z].every(Number.isFinite)) return
   rig.free.position.set(position.x, position.y, position.z)
   rig.free.lookAt(target.x, target.y, target.z)
   rig.freeInitialized = true
