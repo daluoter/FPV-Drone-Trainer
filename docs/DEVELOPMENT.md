@@ -13,7 +13,7 @@ Open the Vite URL shown in the terminal. Phase 8 exposes the Controller Lab hand
 
 ### Confirm the updated local screen
 
-The current release shows **版本 2026.10.26.3** near the page heading. Choose **Free / debug** in LIVE SIM or a demonstration/replay, then drag the 3D canvas to orbit/pan and use the wheel to zoom. Focus the canvas for arrows, Page Up/Down, Shift+arrows, +/- and Home; **定位飛機** recenters the currently displayed aircraft. The visible camera helper explains these controls without Developer HUD. See [the free-camera guide](FREE_CAMERA.md).
+The current release shows **版本 2026.10.27.1** near the page heading. Choose **Free / debug** in LIVE SIM or a demonstration/replay, then drag the 3D canvas to orbit/pan and use the wheel to zoom. The **升高鏡頭 1 m** and **降低鏡頭 1 m** buttons move the camera and its target vertically by one metre per click, including during paused replay; these work without Page keys or prior canvas focus. Focus the canvas for arrows, Page Up/Down, Shift+arrows, +/- and Home; Page Up/Down also work while Shift is held. **定位飛機** recenters the currently displayed aircraft. The altitude/XYZ instruments continue to show the aircraft, not the camera. See [the free-camera guide](FREE_CAMERA.md).
 
 The course workspace still has 15 active flight lessons and 17 displayed demonstrations: three L00 axes and L01–L14. Course names stay Chinese. L14 retains the `split-s` ID and ground-start rule 6; former airborne rule-4 results remain in their original scope. L15 正刷鍋 (`orbit`) retains its prototype and earlier rules. The camera change does not alter course acceptance, score scopes or stored preferences. See [the L14 guide](L14_SPLIT_S.md) and [the compatibility table](LEARNING_CONTRACT.md#課程編號與合併相容性).
 

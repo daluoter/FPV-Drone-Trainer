@@ -152,6 +152,12 @@ export class FlightRenderer {
     return this.freeCameraControls.getState()
   }
 
+  /** Move only the active Free view; live flight and replay state are untouched. */
+  public moveFreeCameraVertically(deltaM: number): void {
+    if (this.disposed || this.cameraRig.mode !== 'free' || this.status.kind !== 'ready') return
+    this.freeCameraControls.moveVertically(deltaM)
+  }
+
   /** Update guidance without recreating the scene or changing simulation state. */
   public setLessonTarget(lessonId: string | null): void {
     if (this.disposed) return

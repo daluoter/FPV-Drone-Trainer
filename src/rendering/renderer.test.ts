@@ -121,6 +121,64 @@ describe('interactive free camera renderer integration', () => {
     } finally { renderer.dispose(); canvas.remove(); clock.mockRestore() }
   })
 
+  it('raises and lowers the live or paused-ghost viewpoint without writing either aircraft pose', () => {
+    const canvas = viewport()
+    const renderer = new FlightRenderer(canvas, { rendererFactory: createRendererStub })
+    try {
+      const live = createInitialDroneState(DEFAULT_DRONE_CONFIG, { x: 4, y: 8, z: -15 })
+      const liveBefore = JSON.stringify(live)
+      renderer.render(live)
+      renderer.setCameraMode('free')
+      const initial = renderer.getFreeCameraState()
+      renderer.moveFreeCameraVertically(1)
+      expect(renderer.getFreeCameraState().targetM).toEqual({ ...initial.targetM, y: initial.targetM.y + 1 })
+      renderer.moveFreeCameraVertically(-1)
+      expect(renderer.getFreeCameraState().targetM).toEqual(initial.targetM)
+      expect(JSON.stringify(live)).toBe(liveBefore)
+
+      const ghost = { positionM: { x: 20, y: 30, z: -40 }, orientation: { x: 0, y: 0, z: 0, w: 1 } }
+      const ghostBefore = JSON.stringify(ghost)
+      renderer.renderGhost(ghost)
+      renderer.focusFreeCamera()
+      const applyLive = vi.spyOn(renderer.flightScene, 'applyState')
+      renderer.moveFreeCameraVertically(-1)
+      const lowered = renderer.getFreeCameraState()
+      renderer.renderGhost(ghost)
+      expect(renderer.getFreeCameraState()).toEqual(lowered)
+      expect(lowered.targetM).toEqual({ ...ghost.positionM, y: ghost.positionM.y - 1 })
+      expect(lowered.positionM.y).toBeCloseTo(ghost.positionM.y + 2)
+      expect(JSON.stringify(ghost)).toBe(ghostBefore)
+      expect(JSON.stringify(live)).toBe(liveBefore)
+      expect(applyLive).not.toHaveBeenCalled()
+    } finally { renderer.dispose(); canvas.remove() }
+  })
+
+  it('ignores elevation commands outside Free mode, during context loss and after disposal', () => {
+    const canvas = viewport()
+    const renderer = new FlightRenderer(canvas, { rendererFactory: createRendererStub })
+    try {
+      renderer.render(createInitialDroneState(DEFAULT_DRONE_CONFIG))
+      for (const mode of ['fpv', 'chase'] as const) {
+        renderer.setCameraMode(mode)
+        const before = renderer.getFreeCameraState()
+        renderer.moveFreeCameraVertically(1)
+        expect(renderer.getFreeCameraState()).toEqual(before)
+      }
+      renderer.setCameraMode('free')
+      canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }))
+      const lost = renderer.getFreeCameraState()
+      renderer.moveFreeCameraVertically(1)
+      expect(renderer.getFreeCameraState()).toEqual(lost)
+      canvas.dispatchEvent(new Event('webglcontextrestored'))
+      renderer.moveFreeCameraVertically(1)
+      expect(renderer.getFreeCameraState().targetM.y).toBeCloseTo(lost.targetM.y + 1)
+      renderer.dispose()
+      const disposed = renderer.getFreeCameraState()
+      renderer.moveFreeCameraVertically(-1)
+      expect(renderer.getFreeCameraState()).toEqual(disposed)
+    } finally { renderer.dispose(); canvas.remove() }
+  })
+
   it('disables and releases camera input during context loss and removes handlers on disposal', () => {
     const canvas = viewport()
     let now = 0

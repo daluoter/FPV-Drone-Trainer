@@ -765,9 +765,14 @@ export default function FreeFlight({
               rendererRef.current?.focusFreeCamera?.()
               canvasRef.current?.focus({ preventScroll: true })
             }}>定位飛機</button></div>
+            <div className="free-camera-height-controls" role="group" aria-label="鏡頭高度控制">
+              <button className="lab-button lab-button-small" type="button" disabled={renderingState !== 'ready'} onClick={() => rendererRef.current?.moveFreeCameraVertically(1)}>升高鏡頭 1 m</button>
+              <button className="lab-button lab-button-small" type="button" disabled={renderingState !== 'ready'} onClick={() => rendererRef.current?.moveFreeCameraVertically(-1)}>降低鏡頭 1 m</button>
+              <span>每按一次垂直移動 1 公尺，保持觀看角度。</span>
+            </div>
             <p>左鍵拖曳旋轉 · 右鍵或 Shift＋左鍵拖曳平移 · 滾輪拉近／拉遠。</p>
             <p>點選 3D 畫面後：方向鍵前後左右移動，Page Up／Down 升降，Shift＋方向鍵旋轉，＋／－拉近拉遠，Home 定位飛機。</p>
-            <small>鏡頭操作不改變飛機；選用鍵盤飛行時，WASD、Q／E、R／F、X 仍是飛行及重設按鍵。</small>
+            <small>畫面中的高度與 XYZ 是飛機位置；升降鏡頭不會改變飛機。選用鍵盤飛行時，WASD、Q／E、R／F、X 仍是飛行及重設按鍵。</small>
           </div>}
           {visibleResultReplay && <section className="school-result-replay" aria-label="本次結果回放">
             <strong>本次結果回放</strong>

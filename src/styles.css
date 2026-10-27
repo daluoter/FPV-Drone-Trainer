@@ -2801,6 +2801,8 @@ h1 em {
 .flight-canvas.is-free-camera:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
 .free-camera-help { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); font-size: 11px; line-height: 1.6; }
 .free-camera-help > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.free-camera-help > .free-camera-height-controls { justify-content: flex-start; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.free-camera-height-controls span { color: var(--muted); }
 .free-camera-help p { margin: 5px 0; }
 .free-camera-help small { color: var(--muted); font-size: inherit; }
 .school-flight .flight-replay-card { margin-top: 10px; padding: 12px; }

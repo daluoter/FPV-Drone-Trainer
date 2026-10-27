@@ -85,6 +85,13 @@ export class FreeCameraControls {
       targetM: { x: this.target.x, y: this.target.y, z: this.target.z }, distanceM: position.distanceTo(this.target) }
   }
 
+  /** Translate the view along world Y without requiring a focused canvas. */
+  public moveVertically(deltaM: number): void {
+    if (this.disposed || !this.enabled || !Number.isFinite(deltaM) || deltaM === 0) return
+    this.target.y += deltaM
+    this.apply()
+  }
+
   /** Called on ordinary live and replay render frames, including paused playback. */
   public update(timeMs = performance.now()): void {
     if (this.disposed || !this.enabled) return
@@ -220,17 +227,17 @@ export class FreeCameraControls {
     const axis = (positive: string, negative: string): number => Number(this.pressed.has(positive)) - Number(this.pressed.has(negative))
     const x = axis('arrowright', 'arrowleft')
     const forward = axis('arrowup', 'arrowdown')
+    const move = new THREE.Vector3(0, axis('pageup', 'pagedown'), 0)
     if (this.shifted) {
       this.spherical.theta -= x * delta * 1.5
       this.spherical.phi -= forward * delta * 1.5
     } else {
       const direction = new THREE.Vector3(-Math.sin(this.spherical.theta), 0, -Math.cos(this.spherical.theta))
       const right = new THREE.Vector3(-direction.z, 0, direction.x)
-      const move = direction.multiplyScalar(forward).addScaledVector(right, x)
-      move.y = axis('pageup', 'pagedown')
-      if (move.lengthSq() > 1) move.normalize()
-      this.target.addScaledVector(move, delta * bounded(this.spherical.radius * 0.75, 2, 80))
+      move.addScaledVector(direction, forward).addScaledVector(right, x)
     }
+    if (move.lengthSq() > 1) move.normalize()
+    this.target.addScaledVector(move, delta * bounded(this.spherical.radius * 0.75, 2, 80))
     const zoom = Number(this.pressed.has('+') || this.pressed.has('=')) - Number(this.pressed.has('-') || this.pressed.has('_'))
     this.spherical.radius *= Math.exp(-zoom * delta * 1.8)
     this.apply()

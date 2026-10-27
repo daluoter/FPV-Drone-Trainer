@@ -105,7 +105,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if response is None or response.status != 200:
                 raise AssertionError("The production entry page did not return HTTP 200.")
             expect(page).to_have_title("FPV Drone Trainer")
-            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.26.3")
+            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.27.1")
             report["release"] = page.get_by_test_id("app-release").inner_text()
 
             asset_urls = page.locator("script[src], link[rel='stylesheet'][href]").evaluate_all(
@@ -1569,6 +1569,16 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                     raise AssertionError(f"Free camera distance is invalid: {state}")
                 return state
 
+            def assert_camera_height_change(before: dict, after: dict, delta_m: float) -> None:
+                for field in ("position", "target"):
+                    for axis in ("x", "y", "z"):
+                        actual = after[field][axis] - before[field][axis]
+                        expected = delta_m if axis == "y" else 0
+                        if not math.isclose(actual, expected, abs_tol=1e-6):
+                            raise AssertionError(f"Camera elevation changed {field}.{axis} by {actual}; expected {expected} m.")
+                if not math.isclose(before["distance"], after["distance"], abs_tol=1e-6):
+                    raise AssertionError("Changing camera height also changed the viewing distance.")
+
             def camera_drag(button: str, dx: float, dy: float, shift: bool = False) -> None:
                 canvas.scroll_into_view_if_needed()
                 bounds = canvas.bounding_box()
@@ -1598,6 +1608,27 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             free_help = flight.get_by_label("自由鏡頭操作", exact=True)
             expect(free_help).to_be_visible()
             expect(canvas).to_have_attribute("tabindex", "0")
+            flight.get_by_role("button", name="定位飛機", exact=True).click()
+            initial_camera = free_camera_state()
+            raise_camera = free_help.get_by_role("button", name="升高鏡頭 1 m", exact=True)
+            lower_camera = free_help.get_by_role("button", name="降低鏡頭 1 m", exact=True)
+            raise_camera.click()
+            raised_camera = free_camera_state()
+            assert_camera_height_change(initial_camera, raised_camera, 1)
+            expect(raise_camera).to_be_focused()
+            raise_camera.press("Enter")
+            assert_camera_height_change(initial_camera, free_camera_state(), 2)
+            expect(raise_camera).to_be_focused()
+            lower_camera.click()
+            lower_camera.click()
+            assert_camera_height_change(initial_camera, free_camera_state(), 0)
+            if visible_position() != live_position or training_progress(page) != before_free_results:
+                raise AssertionError("Camera height buttons changed the aircraft position or saved results.")
+            report["free_camera_height_buttons"] = {"before": initial_camera, "raised": raised_camera,
+                "restored": free_camera_state(), "keyboard_button_focus_retained": True}
+            if screenshot:
+                page.screenshot(path=str(artifact_dir / "free-camera-height-controls-live.png"))
+            checks.append("visible camera height buttons move only world Y by 1 m per activation and retain focus for repeated keyboard activation")
             flight.get_by_role("button", name="定位飛機", exact=True).click()
             initial_camera = free_camera_state()
             camera_drag("left", 70, 20)
@@ -1645,8 +1676,20 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if keyboard_orbit["position"] == keyboard_moved["position"] or keyboard_orbit["target"] != keyboard_moved["target"]:
                 raise AssertionError("Shift-arrow keys did not orbit the free camera.")
             canvas.press("PageUp")
-            if free_camera_state()["target"] == keyboard_orbit["target"]:
+            keyboard_raised = free_camera_state()
+            if keyboard_raised["target"]["y"] <= keyboard_orbit["target"]["y"]:
                 raise AssertionError("PageUp did not move the free camera vertically.")
+            assert_camera_height_change(keyboard_orbit, keyboard_raised, keyboard_raised["target"]["y"] - keyboard_orbit["target"]["y"])
+            canvas.press("PageDown")
+            keyboard_lowered = free_camera_state()
+            if keyboard_lowered["target"]["y"] >= keyboard_raised["target"]["y"]:
+                raise AssertionError("PageDown did not lower the free camera.")
+            assert_camera_height_change(keyboard_raised, keyboard_lowered, keyboard_lowered["target"]["y"] - keyboard_raised["target"]["y"])
+            canvas.press("Shift+PageUp")
+            shifted_raised = free_camera_state()
+            if shifted_raised["target"]["y"] <= keyboard_lowered["target"]["y"]:
+                raise AssertionError("Holding Shift disabled PageUp camera elevation.")
+            assert_camera_height_change(keyboard_lowered, shifted_raised, shifted_raised["target"]["y"] - keyboard_lowered["target"]["y"])
             canvas.press("Home")
             homed_camera = free_camera_state()
             if homed_camera["target"] != initial_camera["target"]:
@@ -1685,6 +1728,10 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             target_values = target if isinstance(target, list) else [target[axis] for axis in ("x", "y", "z")]
             if target_values[1] < 1.5 or target_values[2] > -10:
                 raise AssertionError(f"Refocus used the old ground spawn instead of the paused replay ghost: {replay_camera}")
+            raise_camera.click()
+            assert_camera_height_change(replay_camera, free_camera_state(), 1)
+            lower_camera.click()
+            assert_camera_height_change(replay_camera, free_camera_state(), 0)
             camera_drag("left", -55, 20)
             canvas.focus()
             canvas.press("PageUp")
@@ -1707,6 +1754,18 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 helper_bounds = free_help.bounding_box()
                 if not helper_bounds or helper_bounds["x"] < 0 or helper_bounds["x"] + helper_bounds["width"] > width + 1:
                     raise AssertionError(f"Free-camera instructions overflow {width}x{height}: {helper_bounds}")
+                for button in (raise_camera, lower_camera):
+                    expect(button).to_be_visible()
+                    button_bounds = button.bounding_box()
+                    if not button_bounds or button_bounds["x"] < helper_bounds["x"] or button_bounds["x"] + button_bounds["width"] > helper_bounds["x"] + helper_bounds["width"] + 1:
+                        raise AssertionError(f"Camera elevation button overflows its helper at {width}x{height}: {button_bounds}")
+                layout_camera = free_camera_state()
+                raise_camera.click()
+                assert_camera_height_change(layout_camera, free_camera_state(), 1)
+                lower_camera.click()
+                assert_camera_height_change(layout_camera, free_camera_state(), 0)
+                if abs(float(timeline.input_value()) - paused_time) > .02 or visible_position() != paused_position or demo_progress.inner_text() != paused_progress or training_progress(page) != before_free_results:
+                    raise AssertionError(f"Camera height controls changed paused replay or saved results at {width}x{height}.")
                 for other in (position_hud.bounding_box(), flight.locator(".flight-safe-overlay").bounding_box()):
                     if not other:
                         raise AssertionError("Free-camera position or playback banner has no bounds.")
