@@ -8,7 +8,7 @@ import type { TuningSettings } from '../tuning/config'
 import { createTuningPreset } from '../tuning/presets'
 import { createTeachingDemonstration, teachingPowerLoopPhaseAt } from './demonstrations'
 import { createTrainingFieldAnchors } from './field'
-import { POWER_LOOP_LESSON, POWER_LOOP_PHASE_IDS, powerLoopEvaluator } from './powerLoop'
+import { POWER_LOOP_LESSON, POWER_LOOP_PHASE_IDS, POWER_LOOP_TARGET_HEIGHT_M, powerLoopEvaluator } from './powerLoop'
 import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample } from './types'
 
 function evaluateRecording(settings: TuningSettings, demo: ReturnType<typeof createTeachingDemonstration>) {
@@ -59,6 +59,13 @@ describe('actual spatial-loop teaching recording', () => {
     expect(demo.cues.every((cue) => times.has(cue.timeSeconds) && cue.targetReferenceId === 'loop-zone')).toBe(true)
     expect(demo.cues.at(-1)).toMatchObject({ timeSeconds: demo.recording.durationSeconds, powerLoopPhase: 8 })
     expect(demo.cues.at(-1)?.text).toContain('大迴旋八步已完成')
+    const pullCue = demo.cues.find(({ text }) => text.startsWith('現在開始拉起'))!
+    expect(pullCue).toBeDefined()
+    const pullSamples = demo.recording.samples.filter(({ timestampSeconds }) => timestampSeconds >= pullCue.timeSeconds)
+    // The whole maneuver retains the higher practice margin, not just its crest.
+    expect(Math.min(...pullSamples.map(({ positionM }) => positionM.y - settings.drone.ground.heightM)))
+      .toBeGreaterThan(POWER_LOOP_TARGET_HEIGHT_M - 1)
+    expect(pullSamples[0].positionM.y - settings.drone.ground.heightM).toBeCloseTo(POWER_LOOP_TARGET_HEIGHT_M, 0)
     let inverted = false
     let forward = false
     let rearward = false
@@ -96,7 +103,7 @@ describe('actual spatial-loop teaching recording', () => {
     expect(evaluation?.metrics?.loopForwardSpanM).toBeGreaterThan(15)
     expect(evaluation?.metrics?.loopReverseTravelM).toBeGreaterThan(12)
     const end = demo.recording.samples.at(-1)!
-    expect(end.positionM.y - settings.drone.ground.heightM).toBeGreaterThan(8)
+    expect(end.positionM.y - settings.drone.ground.heightM).toBeGreaterThan(POWER_LOOP_TARGET_HEIGHT_M - 2)
     expect(rotateVectorByQuaternion(end.orientation, { x: 0, y: 1, z: 0 }).y).toBeGreaterThan(Math.cos(35 * Math.PI / 180))
     expect(JSON.stringify(settings)).toBe(before)
   })

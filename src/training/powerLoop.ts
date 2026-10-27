@@ -4,7 +4,7 @@ import { isFiniteVector3 } from '../math/vector'
 import type { LessonLearningContent } from './catalog'
 import type { LessonDefinition, LessonEvaluatorContract, TrainingEvaluation, TrainingEvaluationContext, TrainingSample } from './types'
 
-export const POWER_LOOP_TARGET_HEIGHT_M = 10
+export const POWER_LOOP_TARGET_HEIGHT_M = 25
 export const POWER_LOOP_MIN_ENTRY_HEIGHT_M = 6
 export const POWER_LOOP_MIN_PREPARATION_HEIGHT_M = POWER_LOOP_MIN_ENTRY_HEIGHT_M
 export const POWER_LOOP_MIN_HEIGHT_M = 1.5
@@ -58,9 +58,9 @@ function terminal(message: string, metrics: Readonly<Record<string, number>> = {
 function hint(phase: number, metrics: Readonly<Record<string, number>>): string {
   if (phase >= 8) return '已完成實際垂直迴圈並恢復正飛與控制；不需降落，可以上鎖停止馬達。'
   if (phase === 0) return '請先在起飛區實際接地開始。'
-  if (phase === 1) return '自行起飛至至少 6 m，建議約 10 m，為迴圈保留高度。'
-  if (metrics.loopEpisodeValid < 0.5) return `${metrics.loopInterruptionReason === 9 ? '本圈實際前後跨度不足 6 m，已清除本圈證據；直線飛遠不會補成大迴旋。' : metrics.loopInterrupted > 0.5 ? '本圈已中斷，先前步驟保留；需重新完成同一整圈。' : ''}在至少 6 m 高度建立前進速度（至少 3 m/s），姿態帶回 35° 內，短暫準備。`
-  if (metrics.loopClimbed < 0.5) return '帶著前進速度，適量加油並持續向後拉俯仰，讓航跡實際向上彎；不要原地快速後翻。'
+  if (phase === 1) return `先自行起飛至建議約 ${POWER_LOOP_TARGET_HEIGHT_M} m，為下降與改出保留高度；最低有效高度仍為 6 m。`
+  if (metrics.loopEpisodeValid < 0.5) return `${metrics.loopInterruptionReason === 9 ? '本圈實際前後跨度不足 6 m，已清除本圈證據；直線飛遠不會補成大迴旋。' : metrics.loopInterrupted > 0.5 ? '本圈已中斷，先前步驟保留；需重新完成同一整圈。' : ''}建議先升至約 ${POWER_LOOP_TARGET_HEIGHT_M} m，再建立前進速度（至少 3 m/s），姿態帶回 35° 內，短暫準備；最低有效高度仍為 6 m。`
+  if (metrics.loopClimbed < 0.5) return `${metrics.loopEpisodeState === 1 && metrics.altitudeM < POWER_LOOP_TARGET_HEIGHT_M - 1 ? `高度仍低於建議約 ${POWER_LOOP_TARGET_HEIGHT_M} m，先升高並穩住，再開始拉起。` : ''}帶著前進速度，適量加油並持續向後拉俯仰，讓航跡實際向上彎；不要原地快速後翻。`
   if (metrics.loopInverted < 0.5) return '保持同一俯仰方向越過頂部；倒置時適度收油，讓機體往後方繞回。'
   if (metrics.loopDescended < 0.5) return '已越過頂部，繼續同一圈並往下繞回；需要實際後退航段與下降，不能只在空中翻一圈。'
   if (metrics.loopCompleted < 0.5) return '繼續拉回正飛，隨姿態補回油門，建立向前出口；不用飛出完美圓形或回到原點。'
@@ -275,8 +275,8 @@ export const POWER_LOOP_LESSON: LessonDefinition = {
   setup: { requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: ['training-launch', 'landing-surface', 'loop-zone'], spawnOrientation: { x: 0, y: 0, z: 0, w: 1 } },
   checkpoints: [
     { id: 'loop-ground', title: '地面開始', description: '在起飛區實際接地開始。' },
-    { id: 'loop-liftoff', title: '自行起飛至練習高度', description: '自行起飛至至少 6 m，建議約 10 m。' },
-    { id: 'loop-entry', title: '建立前進速度', description: '至少 3 m/s 前進，姿態在 35° 內短暫準備。' },
+    { id: 'loop-liftoff', title: '自行起飛至練習高度', description: `先起飛至建議約 ${POWER_LOOP_TARGET_HEIGHT_M} m，預留改出空間；最低有效高度為 6 m。` },
+    { id: 'loop-entry', title: '建立前進速度', description: `建議在約 ${POWER_LOOP_TARGET_HEIGHT_M} m 高度建立至少 3 m/s 前進速度，姿態在 35° 內短暫準備。` },
     { id: 'loop-climb', title: '向上拉出迴圈', description: '帶著前進速度向上拉，實際爬升至少 3 m。' },
     { id: 'loop-inverted', title: '越頂通過倒置', description: '沿同一俯仰方向越頂，實際通過倒置。' },
     { id: 'loop-descent', title: '繞回下降', description: '實際往後方繞回至少 1.5 m，越頂後下降至少 2 m。' },
@@ -286,12 +286,12 @@ export const POWER_LOOP_LESSON: LessonDefinition = {
   success: { title: '大迴旋完成', description: '已觀察到實際垂直迴圈與空中恢復。', criteria: ['地面自行起飛', '同一圈爬升、倒置、後退與下降', '向前改出並恢復控制'] },
   failure: { title: '大迴旋尚未完成', description: '一般動作中斷可重新準備；墜毀、上鎖或無效資料需重試。', criteria: ['不能用原地後翻或只上下移動代替', '中斷後需重新完成同一整圈', '接地停住不能代替空中恢復'] },
   scoring: { maxScore: 100, minimumPassingScore: 70, minimumActiveSeconds: 0, metricLabels: ['loopProgressDegrees', 'loopHeightGainM', 'loopForwardSpanM', 'loopRecoveryDwellSeconds'] },
-  hints: ['先建立前進速度，再拉出大範圍垂直迴圈；本課先練空曠場地，不要求繞過障礙物或飛出完美圓形。'],
+  hints: [`建議先升至約 ${POWER_LOOP_TARGET_HEIGHT_M} m，再建立前進速度並拉出大範圍垂直迴圈；本課先練空曠場地，不要求繞過障礙物或飛出完美圓形。`],
   evaluator: powerLoopEvaluator,
 }
 export const POWER_LOOP_LEARNING_CONTENT: LessonLearningContent = {
   code: 'L13', title: '大迴旋', level: '花飛入門', prerequisiteIds: ['back-flip'],
   objectives: ['分辨實際垂直迴圈與原地後翻。', '連續完成入彎、爬升、越頂、下降與改出。'],
-  steps: ['自行起飛至至少 6 m，建議約 10 m，留在起飛點周圍 120 m 空曠練習區。', '建立至少 3 m/s 前進速度，姿態在 35° 內短暫準備。', '適量加油並向後拉俯仰，帶著速度實際向上繞出迴圈，爬升至少 3 m。', '保持同一方向越過頂部，倒置時適度收油，讓機體往後方繞回並下降。', '接近正飛時提早回中減緩旋轉，補回油門向前改出；本圈需有至少 6 m 前後跨度。', '保留至少 1.5 m 高度，在 35° 內減緩旋轉與下降，確認 0.2 秒；不需降落、回原點或飛出完美圓形。'],
+  steps: [`先自行起飛至建議約 ${POWER_LOOP_TARGET_HEIGHT_M} m，為下降與改出保留空間；最低有效高度仍為 6 m，留在起飛點周圍 120 m 空曠練習區。`, '建立至少 3 m/s 前進速度，姿態在 35° 內短暫準備。', '適量加油並向後拉俯仰，帶著速度實際向上繞出迴圈，爬升至少 3 m。', '保持同一方向越過頂部，倒置時適度收油，讓機體往後方繞回並下降。', '接近正飛時提早回中減緩旋轉，補回油門向前改出；本圈需有至少 6 m 前後跨度。', '保留至少 1.5 m 高度，在 35° 內減緩旋轉與下降，確認 0.2 秒；不需降落、回原點或飛出完美圓形。'],
   commonMistakes: ['前進速度不足，原地快速後翻；姿態翻一圈不代表航跡完成大迴旋。', '只往上拉後原路下降，沒有越頂往後繞回。', '越頂後改向前翻，沒有沿同一方向完成整圈。', '倒置時維持大油門或改出太晚，迅速掉高。'],
 }

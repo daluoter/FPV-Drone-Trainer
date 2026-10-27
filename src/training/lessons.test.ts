@@ -29,7 +29,7 @@ describe('lesson catalog', () => {
     expect(DEFAULT_LESSONS.map((lesson) => lesson.title)).toEqual([
       '定點懸停',
       '協調轉彎',
-      '翻轉下降',
+      '破S',
       '正刷鍋',
       '起飛與定點懸停',
       '起飛、前往降落區與降落',

@@ -202,7 +202,7 @@ export function createTeachingDemonstration(
       rulesVersion: trainingRulesVersionForLesson(kind), physicsVersion: 1,
       presetId: identifyTuningPreset(settings), settingsFingerprint: fingerprintTrainingSettings(settings),
       title: courseDemonstrationTitle(kind, '地面起飛、半圈橫滾、下降半迴圈與反向改出'),
-      description: '模擬示範，以實際搖桿輸入與物理完成翻轉下降；真人練習全程自行操控，觀看不計入通關。',
+      description: '模擬示範，以實際搖桿輸入與物理完成破S；真人練習全程自行操控，觀看不計入通關。',
       source: 'simulated', recording, cues,
     })
   }

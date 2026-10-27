@@ -490,7 +490,7 @@ describe('integrated training/runtime UI boundaries', () => {
     expect(persistedAttempts('coordinated-turn')).toBe(1)
 
     fireEvent.change(within(training).getByLabelText('選擇課程'), { target: { value: 'split-s' } })
-    expect(within(training).getByRole('heading', { level: 3, name: '翻轉下降' })).toBeInTheDocument()
+    expect(within(training).getByRole('heading', { level: 3, name: '破S' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /enter replay/i })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: /enter replay/i }))
     fireEvent.click(screen.getByRole('button', { name: /^Play$/ }))

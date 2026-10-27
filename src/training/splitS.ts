@@ -57,29 +57,29 @@ function hint(phase: number, metrics: Readonly<Record<string, number>>): string 
   if (phase >= 8) return '已完成橫滾倒置、下降半迴圈、方向反轉及空中恢復；不需降落，可以上鎖停止馬達。'
   if (phase === 0) return '在起飛區實際接地、低油門明確解鎖後開始。'
   if (phase === 1) return '自行起飛至至少 15 m，建議約 25 m；這課向下繞回，需要保留下降空間。'
-  if (metrics.splitEpisodeValid < 0.5) return `${metrics.splitInterrupted > 0.5 ? '本次動作已中斷，先前步驟保留；請重新完成同一套翻轉下降。' : ''}升到至少 15 m，建立至少 3 m/s 前進速度，姿態帶回 35° 內並短暫準備。`
-  if (metrics.splitInverted < 0.5) return '選左或右，主要用橫滾半圈翻成倒置；不要直接後翻，也不要用偏航轉頭代替。倒置時適度收油。'
-  if (metrics.splitDescended < 0.5) return '已橫滾至倒置；向後拉俯仰，讓機頭往地面繞出下降半迴圈，配合油門並留意高度。'
+  if (metrics.splitEpisodeValid < 0.5) return `${metrics.splitInterrupted > 0.5 ? '本次動作已中斷，先前步驟保留；請重新完成同一套破S。' : ''}升到至少 15 m，建立至少 3 m/s 前進速度，姿態帶回 35° 內並短暫準備。`
+  if (metrics.splitInverted < 0.5) return '朝橘色參考橫樑上方進場，選左或右橫滾半圈至倒置；倒置時適度收油。橫樑與路徑幫助辨認位置，不必貼線。'
+  if (metrics.splitDescended < 0.5) return '已橫滾至倒置；在參考橫樑後方，向後拉俯仰繞出下降半迴圈，配合油門並留意高度。'
   if (metrics.splitReversed < 0.5) return '已實際下降；持續同方向後拉，讓機頭與實際移動都轉向來路，不能只原地轉機頭。'
-  if (metrics.splitCompleted < 0.5) return '沿同一下降半迴圈拉回正飛，朝來路方向飛出；不要反向翻回起始姿態。'
+  if (metrics.splitCompleted < 0.5) return '沿同一下降半迴圈拉回正飛，對照參考橫樑下方朝來路飛出；不要反向翻回起始姿態。'
   return '已完成下降與改出；留在空中，回中減緩旋轉並主動帶回 35° 內，減緩下降後確認 0.2 秒。'
 }
 
 function evaluateSplitS(sample: TrainingSample, context: TrainingEvaluationContext): TrainingEvaluation {
   if (!Number.isFinite(sample.timestampSeconds) || sample.timestampSeconds < 0 || !Number.isFinite(context.elapsedSeconds)
-    || context.elapsedSeconds < 0 || !isFiniteDroneState(sample.state)) return terminal('翻轉下降停止：時間或飛行狀態含無效數值。')
-  if (sample.state.crashed) return terminal('翻轉下降停止：機體已墜毀，請重設後重試。')
-  if (sample.armed === false) return terminal('翻轉下降停止：已上鎖或失去焦點。')
+    || context.elapsedSeconds < 0 || !isFiniteDroneState(sample.state)) return terminal('破S停止：時間或飛行狀態含無效數值。')
+  if (sample.state.crashed) return terminal('破S停止：機體已墜毀，請重設後重試。')
+  if (sample.armed === false) return terminal('破S停止：已上鎖或失去焦點。')
   if (sample.armed !== true) return { status: 'continue', metrics: {}, message: '等待實際解鎖後的飛行資料。' }
   const launch = context.sceneReferences.find(({ id }) => id === 'training-launch')
   const surface = context.sceneReferences.find(({ id }) => id === 'landing-surface')
-  if (!launch || !surface || !isFiniteVector3(launch.positionM) || !isFiniteVector3(surface.positionM)) return terminal('翻轉下降缺少有效起飛點或地面參考。')
+  if (!launch || !surface || !isFiniteVector3(launch.positionM) || !isFiniteVector3(surface.positionM)) return terminal('破S缺少有效起飛點或地面參考。')
   const contact = sample.groundContact
   if (!contact || typeof contact.touching !== 'boolean' || !Number.isFinite(contact.heightM) || !Number.isFinite(contact.supportOffsetM)
-    || contact.supportOffsetM < 0 || Math.abs(contact.heightM - surface.positionM.y) > 1e-5) return terminal('翻轉下降停止：缺少有效的地面接觸資料。')
+    || contact.supportOffsetM < 0 || Math.abs(contact.heightM - surface.positionM.y) > 1e-5) return terminal('破S停止：缺少有效的地面接觸資料。')
   const position = sample.state.positionM
   const clearance = position.y - contact.heightM - contact.supportOffsetM - DRONE_GROUND_CLEARANCE_M
-  if (clearance < -0.003 || contact.touching && Math.abs(clearance) > 0.003) return terminal('翻轉下降停止：接地標記與機體支撐高度不一致。')
+  if (clearance < -0.003 || contact.touching && Math.abs(clearance) > 0.003) return terminal('破S停止：接地標記與機體支撐高度不一致。')
   let phase = 0
   while (phase < SPLIT_S_PHASE_IDS.length && context.checkpoints[SPLIT_S_PHASE_IDS[phase]]?.completed) phase += 1
   const motion = measureSplitSMotion(sample.state)
@@ -102,7 +102,7 @@ function evaluateSplitS(sample: TrainingSample, context: TrainingEvaluationConte
     delta = sample.timestampSeconds - previous.timestampSeconds
     const physicsDelta = sample.state.timeSeconds - previous.state.timeSeconds
     if (!isFiniteDroneState(previous.state) || !Number.isFinite(delta) || delta <= 0 || delta > 0.35 || physicsDelta <= 0
-      || Math.abs(physicsDelta - delta) > 1e-6 || sample.state.stepIndex <= previous.state.stepIndex) return terminal('翻轉下降停止：資料中斷、時間倒退或模擬被重設。', metrics)
+      || Math.abs(physicsDelta - delta) > 1e-6 || sample.state.stepIndex <= previous.state.stepIndex) return terminal('破S停止：資料中斷、時間倒退或模擬被重設。', metrics)
     const velocity = sample.state.velocityMps
     const beforeVelocity = previous.state.velocityMps
     metrics.velocityConsistencyErrorM = Math.hypot(
@@ -110,7 +110,7 @@ function evaluateSplitS(sample: TrainingSample, context: TrainingEvaluationConte
       position.y - previous.state.positionM.y - (velocity.y + beforeVelocity.y) * 0.5 * delta,
       position.z - previous.state.positionM.z - (velocity.z + beforeVelocity.z) * 0.5 * delta,
     )
-    if (metrics.velocityConsistencyErrorM > 0.04 + 10 * delta * delta) return terminal('翻轉下降停止：位置跳躍與實際速度不一致。', metrics)
+    if (metrics.velocityConsistencyErrorM > 0.04 + 10 * delta * delta) return terminal('破S停止：位置跳躍與實際速度不一致。', metrics)
     let rotation = normalizeQuaternion(multiplyQuaternions(conjugateQuaternion(normalizeQuaternion(previous.state.orientation)), normalizeQuaternion(sample.state.orientation)))
     if (rotation.w < 0) rotation = { x: -rotation.x, y: -rotation.y, z: -rotation.z, w: -rotation.w }
     const sine = Math.hypot(rotation.x, rotation.y, rotation.z)
@@ -128,9 +128,9 @@ function evaluateSplitS(sample: TrainingSample, context: TrainingEvaluationConte
       rotation.y * factor - (rateBefore.y + rateAfter.y) * 0.5 * delta,
       rotation.z * factor - (rateBefore.z + rateAfter.z) * 0.5 * delta,
     ) * DEGREES
-    if (angle * DEGREES > 90 || metrics.angularConsistencyErrorDegrees > 2 + 400 * delta * delta) return terminal('翻轉下降停止：姿態變化與實際旋轉速度不一致。', metrics)
+    if (angle * DEGREES > 90 || metrics.angularConsistencyErrorDegrees > 2 + 400 * delta * delta) return terminal('破S停止：姿態變化與實際旋轉速度不一致。', metrics)
   }
-  if (context.mode !== 'practice' && context.elapsedSeconds > SPLIT_S_TIME_LIMIT_SECONDS) return terminal('翻轉下降挑戰逾時：尚未完成下降半迴圈與空中恢復。', metrics)
+  if (context.mode !== 'practice' && context.elapsedSeconds > SPLIT_S_TIME_LIMIT_SECONDS) return terminal('破S挑戰逾時：尚未完成下降半迴圈與空中恢復。', metrics)
   const continuing = (): TrainingEvaluation => ({ status: 'continue', metrics, hint: hint(phase, metrics) })
   const advance = (): TrainingEvaluation => {
     const id = SPLIT_S_PHASE_IDS[phase]
@@ -152,8 +152,8 @@ function evaluateSplitS(sample: TrainingSample, context: TrainingEvaluationConte
   }
   if (phase >= 8) return metrics.splitEpisodeValid > 0.5 && metrics.splitCompleted > 0.5 && metrics.splitInverted > 0.5
     && metrics.splitDescended > 0.5 && metrics.splitReversed > 0.5
-    ? { status: 'success', score: 100, metrics, message: '已完成翻轉下降與空中恢復。', hint: hint(phase, metrics) }
-    : terminal('翻轉下降停止：缺少同一套動作的實際飛行證據，請重新開始。', metrics)
+    ? { status: 'success', score: 100, metrics, message: '已完成破S與空中恢復。', hint: hint(phase, metrics) }
+    : terminal('破S停止：缺少同一套動作的實際飛行證據，請重新開始。', metrics)
   if (phase === 0) return contact.touching && launchDistanceM <= 1.9 ? advance() : continuing()
   if (phase === 1) return airborne && inside && altitudeM >= SPLIT_S_MIN_ENTRY_HEIGHT_M ? advance() : continuing()
   if (!airborne) return interrupt(contact.touching ? 1 : 2)
@@ -188,7 +188,7 @@ function evaluateSplitS(sample: TrainingSample, context: TrainingEvaluationConte
     metrics.splitRollProgressDegrees = Math.abs(metrics.splitRollSignedDegrees)
     metrics.splitRollMaxDegrees = Math.max(metrics.splitRollMaxDegrees, metrics.splitRollProgressDegrees)
     metrics.splitRollOffAxisDegrees += Math.abs(pitchDegrees) + yawDegrees
-    if (Math.abs(metrics.splitRollSignedDegrees - metrics.splitRollMeasuredDegrees) > 12) return terminal('翻轉下降停止：累積姿態與橫滾速度不一致。', metrics)
+    if (Math.abs(metrics.splitRollSignedDegrees - metrics.splitRollMeasuredDegrees) > 12) return terminal('破S停止：累積姿態與橫滾速度不一致。', metrics)
     if (metrics.splitRollProgressDegrees > 250) return interrupt(5)
     if (metrics.splitRollOffAxisDegrees > 100 || metrics.splitHeadingChangeDegrees > 70) return interrupt(4)
     if (metrics.splitRollMaxDegrees - metrics.splitRollProgressDegrees > 45) return interrupt(6)
@@ -207,7 +207,7 @@ function evaluateSplitS(sample: TrainingSample, context: TrainingEvaluationConte
     metrics.splitRollMeasuredDegrees += measuredRollDegrees
     metrics.splitRollProgressDegrees = Math.abs(metrics.splitRollSignedDegrees)
     metrics.splitRollMaxDegrees = Math.max(metrics.splitRollMaxDegrees, metrics.splitRollProgressDegrees)
-    if (Math.abs(metrics.splitRollSignedDegrees - metrics.splitRollMeasuredDegrees) > 12) return terminal('翻轉下降停止：累積姿態與橫滾速度不一致。', metrics)
+    if (Math.abs(metrics.splitRollSignedDegrees - metrics.splitRollMeasuredDegrees) > 12) return terminal('破S停止：累積姿態與橫滾速度不一致。', metrics)
     if (metrics.splitRollProgressDegrees > 250) return interrupt(5)
     if (metrics.splitRollMaxDegrees - metrics.splitRollProgressDegrees > 45) return interrupt(6)
   }
@@ -216,7 +216,7 @@ function evaluateSplitS(sample: TrainingSample, context: TrainingEvaluationConte
   metrics.splitPitchProgressDegrees = Math.max(0, metrics.splitPitchSignedDegrees)
   metrics.splitPitchMaxDegrees = Math.max(metrics.splitPitchMaxDegrees, metrics.splitPitchProgressDegrees)
   metrics.splitPitchOffAxisDegrees += Math.abs(rollDegrees) + yawDegrees
-  if (Math.abs(metrics.splitPitchSignedDegrees - metrics.splitPitchMeasuredDegrees) > 12) return terminal('翻轉下降停止：累積姿態與俯仰速度不一致。', metrics)
+  if (Math.abs(metrics.splitPitchSignedDegrees - metrics.splitPitchMeasuredDegrees) > 12) return terminal('破S停止：累積姿態與俯仰速度不一致。', metrics)
   if (metrics.splitPitchOffAxisDegrees > 150) return interrupt(4)
   if (metrics.splitPitchProgressDegrees > 250) return interrupt(5)
   if (metrics.splitPitchSignedDegrees < -35 || metrics.splitPitchMaxDegrees - metrics.splitPitchSignedDegrees > 45) return interrupt(6)
@@ -281,29 +281,29 @@ function evaluateSplitS(sample: TrainingSample, context: TrainingEvaluationConte
 }
 export const splitSLearningEvaluator: LessonEvaluatorContract = { evaluate: evaluateSplitS }
 export const SPLIT_S_LESSON: LessonDefinition = {
-  id: 'split-s', priority: 3, title: '翻轉下降', availability: 'available', available: true,
-  description: '從地面自行起飛，在足夠高度橫滾半圈至倒置，再後拉俯仰走出下降半迴圈，反轉方向並恢復正飛。',
+  id: 'split-s', priority: 3, title: '破S', availability: 'available', available: true,
+  description: '從地面自行起飛，對照橘色橫樑從上方進場，橫滾倒置後在樑後方拉出下降半迴圈，再從下方反向改出。',
   objectives: ['自行起飛並保留下降與改出高度。', '依序完成橫滾倒置、下降半迴圈與實際方向反轉。', '朝來路方向改出並恢復空中控制。'],
   setup: { requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: ['training-launch', 'landing-surface', 'split-zone'], spawnOrientation: { x: 0, y: 0, z: 0, w: 1 } },
   checkpoints: [
     { id: 'split-ground', title: '地面開始', description: '在起飛區實際接地開始。' },
     { id: 'split-liftoff', title: '自行起飛至下降餘裕高度', description: '自行起飛至至少 15 m，建議約 25 m。' },
-    { id: 'split-entry', title: '建立前進速度', description: '至少 3 m/s 前進，姿態在 35° 內短暫準備。' },
-    { id: 'split-inverted', title: '橫滾半圈至倒置', description: '選左或右，實際橫滾半圈並翻成倒置，不能以後翻代替。' },
-    { id: 'split-descent', title: '拉出下降半迴圈', description: '倒置後沿同一方向後拉俯仰，實際下降至少 3 m。' },
+    { id: 'split-entry', title: '建立前進速度', description: '朝參考橫樑上方進場，至少 3 m/s 前進，姿態在 35° 內短暫準備。' },
+    { id: 'split-inverted', title: '橫滾半圈至倒置', description: '選左或右在樑上方實際橫滾半圈至倒置，不能以後翻代替。' },
+    { id: 'split-descent', title: '拉出下降半迴圈', description: '對照樑後方的路徑，倒置後沿同一方向後拉俯仰，實際下降至少 3 m。' },
     { id: 'split-reversed', title: '實際反轉飛行方向', description: '機頭轉向來路，實際反向飛行至少 1.5 m。' },
     { id: 'split-upright', title: '拉平恢復正飛', description: '以俯仰走完下降半圈並回到正飛，不用偏航迴轉或反向拼湊。' },
     { id: 'split-recovered', title: '恢復正飛與控制', description: '留在空中，主動修回 35° 內並減緩旋轉與下降，確認 0.2 秒。' },
   ],
-  success: { title: '翻轉下降完成', description: '已觀察到連續橫滾倒置、下降半迴圈、反向出口與空中恢復。', criteria: ['地面自行起飛', '先橫滾倒置再俯仰下降', '實際反轉方向及空中改出'] },
-  failure: { title: '翻轉下降尚未完成', description: '一般動作中斷可重新取得高度再準備；墜毀、上鎖或無效資料需重試。', criteria: ['不能只偏航轉頭或原地後翻', '不能借用舊動作證據', '地面停住不能代替空中恢復'] },
+  success: { title: '破S完成', description: '已觀察到連續橫滾倒置、下降半迴圈、反向出口與空中恢復。', criteria: ['地面自行起飛', '先橫滾倒置再俯仰下降', '實際反轉方向及空中改出'] },
+  failure: { title: '破S尚未完成', description: '一般動作中斷可重新取得高度再準備；墜毀、上鎖或無效資料需重試。', criteria: ['不能只偏航轉頭或原地後翻', '不能借用舊動作證據', '地面停住不能代替空中恢復'] },
   scoring: { maxScore: 100, minimumPassingScore: 70, minimumActiveSeconds: 0, metricLabels: ['splitRollProgressDegrees', 'splitPitchProgressDegrees', 'splitHeightLossM', 'splitHeadingChangeDegrees', 'splitRecoveryDwellSeconds'] },
-  hints: ['先留出約 25 m 高度，橫滾至倒置再後拉，走出下降半迴圈並朝來路改出；本課不要求窄門、原點或降落。'],
+  hints: ['先留出約 25 m 高度，從橘色參考橫樑上方進場，在樑後方橫滾倒置並後拉下降，再朝樑下方反向改出。路徑保留作對照，不必貼線、穿窄門或降落。'],
   evaluator: splitSLearningEvaluator,
 }
 export const SPLIT_S_LEARNING_CONTENT: LessonLearningContent = {
-  code: 'L14', title: '翻轉下降', level: '花飛進階', prerequisiteIds: ['basic-recovery', 'full-roll', 'front-flip'],
+  code: 'L14', title: '破S', level: '花飛進階', prerequisiteIds: ['basic-recovery', 'full-roll', 'front-flip'],
   objectives: ['理解橫滾倒置後的俯仰下降與方向變化。', '自行串接下降半迴圈、方向反轉與空中恢復。'],
-  steps: ['從地面自行起飛至至少 15 m，建議約 25 m，留在起飛點半徑 150 m 的空曠區。', '建立至少 3 m/s 前進速度，姿態在 35° 內短暫準備。', '選左或右橫滾半圈，實際翻成倒置；倒置時適度收油。', '向後拉俯仰，讓機頭往地面繞出下降半迴圈，留意高度與油門，不要只原地轉頭。', '持續同方向後拉，讓機頭及實際飛行轉向來路，再提早回中減緩旋轉並補油改出。', '保留至少 1.5 m 高度，主動帶回 35° 內並減緩下降，確認 0.2 秒；不需降落或回原點。'],
+  steps: ['從地面自行起飛至至少 15 m，建議約 25 m，留在起飛點半徑 150 m 的空曠區。', '辨認橘色參考橫樑，從上方建立至少 3 m/s 前進速度，姿態在 35° 內短暫準備。', '選左或右在樑上方橫滾半圈，實際翻成倒置；倒置時適度收油。', '在樑後方向後拉俯仰，對照下降弧線往下繞出半迴圈，留意高度與油門。', '持續同方向後拉，讓機頭及實際飛行轉向來路，再提早回中並補油，對照樑下方反向改出。', '保留至少 1.5 m 高度，主動帶回 35° 內並減緩下降，確認 0.2 秒；不必貼線、精準穿樑、降落或回原點。'],
   commonMistakes: ['直接後翻或偏航迴轉，沒有先實際橫滾成倒置。', '倒置時維持大油門，或起始高度不夠，讓改出空間迅速縮小。', '只完成機頭反轉，飛行慣性還沒有轉向來路。', '下降時反向翻回，未沿同一俯仰方向走完半迴圈。'],
 }

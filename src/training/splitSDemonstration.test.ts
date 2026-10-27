@@ -47,7 +47,7 @@ describe('actual split-S teaching recording', () => {
     const before = JSON.stringify(settings)
     const demo = createTeachingDemonstration(settings, 'split-s')
     expect(demo).toMatchObject({ lessonId: 'split-s', rulesVersion: 6, physicsVersion: 1, source: 'simulated' })
-    expect(demo.title).toContain('L14 翻轉下降')
+    expect(demo.title).toContain('L14 破S')
     expect(demo.recording.samples[0].positionM).toEqual(createTrainingFieldAnchors(settings.drone).launch)
     expect(demo.recording).toMatchObject({ capacity: 7_500, decimation: 4, droppedSamples: 0 })
     expect(demo.recording.durationSeconds).toBeGreaterThan(12)
@@ -58,7 +58,7 @@ describe('actual split-S teaching recording', () => {
     const times = new Set(demo.recording.samples.map((pose) => pose.timestampSeconds))
     expect(demo.cues.every((cue) => times.has(cue.timeSeconds) && cue.targetReferenceId === 'split-zone')).toBe(true)
     expect(demo.cues.at(-1)).toMatchObject({ timeSeconds: demo.recording.durationSeconds, splitSPhase: 8 })
-    expect(demo.cues.at(-1)?.text).toContain('翻轉下降八步已完成')
+    expect(demo.cues.at(-1)?.text).toContain('破S八步已完成')
     let inverted = false
     let forward = false
     let rearward = false

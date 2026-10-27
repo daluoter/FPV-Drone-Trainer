@@ -622,7 +622,7 @@ export default function FreeFlight({
 
       <div className="school-demo-bar school-demo-toolbar" aria-label="四軸與課程示範">
         <strong>L00 看懂四軸</strong>
-        {([['roll', '橫滾'], ['pitch', '俯仰'], ['yaw', '偏航'], ['takeoff', '起飛與懸停示範'], ['straight-line', '直線示範'], ['landing', '降落示範'], ['direction-control', '方向示範'], ['coordinated-turn', '轉彎示範'], ['square-route', '方形示範'], ['figure-eight', '八字示範'], ['wide-gate', '穿門示範'], ['basic-recovery', '恢復示範'], ['full-roll', '橫滾示範'], ['front-flip', '前翻示範'], ['back-flip', '後翻示範'], ['power-loop', '大迴旋示範'], ['split-s', '翻轉下降示範']] as const).map(([kind, label]) => {
+        {([['roll', '橫滾'], ['pitch', '俯仰'], ['yaw', '偏航'], ['takeoff', '起飛與懸停示範'], ['straight-line', '直線示範'], ['landing', '降落示範'], ['direction-control', '方向示範'], ['coordinated-turn', '轉彎示範'], ['square-route', '方形示範'], ['figure-eight', '八字示範'], ['wide-gate', '穿門示範'], ['basic-recovery', '恢復示範'], ['full-roll', '橫滾示範'], ['front-flip', '前翻示範'], ['back-flip', '後翻示範'], ['power-loop', '大迴旋示範'], ['split-s', '破S示範']] as const).map(([kind, label]) => {
           const course = lessonLearningContent(kind)
           return <button className="lab-button lab-button-small" type="button" key={kind} disabled={trainingSettingsLocked || Boolean(telemetry?.armed) || renderingState !== 'ready'} onClick={() => startDemonstration(kind)}>{course ? `${course.code} ${label}` : label}</button>
         })}
@@ -687,8 +687,8 @@ export default function FreeFlight({
                   <span>前後跨度<b data-testid="loop-span">{format(loopMetrics?.loopForwardSpanM ?? 0, 1)} m</b></span>
                 </div>
               </div>}
-              {showSplitHud && <div className="flight-recovery-hud" role="group" aria-label="翻轉下降即時狀態">
-                <strong>{telemetry?.replay.active ? '回放翻轉下降數值' : '即時翻轉下降數值'}</strong>
+              {showSplitHud && <div className="flight-recovery-hud" role="group" aria-label="破S即時狀態">
+                <strong>{telemetry?.replay.active ? '回放破S數值' : '即時破S數值'}</strong>
                 <div>
                   <span>半圈橫滾<b data-testid="split-roll">{format(splitMetrics?.splitRollProgressDegrees ?? 0, 0)}°</b></span>
                   <span>下拉俯仰<b data-testid="split-pitch">{format(splitMetrics?.splitPitchProgressDegrees ?? 0, 0)}°</b></span>
@@ -765,10 +765,14 @@ export default function FreeFlight({
               rendererRef.current?.focusFreeCamera?.()
               canvasRef.current?.focus({ preventScroll: true })
             }}>定位飛機</button></div>
-            <div className="free-camera-height-controls" role="group" aria-label="鏡頭高度控制">
+            <div className="free-camera-height-controls" role="group" aria-label="鏡頭移動控制">
               <button className="lab-button lab-button-small" type="button" disabled={renderingState !== 'ready'} onClick={() => rendererRef.current?.moveFreeCameraVertically(1)}>升高鏡頭 1 m</button>
               <button className="lab-button lab-button-small" type="button" disabled={renderingState !== 'ready'} onClick={() => rendererRef.current?.moveFreeCameraVertically(-1)}>降低鏡頭 1 m</button>
-              <span>每按一次垂直移動 1 公尺，保持觀看角度。</span>
+              <button className="lab-button lab-button-small" type="button" disabled={renderingState !== 'ready'} onClick={() => rendererRef.current?.moveFreeCameraHorizontally(0, 1)}>前移鏡頭 1 m</button>
+              <button className="lab-button lab-button-small" type="button" disabled={renderingState !== 'ready'} onClick={() => rendererRef.current?.moveFreeCameraHorizontally(0, -1)}>後移鏡頭 1 m</button>
+              <button className="lab-button lab-button-small" type="button" disabled={renderingState !== 'ready'} onClick={() => rendererRef.current?.moveFreeCameraHorizontally(-1, 0)}>左移鏡頭 1 m</button>
+              <button className="lab-button lab-button-small" type="button" disabled={renderingState !== 'ready'} onClick={() => rendererRef.current?.moveFreeCameraHorizontally(1, 0)}>右移鏡頭 1 m</button>
+              <span>每按一次移動 1 公尺；前後左右依鏡頭朝向沿水平面移動，保持觀看角度。</span>
             </div>
             <p>左鍵拖曳旋轉 · 右鍵或 Shift＋左鍵拖曳平移 · 滾輪拉近／拉遠。</p>
             <p>點選 3D 畫面後：方向鍵前後左右移動，Page Up／Down 升降，Shift＋方向鍵旋轉，＋／－拉近拉遠，Home 定位飛機。</p>

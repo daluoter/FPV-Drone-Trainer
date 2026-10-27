@@ -95,8 +95,8 @@ function prepared(config = DEFAULT_DRONE_CONFIG, heading = 0): Observer {
 
 describe('ground-start ordered descending half-loop', () => {
   it('keeps the stable split-s ID while exposing eight Chinese ground-start stages', () => {
-    expect(SPLIT_S_LESSON).toMatchObject({ id: 'split-s', priority: 3, title: '翻轉下降' })
-    expect(SPLIT_S_LEARNING_CONTENT).toMatchObject({ code: 'L14', title: '翻轉下降' })
+    expect(SPLIT_S_LESSON).toMatchObject({ id: 'split-s', priority: 3, title: '破S' })
+    expect(SPLIT_S_LEARNING_CONTENT).toMatchObject({ code: 'L14', title: '破S' })
     expect(SPLIT_S_LESSON.checkpoints.map(({ id }) => id)).toEqual(SPLIT_S_PHASE_IDS)
     expect(SPLIT_S_LESSON.setup.spawnPositionM).toBeUndefined()
   })

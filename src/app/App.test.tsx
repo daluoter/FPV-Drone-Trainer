@@ -49,7 +49,7 @@ describe('beginner flight school', () => {
     saveLearningPreferences({ ...DEFAULT_LEARNING_PREFERENCES, lastLessonId: 'split-s', introCompleted: true })
     render(<App />)
     expect(screen.getByLabelText('選擇課程')).toHaveValue('split-s')
-    expect(screen.getByRole('heading', { name: '翻轉下降' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '破S' })).toBeInTheDocument()
     const steps = screen.getByRole('list', { name: '本課步驟' })
     expect(within(steps).getAllByRole('listitem')).toHaveLength(8)
     expect(steps.querySelectorAll('.is-complete')).toHaveLength(0)

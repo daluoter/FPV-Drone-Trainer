@@ -1200,7 +1200,7 @@ describe('大迴旋 observations and recovery guidance', () => {
   })
 })
 
-describe('翻轉下降 measured guidance', () => {
+describe('破S measured guidance', () => {
   const ready = { splitPhase: 3, splitEpisodeValid: 1, splitInterrupted: 0, splitInverted: 0,
     splitDescended: 0, splitReversed: 0, splitCompleted: 0 }
   const proofFor = (phase: number) => ({ ...ready, splitPhase: phase,
@@ -1269,7 +1269,7 @@ describe('翻轉下降 measured guidance', () => {
     expect(detail).toContain('傾角 51.0°')
     expect(detail).toContain('−4～+5 m/s')
     expect(detail).toContain('0.10 s／0.20 s')
-    expect(trainingObjective('split-s', { metrics: proofFor(8) })?.title).toContain('8／8 翻轉下降與反向改出完成')
+    expect(trainingObjective('split-s', { metrics: proofFor(8) })?.title).toContain('8／8 破S與反向改出完成')
     expect(trainingObjective('split-s', { metrics: { ...proofFor(8), splitInverted: 0 } })?.detail).toContain('缺少同一段')
   })
 

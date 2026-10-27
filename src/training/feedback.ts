@@ -559,7 +559,7 @@ const SPLIT_S_STAGE_LABELS = ['起飛區地面準備', '自行起飛至進場高
 
 export function splitSStageLabel(phase: number): string {
   return Number.isInteger(phase) && phase >= 0 && phase < SPLIT_S_STAGE_LABELS.length
-    ? SPLIT_S_STAGE_LABELS[phase] : '目前翻轉下降練習'
+    ? SPLIT_S_STAGE_LABELS[phase] : '目前破S練習'
 }
 
 /** Interruption snapshots describe the stopped maneuver, not the later recovered position. */
@@ -568,10 +568,10 @@ export function splitSInterruptionReason(metrics: Readonly<Record<string, number
   const height = fact(metrics, 'interruptionAltitudeM', 'm')
   const distance = fact(metrics, 'interruptionLaunchDistanceM', 'm')
   switch (metrics.splitInterruptionReason) {
-    case 1: return '這段翻轉下降曾接地，地面停住不能代替空中改出。'
+    case 1: return '這段破S曾接地，地面停住不能代替空中改出。'
     case 2: return `中斷時${height ? `離地 ${height}` : '高度不足'}，低於空中改出需要的 ${SPLIT_MIN_HEIGHT} m；下次先保留高度，提早拉平止降。`
     case 3: return `中斷時${distance ? `距起飛點 ${distance}` : '已離開練習區'}，超出半徑 ${SPLIT_AREA_RADIUS} m。`
-    case 4: return '翻轉下降混入過多其他軸旋轉；先以橫滾翻至倒置，再以後拉俯仰走出下降半迴圈，不以偏航轉頭代替。'
+    case 4: return '破S混入過多其他軸旋轉；先以橫滾翻至倒置，再以後拉俯仰走出下降半迴圈，不以偏航轉頭代替。'
     case 5: return '本段旋轉過量，已超出半橫滾與下降半迴圈範圍；接近倒置及正飛時提早回中減緩旋轉。'
     case 6: return '本段反向翻回或折返，連續動作已中斷；先重新準備，再橫滾至倒置，沿同一後拉方向下降並改出。'
     case 7: return `尚未開始翻轉便失去進場高度${height ? `，中斷時離地 ${height}` : ''}；先升回至少 ${SPLIT_ENTRY_HEIGHT} m，再建立前速。`
@@ -593,7 +593,7 @@ function splitSObjective(metrics: Readonly<Record<string, number>>): TrainingObj
   if (valid && phase >= 3 && phase < 8) phase = !(metrics.splitInverted > 0.5) ? 3
     : !(metrics.splitDescended > 0.5) ? 4 : !(metrics.splitReversed > 0.5) ? 5 : !(metrics.splitCompleted > 0.5) ? 6 : 7
   if (phase === 8 && valid && metrics.splitCompleted > 0.5 && metrics.splitInverted > 0.5 && metrics.splitDescended > 0.5 && metrics.splitReversed > 0.5) return {
-    title: '8／8 翻轉下降與反向改出完成',
+    title: '8／8 破S與反向改出完成',
     detail: '已觀察到同一段橫滾倒置、下降半迴圈、反轉實際飛行方向及正飛改出，並恢復空中控制；可解除解鎖，不需回原點或降落。',
   }
   const title = `${Math.min(8, phase + 1)}／8 ${splitSStageLabel(Math.min(7, phase))}`
@@ -1187,11 +1187,11 @@ export function trainingHint(
   const message = evaluation?.message?.trim()
   if (lessonId === 'split-s' && evaluation?.status === 'failure') {
     const restart = '本次練習已結束；按「再練一次」會清空本次步驟，從地面重新開始。'
-    if (/墜毀|撞擊|crash|impact|Obstacle collision:/iu.test(message ?? '')) return `本次發生墜毀，翻轉下降已停止；先重設場景，下一次保留足夠進場高度並提早改出。${restart}`
+    if (/墜毀|撞擊|crash|impact|Obstacle collision:/iu.test(message ?? '')) return `本次發生墜毀，破S已停止；先重設場景，下一次保留足夠進場高度並提早改出。${restart}`
     if (/解除解鎖|上鎖|失焦|失去焦點|斷線|disarm|focus|disconnect/iu.test(message ?? '')) return `本次因解除解鎖、失去焦點或連線中斷而停止；確認網頁與控制器就緒後重試。${restart}`
-    if (/無效|資料中斷|時間倒退|跳躍|缺少有效|不一致|重設|invalid|non-finite|telemetry.*gap|reset|rewind/iu.test(message ?? '')) return `本次飛行資料無效、中斷或被重設，無法判定翻轉下降表現；保持網頁在前景後重試。${restart}`
-    if (/逾時|timed out|timeout/iu.test(message ?? '')) return `本次翻轉下降挑戰逾時。${restart}`
-    return `本次翻轉下降尚未完成。${restart}`
+    if (/無效|資料中斷|時間倒退|跳躍|缺少有效|不一致|重設|invalid|non-finite|telemetry.*gap|reset|rewind/iu.test(message ?? '')) return `本次飛行資料無效、中斷或被重設，無法判定破S表現；保持網頁在前景後重試。${restart}`
+    if (/逾時|timed out|timeout/iu.test(message ?? '')) return `本次破S挑戰逾時。${restart}`
+    return `本次破S尚未完成。${restart}`
   }
   if (lessonId === 'split-s' && evaluation?.status === 'continue' && evaluation.metrics && evaluation.recovery !== 'restart') {
     const objective = splitSObjective(evaluation.metrics)

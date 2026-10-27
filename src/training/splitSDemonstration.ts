@@ -20,15 +20,15 @@ const CAPACITY = 7_500
 const HALF_ROLL = quaternionFromRotationVector({ x: 0, y: 0, z: -Math.PI })
 const REVERSED_HEADING = quaternionFromRotationVector({ x: 0, y: -Math.PI, z: 0 })
 const CAPTIONS = [
-  '從地面自行起飛；這段翻轉下降示範以實際搖桿與物理錄製，觀看不計入真人成績。',
+  '從地面自行起飛；這段破S示範以實際搖桿與物理錄製，觀看不計入真人成績。',
   '第 2 步：自行起飛至約 25 m，留出倒置後下降半迴圈及改出的空間。',
-  '第 3 步：建立前進速度並保持進場高度，再開始半圈橫滾。',
-  '第 4 步：前進準備完成；先橫滾半圈到倒置，再向後拉俯仰進入下降段。',
-  '第 5 步：已觀察到半圈橫滾與倒置；接著向後拉俯仰，實際往下繞弧。',
+  '第 3 步：辨認橘色參考橫樑；從樑上方建立前進速度並保持進場高度。',
+  '第 4 步：前進準備完成；在樑上方橫滾半圈至倒置，再於樑後方向後拉俯仰進入下降段。',
+  '第 5 步：已觀察到半圈橫滾與倒置；在樑後方向後拉俯仰，對照保留的弧線往下繞。',
   '第 6 步：已開始下降半迴圈；保持同一後拉方向，讓機頭與實際速度逐漸轉向來路。',
-  '第 7 步：已轉向來路並實際反向移動；繼續拉回正飛，保留下方高度。',
+  '第 7 步：已轉向來路並實際反向移動；繼續拉回正飛，對照參考橫樑下方的出口。',
   '第 8 步：已完成半迴圈並回正；回中減緩旋轉，補油止住下降，再恢復控制。',
-  '翻轉下降八步已完成；已觀察到半圈橫滾、倒置、下降半迴圈、反向出場及空中恢復。',
+  '破S八步已完成；已觀察到半圈橫滾、倒置、下降半迴圈、反向出場及空中恢復。',
 ] as const
 
 function clamp(value: number, low: number, high: number): number {
@@ -49,7 +49,7 @@ export function recordSplitSDemonstration(
   const maximumRate = (axis: RateAxis): number => Math.min(280, settings.controller.rates.axes[axis].maxRateDegPerSec * 0.94,
     (settings.controller.rateLimitsDegPerSec[axis] ?? Number.POSITIVE_INFINITY) * 0.94)
   if (maximumRate('roll') < 180 || maximumRate('pitch') < 240 || maximumThrust / settings.drone.massKg < 28) {
-    throw new RangeError('目前角速度或推力不足以完成翻轉下降示範，請採用新手或一般預設。')
+    throw new RangeError('目前角速度或推力不足以完成破S示範，請採用新手或一般預設。')
   }
   simulation.resetForTraining(launch, { x: 0, y: 0, z: 0, w: 1 })
   simulation.arm()
@@ -84,8 +84,8 @@ export function recordSplitSDemonstration(
         touching: state.positionM.y - supportOffsetM <= ground + GROUND_CONTACT_SLOP_M + 1e-5 } }
     const next = splitSLearningEvaluator.evaluate(sample, { lesson: SPLIT_S_LESSON, mode: 'practice', elapsedSeconds: state.timeSeconds,
       sceneReferences: references, checkpoints, trajectory: [], previousSample: previous, previousFlightSample: previous, previousEvaluation: evaluation })
-    if ((next.metrics?.splitInterrupted ?? 0) > 0.5) throw new RangeError(`目前設定無法連續完成翻轉下降示範。${next.hint ?? ''}`)
-    if (next.status === 'failure') throw new RangeError(`目前設定無法完成翻轉下降模擬示範。${next.message ?? ''}`)
+    if ((next.metrics?.splitInterrupted ?? 0) > 0.5) throw new RangeError(`目前設定無法連續完成破S示範。${next.hint ?? ''}`)
+    if (next.status === 'failure') throw new RangeError(`目前設定無法完成破S模擬示範。${next.message ?? ''}`)
     for (const id of next.checkpointIds ?? []) checkpoints[id] = { id, completed: true, completedAtSeconds: state.timeSeconds, metrics: { ...next.metrics } }
     previous = sample
     evaluation = next
@@ -159,7 +159,7 @@ export function recordSplitSDemonstration(
   for (let index = 0; index < MAXIMUM_DURATION_SECONDS / STEP_SECONDS; index += 1) {
     const input = inputAt(index * STEP_SECONDS)
     const step = simulation.step(input, STEP_SECONDS)
-    if (step.state.crashed || step.reset || !step.telemetry.armed) throw new RangeError('目前設定無法安全完成翻轉下降示範，請採用新手或一般預設。')
+    if (step.state.crashed || step.reset || !step.telemetry.armed) throw new RangeError('目前設定無法安全完成破S示範，請採用新手或一般預設。')
     const retained = recorder.record({ timestampSeconds: step.state.timeSeconds, state: step.state, normalizedInput: input, armed: true, telemetry: step.telemetry })
     if (!retained) continue
     observe(input)
@@ -177,6 +177,6 @@ export function recordSplitSDemonstration(
       break
     }
   }
-  if (!completedMovie) throw new RangeError('目前設定無法在錄影容量內完成翻轉下降示範，請採用新手或一般預設。')
+  if (!completedMovie) throw new RangeError('目前設定無法在錄影容量內完成破S示範，請採用新手或一般預設。')
   return { recording: recorder.endFlight(), cues: Object.freeze(cues.map((value) => Object.freeze(value))) }
 }

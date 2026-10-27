@@ -1,10 +1,10 @@
 # Training system
 
-Release **2026.10.25.1** splits the accepted combined 前後翻轉 course into **L11 前翻** (`front-flip`) and **L12 後翻** (`back-flip`). Both use rules 6 and six observational phases, but completion requires the course’s own measured direction. Course names stay Chinese; retained `split-s` / `orbit` entries display as **L14 翻轉下降** / **L15 正刷鍋**, preserving rules and records. Their earlier prototypes remain; this batch does not add their complete teaching packages.
+Current release **2026.10.27.2** retains separate **L11 前翻** (`front-flip`) and **L12 後翻** (`back-flip`), both rules 6. **L13 大迴旋** (`power-loop`, rules 6) has user flight acceptance dated 2026-10-27; recommended height and the demonstration now use 25 m, retaining the 6 m minimum. **L14 破S** (`split-s`, rules 6) has ground-start eight-stage teaching and its own physics demonstration; a reference gantry supplements the retained route without a new collision or completion requirement. Its user acceptance remains pending. L15 正刷鍋 (`orbit`) retains its prototype and records.
 
-The learning menu has 14 courses; the registry has 16 definitions including historical `hover` and `full-flip`. `LEARNING_LESSONS` excludes both historical entries. L01 `takeoff` retains its 1.5-second settled-hover condition. Saved `hover` / `full-flip` selection opens `takeoff` / `front-flip`, without changing raw preferences during reading or crediting old results to replacements. Display numbers are not storage keys.
+The learning menu has 15 courses; the registry has 17 definitions including historical `hover` and `full-flip`. `LEARNING_LESSONS` excludes both historical entries. L01 `takeoff` retains its 1.5-second settled-hover condition. Saved `hover` / `full-flip` selection opens `takeoff` / `front-flip`, without changing raw preferences during reading or crediting old results to replacements. Display numbers and the L14 title change are not storage keys.
 
-The user accepted original combined L11 in `2026.10.24.3` / `92517a8`, after earlier L01–L10 approvals. These approvals remain under their original IDs and rules. New split-course automated and browser checks passed; user acceptance and common hardware/pilot calibration remain pending. See [compatibility](LEARNING_CONTRACT.md#課程編號與合併相容性), [the roadmap](LEARNING_ROADMAP.md), and [the two-course guide](L11_FULL_FLIP.md).
+The user accepted original combined L11 in `2026.10.24.3` / `92517a8`, the split L11/L12 courses on 2026-10-26, and L13 大迴旋 on 2026-10-27. Their original IDs and rule scopes retain the approvals and records. L14 破S acceptance and common hardware/pilot calibration remain separate. See [compatibility](LEARNING_CONTRACT.md#課程編號與合併相容性), [the roadmap](LEARNING_ROADMAP.md), and [the directional-flip guide](L11_FULL_FLIP.md).
 
 The evaluator result is based on finite fixed-step drone state and geometry. A
 stick sequence cannot pass a lesson. Synthetic fixture success is deterministic
@@ -232,15 +232,11 @@ Recovery requires at least 1.5 m altitude, tilt ≤30°, body rate ≤120°/s, h
 
 Displayed teaching kinds `front-flip` / `back-flip` bind to their respective lesson IDs. The internal legacy `full-flip` kind and lesson remain for compatibility, outside the displayed lesson/demo menu. Actual controller/physics recordings start from supported ground and open at 0.5×, with independent checkpoint timelines and measured degree/direction metrics. Playback never writes learner results. Live/replay instruments show turn progress, signed pitch rate and actual tilt beside altitude/XYZ. See [the guide](L11_FULL_FLIP.md).
 
-### 翻轉下降
+### 破S
 
-The setup requests an explicit disarmed reset at `{ x: 0, y: 25, z: 0 }` with
-identity orientation. The evaluator orders `entry -> inverted -> descent ->
-reversed -> recovered`. It requires sufficient entry altitude and speed, an
-upright-to-inverted attitude transition, descending motion while inverted, an
-actual heading reversal, then upright recovery with bounded altitude, speed,
-and position. The inverted checkpoint must precede reversal, so an upright
-U-turn is not a pass.
+The active `split-s` lesson uses rule 6 and requests an explicit disarmed reset at the supported ground launch. Its eight phases are ground, takeoff, forward entry, measured half-roll inversion, descending pitch half-loop, reversed travel, upright exit and airborne recovery. Entry requires at least 15 m altitude, with 25 m recommended. A yaw-only U-turn or an in-place backflip cannot replace the real roll-then-dive path. The orange gantry and retained route illustrate entry above the beam, descent beyond it and reverse exit below it; the reference adds no collision or precise-passage requirement. See [the current criteria](LEARNING_CONTRACT.md) and [the guide](L14_SPLIT_S.md).
+
+The former airborne rule-4 five-phase evaluator remains for historical contracts and scores. Old results stay in their original scope and are not credited to the current ground-start lesson.
 
 ### 正刷鍋 / 刷鍋
 
@@ -309,10 +305,10 @@ rules-6 completion. Current progress loads the per-lesson rule scope. Physics
 context stays version 1; settings, input source and practice/challenge remain
 separate comparison conditions.
 
-The 15 displayed demonstrations cover three L00 axis examples, L01–L10, L11 前翻 and L12 後翻.
+The 17 displayed demonstrations cover three L00 axis examples and L01–L14, including separate L11 前翻, L12 後翻, L13 大迴旋 and L14 破S recordings.
 Their bounded recordings are generated through the real 240 Hz simulator and
 play through the independent ghost. The L01 demonstration explicitly teaches both takeoff and continuous hover.
-This release does not add demonstrations for L14 翻轉下降 or L15 正刷鍋.
+L14 has its own eight-stage physics demonstration; L15 正刷鍋 still awaits its expanded teaching demonstration.
 
 `createDemonstrationProgress` observes each retained course recording once with
 its own checkpoint/evaluator state, outside the live session and progress store.

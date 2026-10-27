@@ -1100,7 +1100,7 @@ describe('大迴旋 result observations', () => {
   })
 })
 
-describe('翻轉下降 current-rule result observations', () => {
+describe('破S current-rule result observations', () => {
   const splitContext: TrainingAttemptContext = { ...currentContext, rulesVersion: 6 }
   const metrics = { splitPhase: 7, splitEpisodeValid: 1, splitInterrupted: 0, splitInverted: 1,
     splitDescended: 1, splitReversed: 1, splitCompleted: 1, splitRollProgressDegrees: 180,
@@ -1165,7 +1165,7 @@ describe('翻轉下降 current-rule result observations', () => {
     expect(recovery.observedStrength).toContain('反向正飛改出')
     expect(recovery.observedGap).toContain('傾角 54.0°')
     expect(recovery.observedGap).toContain('−4～+5 m/s')
-    const timeout = summarizeTrainingResult({ ...splitResult, message: '翻轉下降挑戰逾時。' })
+    const timeout = summarizeTrainingResult({ ...splitResult, message: '破S挑戰逾時。' })
     expect(timeout.observedGap).toContain('本次挑戰逾時')
     expect(timeout.nextPractice).toContain('清空本次步驟')
   })

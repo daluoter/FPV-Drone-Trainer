@@ -7,21 +7,20 @@ import { GROUND_CONTACT_SLOP_M } from '../simulation/dynamics'
 import type { TuningSettings } from '../tuning/config'
 import type { TeachingCue } from './demonstrations'
 import { createTrainingFieldAnchors } from './field'
-import { POWER_LOOP_LESSON, powerLoopEvaluator } from './powerLoop'
+import { POWER_LOOP_LESSON, POWER_LOOP_TARGET_HEIGHT_M, powerLoopEvaluator } from './powerLoop'
 import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample } from './types'
 
 const STEP_SECONDS = 1 / 240
 const RADIUS_M = 8
 const ANGULAR_SPEED_RAD_PER_SECOND = 1.35
 const ENTRY_SPEED_MPS = RADIUS_M * ANGULAR_SPEED_RAD_PER_SECOND
-const TARGET_HEIGHT_M = 10
 const MAXIMUM_DURATION_SECONDS = 120
 const CAPACITY = 7_500
 
 const CAPTIONS = [
   '從地面自行起飛；這段示範以實際搖桿與物理飛出大迴旋，觀看不計入真人成績。',
-  '第 2 步：自行起飛，先爬升至約 10 m，留出下半圈與改出的空間。',
-  '第 3 步：保持高度並建立前進速度；大迴旋需要飛出路徑，原地後翻不算完成。',
+  `第 2 步：自行起飛，先爬升至約 ${POWER_LOOP_TARGET_HEIGHT_M} m，留出下半圈與改出的空間。`,
+  `第 3 步：繼續升至約 ${POWER_LOOP_TARGET_HEIGHT_M} m，再保持高度並建立前進速度；大迴旋需要飛出路徑，原地後翻不算完成。`,
   '第 4 步：已建立前進速度；穩住入彎高度，接著拉起機頭、配合油門沿弧線爬升。',
   '第 5 步：已向上拉起並實際爬升；繼續拉過頂部，接近倒置時減少油門。',
   '第 6 步：已觀察到倒置；繼續越過頂部並往下繞回，維持同方向俯仰，預留改出高度。',
@@ -47,7 +46,7 @@ export function recordPowerLoopDemonstration(
 ): { readonly recording: ReplayRecording; readonly cues: readonly TeachingCue[] } {
   const { launch, landing } = createTrainingFieldAnchors(settings.drone)
   const ground = settings.drone.ground.heightM
-  const altitude = ground + TARGET_HEIGHT_M
+  const altitude = ground + POWER_LOOP_TARGET_HEIGHT_M
   const maximumThrust = settings.drone.motors.reduce((sum, motor) => sum + motor.maxThrustN, 0)
   const maximumPitchRate = Math.min(280, settings.controller.rates.axes.pitch.maxRateDegPerSec * 0.94,
     (settings.controller.rateLimitsDegPerSec.pitch ?? Number.POSITIVE_INFINITY) * 0.94)

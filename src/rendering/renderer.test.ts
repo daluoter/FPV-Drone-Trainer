@@ -1,4 +1,5 @@
 import { SPLIT_S_TARGET_HEIGHT_M } from '../training/splitS'
+import { POWER_LOOP_TARGET_HEIGHT_M } from '../training/powerLoop'
 import * as THREE from 'three'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -134,6 +135,10 @@ describe('interactive free camera renderer integration', () => {
       expect(renderer.getFreeCameraState().targetM).toEqual({ ...initial.targetM, y: initial.targetM.y + 1 })
       renderer.moveFreeCameraVertically(-1)
       expect(renderer.getFreeCameraState().targetM).toEqual(initial.targetM)
+      renderer.moveFreeCameraHorizontally(0, 1)
+      const forward = renderer.getFreeCameraState()
+      expect(Math.hypot(forward.targetM.x - initial.targetM.x, forward.targetM.z - initial.targetM.z)).toBeCloseTo(1)
+      expect(forward.targetM.y).toBe(initial.targetM.y)
       expect(JSON.stringify(live)).toBe(liveBefore)
 
       const ghost = { positionM: { x: 20, y: 30, z: -40 }, orientation: { x: 0, y: 0, z: 0, w: 1 } }
@@ -147,6 +152,12 @@ describe('interactive free camera renderer integration', () => {
       expect(renderer.getFreeCameraState()).toEqual(lowered)
       expect(lowered.targetM).toEqual({ ...ghost.positionM, y: ghost.positionM.y - 1 })
       expect(lowered.positionM.y).toBeCloseTo(ghost.positionM.y + 2)
+      renderer.moveFreeCameraHorizontally(-1, 0)
+      const shifted = renderer.getFreeCameraState()
+      renderer.renderGhost(ghost)
+      expect(renderer.getFreeCameraState()).toEqual(shifted)
+      expect(Math.hypot(shifted.targetM.x - lowered.targetM.x, shifted.targetM.z - lowered.targetM.z)).toBeCloseTo(1)
+      expect(shifted.targetM.y).toBe(lowered.targetM.y)
       expect(JSON.stringify(ghost)).toBe(ghostBefore)
       expect(JSON.stringify(live)).toBe(liveBefore)
       expect(applyLive).not.toHaveBeenCalled()
@@ -162,12 +173,14 @@ describe('interactive free camera renderer integration', () => {
         renderer.setCameraMode(mode)
         const before = renderer.getFreeCameraState()
         renderer.moveFreeCameraVertically(1)
+        renderer.moveFreeCameraHorizontally(1, 1)
         expect(renderer.getFreeCameraState()).toEqual(before)
       }
       renderer.setCameraMode('free')
       canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }))
       const lost = renderer.getFreeCameraState()
       renderer.moveFreeCameraVertically(1)
+      renderer.moveFreeCameraHorizontally(1, 1)
       expect(renderer.getFreeCameraState()).toEqual(lost)
       canvas.dispatchEvent(new Event('webglcontextrestored'))
       renderer.moveFreeCameraVertically(1)
@@ -175,6 +188,7 @@ describe('interactive free camera renderer integration', () => {
       renderer.dispose()
       const disposed = renderer.getFreeCameraState()
       renderer.moveFreeCameraVertically(-1)
+      renderer.moveFreeCameraHorizontally(-1, -1)
       expect(renderer.getFreeCameraState()).toEqual(disposed)
     } finally { renderer.dispose(); canvas.remove() }
   })
@@ -604,7 +618,7 @@ describe('FlightRenderer lifecycle and failure contract', () => {
       const guide = renderer.scene.getObjectByName('loop-stage-reference') as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
       expect(guide.material.color.getHex()).toBe(0xffc978)
       expect(renderer.scene.getObjectByName('loop-stage-guidance')?.position.toArray()).toEqual([0, 16, -18])
-      expect(renderer.flightScene.getReference('loop-zone')?.positionM).toEqual({ x: 6, y: 15, z: -3 })
+      expect(renderer.flightScene.getReference('loop-zone')?.positionM).toEqual({ x: 6, y: 5 + POWER_LOOP_TARGET_HEIGHT_M, z: -3 })
       expect(renderer.scene.getObjectByName('full-flip-field')?.visible).toBe(false)
       expect(renderer.scene.getObjectByName('wide-gate-field')?.visible).toBe(false)
       expect(renderer.canvas).toBe(canvas)
@@ -635,6 +649,7 @@ describe('FlightRenderer lifecycle and failure contract', () => {
     try {
       renderer.setLessonTarget('split-s')
       renderer.setSplitSStage(5)
+      const previousGuidancePosition = renderer.scene.getObjectByName('split-stage-guidance')!.position.toArray()
       const previous = renderer.flightScene
       const disposePrevious = vi.spyOn(previous, 'dispose')
       renderer.reconfigureScene({ ...DEFAULT_DRONE_CONFIG,
@@ -643,7 +658,7 @@ describe('FlightRenderer lifecycle and failure contract', () => {
       const guide = renderer.scene.getObjectByName('split-stage-reference') as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
       expect(guide.material.color.getHex()).toBe(0xffc978)
       const accent = renderer.scene.getObjectByName('split-stage-guidance')!
-      expect(accent.position.toArray()).toEqual([0, -12, -24])
+      expect(accent.position.toArray()).toEqual(previousGuidancePosition)
       expect(accent.rotation.y).toBe(Math.PI)
       expect(renderer.flightScene.getReference('split-zone')?.positionM).toEqual({ x: 6, y: 5 + SPLIT_S_TARGET_HEIGHT_M, z: -3 })
       expect(renderer.flightScene.getReference('split-s-reference')?.object.visible).toBe(false)

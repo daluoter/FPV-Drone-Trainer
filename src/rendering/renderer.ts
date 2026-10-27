@@ -158,6 +158,11 @@ export class FlightRenderer {
     this.freeCameraControls.moveVertically(deltaM)
   }
 
+  public moveFreeCameraHorizontally(rightM: number, forwardM: number): void {
+    if (this.disposed || this.cameraRig.mode !== 'free' || this.status.kind !== 'ready') return
+    this.freeCameraControls.moveHorizontally(rightM, forwardM)
+  }
+
   /** Update guidance without recreating the scene or changing simulation state. */
   public setLessonTarget(lessonId: string | null): void {
     if (this.disposed) return

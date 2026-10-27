@@ -996,8 +996,9 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     sizeM: { x: POWER_LOOP_AREA_RADIUS_M * 2, y: 16, z: POWER_LOOP_AREA_RADIUS_M * 2 },
   }
 
-  // The descending half-loop is a world-fixed illustration, not a collision
-  // surface or a prescribed circle. The pilot can use another entry heading.
+  // A broad visual gantry makes the over / far side / under relationship
+  // readable. It does not add collision geometry or a mandatory scored route.
+  // The pilot can still use another entry heading for the same maneuver.
   const splitField = new THREE.Group()
   splitField.name = 'split-s-field'
   splitField.position.set(field.launch.x, config.ground.heightM + SPLIT_S_TARGET_HEIGHT_M, field.launch.z)
@@ -1010,10 +1011,41 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   splitFloor.rotation.x = -Math.PI / 2
   splitFloor.position.y = -SPLIT_S_TARGET_HEIGHT_M + 0.025
   splitField.add(splitFloor)
+  const splitBeamZ = -40
+  const splitPathZ = splitBeamZ - 4
+  const splitPathRadiusM = 8
+  const splitExitY = -splitPathRadiusM * 2
+  const splitGantry = new THREE.Group()
+  splitGantry.name = 'split-reference-gantry'
+  splitGantry.userData = { teachingReference: '破S 參考橫樑', collision: false }
+  const addSplitReferenceBox = (name: string, size: readonly [number, number, number], position: readonly [number, number, number], color: number): THREE.Mesh => {
+    const referenceMaterial = material(color, 0.7, 0.12)
+    referenceMaterial.emissive.set(color)
+    referenceMaterial.emissiveIntensity = 0.18
+    const box = new THREE.Mesh(new THREE.BoxGeometry(...size), referenceMaterial)
+    box.name = name
+    box.position.set(...position)
+    splitGantry.add(box)
+    return box
+  }
+  addSplitReferenceBox('split-reference-beam', [22, 1, 2], [0, 18 - SPLIT_S_TARGET_HEIGHT_M, splitBeamZ], 0xffba52)
+  for (const [side, x] of [['left', -10], ['right', 10]] as const) {
+    addSplitReferenceBox(`split-reference-post-${side}`, [1, 18, 1.5], [x, 9 - SPLIT_S_TARGET_HEIGHT_M, splitBeamZ], 0x668691)
+    addSplitReferenceBox(`split-reference-foot-${side}`, [3, 0.35, 3], [x, 0.175 - SPLIT_S_TARGET_HEIGHT_M, splitBeamZ], 0x40565f)
+  }
+  // Opaque alternating marks give the broad beam a recognizable front and back
+  // even while inverted, rather than reading as another translucent path line.
+  for (const [index, x] of [-9.8, -7, -4.2, -1.4, 1.4, 4.2, 7, 9.8].entries()) {
+    for (const [side, z] of [['front', splitBeamZ + 1.025], ['back', splitBeamZ - 1.025]] as const) {
+      const stripe = addSplitReferenceBox(`split-reference-stripe-${side}-${index}`, [0.5, 0.74, 0.04], [x, 18 - SPLIT_S_TARGET_HEIGHT_M, z], 0x23373d)
+      stripe.rotation.z = Math.PI / 8
+    }
+  }
+  splitField.add(splitGantry)
   for (const [side, x] of [['left', -5], ['right', 5]] as const) {
     const points = Array.from({ length: 49 }, (_, index) => {
       const angle = index / 48 * Math.PI
-      return new THREE.Vector3(x, 6 * Math.cos(angle) - 6, -24 - 6 * Math.sin(angle))
+      return new THREE.Vector3(x, splitPathRadiusM * Math.cos(angle) - splitPathRadiusM, splitPathZ - splitPathRadiusM * Math.sin(angle))
     })
     const outline = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints(points),
@@ -1025,9 +1057,9 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   }
   const splitHeightPoles = new THREE.LineSegments(
     new THREE.BufferGeometry().setFromPoints([-7, 7].flatMap((x) => [
-      new THREE.Vector3(x, -SPLIT_S_TARGET_HEIGHT_M, -24), new THREE.Vector3(x, 1, -24),
-      ...[SPLIT_S_MIN_HEIGHT_M - SPLIT_S_TARGET_HEIGHT_M, -12, 0].flatMap((y) => [
-        new THREE.Vector3(x - 0.5, y, -24), new THREE.Vector3(x + 0.5, y, -24),
+      new THREE.Vector3(x, -SPLIT_S_TARGET_HEIGHT_M, splitPathZ), new THREE.Vector3(x, 1, splitPathZ),
+      ...[SPLIT_S_MIN_HEIGHT_M - SPLIT_S_TARGET_HEIGHT_M, splitExitY, 0].flatMap((y) => [
+        new THREE.Vector3(x - 0.5, y, splitPathZ), new THREE.Vector3(x + 0.5, y, splitPathZ),
       ]),
     ])),
     new THREE.LineBasicMaterial({ color: 0x8abac4, transparent: true, opacity: 0.45, depthWrite: false }),
@@ -1036,19 +1068,29 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   splitField.add(splitHeightPoles)
   const splitEntryBand = new THREE.LineLoop(
     new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(-6, 0, -20), new THREE.Vector3(-6, 0, -28),
-      new THREE.Vector3(6, 0, -28), new THREE.Vector3(6, 0, -20),
+      new THREE.Vector3(-6, 0, splitBeamZ + 4), new THREE.Vector3(-6, 0, splitPathZ - 2),
+      new THREE.Vector3(6, 0, splitPathZ - 2), new THREE.Vector3(6, 0, splitBeamZ + 4),
     ]),
     new THREE.LineDashedMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.55, dashSize: 0.7, gapSize: 0.6, depthWrite: false }),
   )
   splitEntryBand.name = 'split-entry-height-band'
   splitEntryBand.computeLineDistances()
   splitField.add(splitEntryBand)
+  const splitApproach = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, splitBeamZ + 12), new THREE.Vector3(0, 0, splitPathZ),
+      new THREE.Vector3(-1, 0, splitPathZ + 2), new THREE.Vector3(0, 0, splitPathZ),
+      new THREE.Vector3(1, 0, splitPathZ + 2), new THREE.Vector3(0, 0, splitPathZ),
+    ]),
+    new THREE.LineBasicMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.55, depthWrite: false }),
+  )
+  splitApproach.name = 'split-over-beam-approach'
+  splitField.add(splitApproach)
   const splitExit = new THREE.LineSegments(
     new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, -12, -24), new THREE.Vector3(0, -12, -12),
-      new THREE.Vector3(-1, -12, -14), new THREE.Vector3(0, -12, -12),
-      new THREE.Vector3(1, -12, -14), new THREE.Vector3(0, -12, -12),
+      new THREE.Vector3(0, splitExitY, splitPathZ), new THREE.Vector3(0, splitExitY, splitBeamZ + 8),
+      new THREE.Vector3(-1, splitExitY, splitBeamZ + 6), new THREE.Vector3(0, splitExitY, splitBeamZ + 8),
+      new THREE.Vector3(1, splitExitY, splitBeamZ + 6), new THREE.Vector3(0, splitExitY, splitBeamZ + 8),
     ]),
     new THREE.LineBasicMaterial({ color: 0xb8f36b, transparent: true, opacity: 0.55, depthWrite: false }),
   )
@@ -1246,10 +1288,11 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     splitAccent.visible = true
     splitStageMaterial.color.set(stage >= 7 ? 0xb8f36b : stage >= 3 ? 0xffc978 : 0x45d7f7)
     const [y, z] = stage === 0 ? [-SPLIT_S_TARGET_HEIGHT_M + 0.1, 0]
-      : stage <= 3 ? [0, -24]
-        : stage === 4 ? [-6, -30]
-          : stage === 5 ? [-12, -24]
-            : stage === 6 ? [-12, -19] : [-12, -14]
+      : stage <= 2 ? [0, splitBeamZ]
+        : stage === 3 ? [0, splitPathZ]
+          : stage === 4 ? [-splitPathRadiusM, splitPathZ - splitPathRadiusM]
+            : stage === 5 ? [splitExitY, splitPathZ]
+              : stage === 6 ? [splitExitY, splitBeamZ + 1] : [splitExitY, splitBeamZ + 8]
     splitAccent.position.set(0, y, z)
     splitAccent.rotation.y = stage >= 5 ? Math.PI : 0
   }

@@ -105,7 +105,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if response is None or response.status != 200:
                 raise AssertionError("The production entry page did not return HTTP 200.")
             expect(page).to_have_title("FPV Drone Trainer")
-            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.27.1")
+            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.27.2")
             report["release"] = page.get_by_test_id("app-release").inner_text()
 
             asset_urls = page.locator("script[src], link[rel='stylesheet'][href]").evaluate_all(
@@ -293,10 +293,10 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(lesson.locator("option[value='orbit']")).to_contain_text("L15")
             for option in lesson.locator("option").all_text_contents():
                 title = re.sub(r"^L\d{2}\s*[·：:]?\s*", "", option.strip())
-                if re.search(r"[A-Za-z]", title):
+                if title != "破S" and re.search(r"[A-Za-z]", title):
                     raise AssertionError(f"A visible course title still contains English: {option}")
             expect(flight.locator(".school-demo-toolbar").get_by_role("button")).to_have_count(17)
-            checks.append("Chinese-only course titles, fifteen active lessons and seventeen distinct demonstrations")
+            checks.append("Chinese course titles including the requested 破S name, fifteen active lessons and seventeen distinct demonstrations")
             progress_before_waiting = training_progress(page)
             training.get_by_role("button", name="開始課程", exact=True).click()
             expect(phase).to_have_text("倒數準備")
@@ -1265,6 +1265,13 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             home_loop = loop_motion()
             if any(abs(value) > .05 for value in home_loop.values()):
                 raise AssertionError(f"L13 does not begin with supported ground and zero loop dimensions: {home_loop}")
+            loop_chapters = demo_progress.get_by_role("list", name="示範步驟", exact=True).get_by_role("button")
+            loop_chapters.nth(3).click()
+            loop_entry_height = float(altitude.inner_text().split()[0])
+            if loop_entry_height < 24:
+                raise AssertionError(f"L13 demonstration starts pulling the loop below the new 25 m recommendation: {loop_entry_height} m.")
+            if screenshot:
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l13-higher-entry.png"))
             timeline.press("End")
             demonstration_snapshot("L13", 8, complete=True)
             end_loop = loop_motion()
@@ -1296,6 +1303,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 raise AssertionError("L13 chapter seeking did not pause its own clock and measured dimensions.")
             report["power_loop_course"] = {
                 "lesson_id": "power-loop", "course_code": "L13", "home": home_loop, "end": end_loop,
+                "entry_height_m": loop_entry_height,
                 "over_top": {"time_seconds": loop_chapter_time, **over_top_loop},
             }
             if screenshot:
@@ -1363,8 +1371,8 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             checks.append("L13 selection persists across reload while L00 pitch illustration and prior saved results remain independent")
 
             lesson.select_option("split-s")
-            expect(training.get_by_role("heading", name="翻轉下降", exact=True)).to_be_visible()
-            split_hud = flight.get_by_role("group", name="翻轉下降即時狀態", exact=True)
+            expect(training.get_by_role("heading", name="破S", exact=True)).to_be_visible()
+            split_hud = flight.get_by_role("group", name="破S即時狀態", exact=True)
             split_fields = {
                 "roll_degrees": flight.get_by_test_id("split-roll"),
                 "pitch_degrees": flight.get_by_test_id("split-pitch"),
@@ -1387,7 +1395,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if len(prior_split_steps) != 8:
                 raise AssertionError("L14 does not expose eight ground-to-descending-reversal checkpoints.")
             expect(split_hud).to_contain_text("即時")
-            flight.get_by_role("button", name="L14 翻轉下降示範", exact=True).click()
+            flight.get_by_role("button", name="L14 破S示範", exact=True).click()
             expect(flight.get_by_role("button", name="0.5×", exact=True)).to_have_attribute("aria-pressed", "true")
             expect(arm).to_be_disabled()
             expect(lesson).to_be_disabled()
@@ -1435,6 +1443,23 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if screenshot:
                 page.locator(".free-flight-layout").evaluate("layout => window.scrollTo({top: layout.getBoundingClientRect().top + window.scrollY - 8, behavior: 'instant'})")
                 page.screenshot(path=str(artifact_dir / "l14-demonstration-inverted.png"))
+                flight.get_by_role("button", name="Free / debug", exact=True).click()
+                flight.get_by_role("button", name="定位飛機", exact=True).click()
+                for _ in range(9):
+                    flight.get_by_role("button", name="降低鏡頭 1 m", exact=True).click()
+                canvas.scroll_into_view_if_needed()
+                reference_bounds = canvas.bounding_box()
+                page.mouse.move(reference_bounds["x"] + reference_bounds["width"] * .7,
+                    reference_bounds["y"] + reference_bounds["height"] * .7)
+                page.mouse.wheel(0, 1200)
+                page.wait_for_timeout(100)
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l14-reference-gantry-free.png"))
+                report["split_reference_view"] = canvas.evaluate("""element => ({
+                    position: JSON.parse(element.dataset.freeCameraPosition),
+                    target: JSON.parse(element.dataset.freeCameraTarget),
+                    distance: Number(element.dataset.freeCameraDistance)
+                })""")
+                flight.get_by_role("button", name="FPV", exact=True).click()
             report["split_s_hud_layouts"] = {}
             for width, height in ((1280, 720), (1280, 600), (375, 720)):
                 page.set_viewport_size({"width": width, "height": height})
@@ -1579,6 +1604,21 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 if not math.isclose(before["distance"], after["distance"], abs_tol=1e-6):
                     raise AssertionError("Changing camera height also changed the viewing distance.")
 
+            def assert_camera_horizontal_change(before: dict, after: dict, right_m: float, forward_m: float) -> None:
+                forward_x = before["target"]["x"] - before["position"]["x"]
+                forward_z = before["target"]["z"] - before["position"]["z"]
+                horizontal_distance = math.hypot(forward_x, forward_z)
+                forward_x, forward_z = forward_x / horizontal_distance, forward_z / horizontal_distance
+                expected = {"x": -forward_z * right_m + forward_x * forward_m,
+                    "y": 0, "z": forward_x * right_m + forward_z * forward_m}
+                for field in ("position", "target"):
+                    for axis in ("x", "y", "z"):
+                        actual = after[field][axis] - before[field][axis]
+                        if not math.isclose(actual, expected[axis], abs_tol=1e-6):
+                            raise AssertionError(f"Camera horizontal movement changed {field}.{axis} by {actual}; expected {expected[axis]} m.")
+                if not math.isclose(before["distance"], after["distance"], abs_tol=1e-6):
+                    raise AssertionError("Changing camera horizontal position also changed the viewing distance.")
+
             def camera_drag(button: str, dx: float, dy: float, shift: bool = False) -> None:
                 canvas.scroll_into_view_if_needed()
                 bounds = canvas.bounding_box()
@@ -1612,6 +1652,11 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             initial_camera = free_camera_state()
             raise_camera = free_help.get_by_role("button", name="升高鏡頭 1 m", exact=True)
             lower_camera = free_help.get_by_role("button", name="降低鏡頭 1 m", exact=True)
+            forward_camera = free_help.get_by_role("button", name="前移鏡頭 1 m", exact=True)
+            backward_camera = free_help.get_by_role("button", name="後移鏡頭 1 m", exact=True)
+            left_camera = free_help.get_by_role("button", name="左移鏡頭 1 m", exact=True)
+            right_camera = free_help.get_by_role("button", name="右移鏡頭 1 m", exact=True)
+            expect(free_help.get_by_role("group", name="鏡頭移動控制", exact=True)).to_be_visible()
             raise_camera.click()
             raised_camera = free_camera_state()
             assert_camera_height_change(initial_camera, raised_camera, 1)
@@ -1635,6 +1680,28 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             orbited_camera = free_camera_state()
             if orbited_camera["position"] == initial_camera["position"] or orbited_camera["target"] != initial_camera["target"]:
                 raise AssertionError("Left drag did not orbit around the retained free-camera target.")
+            forward_camera.click()
+            forward_once = free_camera_state()
+            assert_camera_horizontal_change(orbited_camera, forward_once, 0, 1)
+            expect(forward_camera).to_be_focused()
+            forward_camera.press("Enter")
+            assert_camera_horizontal_change(orbited_camera, free_camera_state(), 0, 2)
+            expect(forward_camera).to_be_focused()
+            backward_camera.click()
+            backward_camera.click()
+            assert_camera_horizontal_change(orbited_camera, free_camera_state(), 0, 0)
+            left_camera.click()
+            left_once = free_camera_state()
+            assert_camera_horizontal_change(orbited_camera, left_once, -1, 0)
+            right_camera.click()
+            assert_camera_horizontal_change(orbited_camera, free_camera_state(), 0, 0)
+            if visible_position() != live_position or training_progress(page) != before_free_results:
+                raise AssertionError("Camera direction buttons changed the aircraft position or saved results.")
+            report["free_camera_direction_buttons"] = {"orbited": orbited_camera, "forward": forward_once,
+                "left": left_once, "restored": free_camera_state(), "keyboard_button_focus_retained": True}
+            if screenshot:
+                page.screenshot(path=str(artifact_dir / "free-camera-direction-controls-live.png"))
+            checks.append("visible camera direction buttons translate 1 m along the explored camera yaw on the horizontal plane without aircraft or saved-result writes")
             camera_drag("right", 45, 20)
             panned_camera = free_camera_state()
             if panned_camera["target"] == orbited_camera["target"]:
@@ -1732,6 +1799,13 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             assert_camera_height_change(replay_camera, free_camera_state(), 1)
             lower_camera.click()
             assert_camera_height_change(replay_camera, free_camera_state(), 0)
+            forward_camera.click()
+            assert_camera_horizontal_change(replay_camera, free_camera_state(), 0, 1)
+            backward_camera.click()
+            left_camera.click()
+            assert_camera_horizontal_change(replay_camera, free_camera_state(), -1, 0)
+            right_camera.click()
+            assert_camera_horizontal_change(replay_camera, free_camera_state(), 0, 0)
             camera_drag("left", -55, 20)
             canvas.focus()
             canvas.press("PageUp")
@@ -1754,7 +1828,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 helper_bounds = free_help.bounding_box()
                 if not helper_bounds or helper_bounds["x"] < 0 or helper_bounds["x"] + helper_bounds["width"] > width + 1:
                     raise AssertionError(f"Free-camera instructions overflow {width}x{height}: {helper_bounds}")
-                for button in (raise_camera, lower_camera):
+                for button in (raise_camera, lower_camera, forward_camera, backward_camera, left_camera, right_camera):
                     expect(button).to_be_visible()
                     button_bounds = button.bounding_box()
                     if not button_bounds or button_bounds["x"] < helper_bounds["x"] or button_bounds["x"] + button_bounds["width"] > helper_bounds["x"] + helper_bounds["width"] + 1:
@@ -1764,6 +1838,13 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 assert_camera_height_change(layout_camera, free_camera_state(), 1)
                 lower_camera.click()
                 assert_camera_height_change(layout_camera, free_camera_state(), 0)
+                forward_camera.click()
+                assert_camera_horizontal_change(layout_camera, free_camera_state(), 0, 1)
+                backward_camera.click()
+                left_camera.click()
+                assert_camera_horizontal_change(layout_camera, free_camera_state(), -1, 0)
+                right_camera.click()
+                assert_camera_horizontal_change(layout_camera, free_camera_state(), 0, 0)
                 if abs(float(timeline.input_value()) - paused_time) > .02 or visible_position() != paused_position or demo_progress.inner_text() != paused_progress or training_progress(page) != before_free_results:
                     raise AssertionError(f"Camera height controls changed paused replay or saved results at {width}x{height}.")
                 for other in (position_hud.bounding_box(), flight.locator(".flight-safe-overlay").bounding_box()):

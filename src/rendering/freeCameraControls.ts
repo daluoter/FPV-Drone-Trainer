@@ -92,6 +92,16 @@ export class FreeCameraControls {
     this.apply()
   }
 
+  /** Translate on the horizontal plane relative to the view's current yaw. */
+  public moveHorizontally(rightM: number, forwardM: number): void {
+    if (this.disposed || !this.enabled || !Number.isFinite(rightM) || !Number.isFinite(forwardM)
+      || rightM === 0 && forwardM === 0) return
+    const forward = new THREE.Vector3(-Math.sin(this.spherical.theta), 0, -Math.cos(this.spherical.theta))
+    const right = new THREE.Vector3(-forward.z, 0, forward.x)
+    this.target.addScaledVector(right, rightM).addScaledVector(forward, forwardM)
+    this.apply()
+  }
+
   /** Called on ordinary live and replay render frames, including paused playback. */
   public update(timeMs = performance.now()): void {
     if (this.disposed || !this.enabled) return

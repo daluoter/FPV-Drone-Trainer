@@ -197,20 +197,20 @@ function splitSResultFeedback(result: TrainingResult, scope: string): TrainingRe
   const timedOut = /逾時|timed out|timeout/iu.test(message)
   if (result.outcome !== 'SUCCESS') {
     if (/墜毀|撞擊|crash|impact|Obstacle collision:/iu.test(message)) return {
-      observedStrength: null, observedGap: '本次發生墜毀，翻轉下降與空中改出尚未完成。',
+      observedStrength: null, observedGap: '本次發生墜毀，破S與空中改出尚未完成。',
       nextPractice: `先重設場景。${restart}下次取得約 25 m 進場高度，下降時提早拉平、補油止降。`, scopeNote: scope,
     }
     if (/解除解鎖|上鎖|失焦|失去焦點|斷線|disarm|focus|disconnect/iu.test(message)) return {
-      observedStrength: null, observedGap: '本次因解除解鎖、失去焦點或連線中斷而停止，不能據此判定翻轉下降操控表現。',
+      observedStrength: null, observedGap: '本次因解除解鎖、失去焦點或連線中斷而停止，不能據此判定破S操控表現。',
       nextPractice: `${restart}確認畫面與控制器就緒，倒數後再明確解鎖。`, scopeNote: scope,
     }
     if (/無效|資料中斷|時間倒退|跳躍|缺少有效|不一致|重設|invalid|non-finite|telemetry.*gap|reset|rewind/iu.test(message)) return {
-      observedStrength: null, observedGap: '本次飛行資料無效、中斷或被重設，無法判定連續的翻轉下降航跡。',
+      observedStrength: null, observedGap: '本次飛行資料無效、中斷或被重設，無法判定連續的破S航跡。',
       nextPractice: `${restart}保持網頁在前景，依序完成橫滾倒置、下降半迴圈與反向改出。`, scopeNote: scope,
     }
   }
   if (!Number.isFinite(result.sampleCount) || result.sampleCount <= 0) return {
-    observedStrength: null, observedGap: '本次沒有有效的已解鎖飛行樣本，無法判定翻轉下降表現。',
+    observedStrength: null, observedGap: '本次沒有有效的已解鎖飛行樣本，無法判定破S表現。',
     nextPractice: `${restart}確認畫面與控制器就緒，再明確解鎖自行起飛。`, scopeNote: scope,
   }
   const metrics = result.metrics
@@ -226,7 +226,7 @@ function splitSResultFeedback(result: TrainingResult, scope: string): TrainingRe
   }
   const ended = timedOut ? '本次挑戰逾時；' : ''
   if (phase === null || phase === 8) return {
-    observedStrength: null, observedGap: `${ended}翻轉下降的連續分段或實際反向航跡證據不足，不能只以完成標記判定通過。`,
+    observedStrength: null, observedGap: `${ended}破S的連續分段或實際反向航跡證據不足，不能只以完成標記判定通過。`,
     nextPractice: `${restart}先取得高度與前速，再依序橫滾倒置、後拉下降及反向改出。`, scopeNote: scope,
   }
   let observation: string

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type * as THREE from 'three'
+import * as THREE from 'three'
 
 import { createDefaultDroneConfig, createInitialDroneState } from '../drone'
 import { rotateVectorByQuaternion } from '../math/quaternion'
@@ -8,6 +8,9 @@ import { createSquareRouteTargets, SQUARE_ROUTE_TARGET_RADIUS_M } from '../train
 import { createFigureEightTargets, FIGURE_EIGHT_TARGET_RADIUS_M } from '../training/figureEight'
 import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
 import { SPLIT_S_MIN_HEIGHT_M, SPLIT_S_TARGET_HEIGHT_M } from '../training/splitS'
+import { POWER_LOOP_TARGET_HEIGHT_M } from '../training/powerLoop'
+import { createTeachingDemonstration } from '../training/demonstrations'
+import { createTuningPreset } from '../tuning/presets'
 
 import { createFlightScene } from './scene'
 
@@ -1066,8 +1069,8 @@ describe('flight scene reference contract', () => {
     try {
       const reference = scene.getReference('loop-zone')!
       expect(scene.sceneReferences.at(-2)?.id).toBe('loop-zone')
-      expect(reference.positionM).toEqual({ x: 6, y: 15, z: -3 })
-      expect(reference.object.position.toArray()).toEqual([6, 15, -3])
+      expect(reference.positionM).toEqual({ x: 6, y: 5 + POWER_LOOP_TARGET_HEIGHT_M, z: -3 })
+      expect(reference.object.position.toArray()).toEqual([6, 5 + POWER_LOOP_TARGET_HEIGHT_M, -3])
       expect(reference.sizeM).toEqual({ x: 240, y: 16, z: 240 })
       const floor = scene.scene.getObjectByName('loop-area-boundary') as THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>
       expect(floor.geometry.parameters.outerRadius).toBe(120)
@@ -1081,8 +1084,8 @@ describe('flight scene reference contract', () => {
         const points = outline.geometry.getAttribute('position')
         const heights = Array.from({ length: points.count }, (_, i) => points.getY(i) + reference.positionM.y)
         const depths = Array.from({ length: points.count }, (_, i) => points.getZ(i) + reference.positionM.z)
-        expect(Math.min(...heights)).toBe(15)
-        expect(Math.max(...heights)).toBe(31)
+        expect(Math.min(...heights)).toBe(5 + POWER_LOOP_TARGET_HEIGHT_M)
+        expect(Math.max(...heights)).toBe(5 + POWER_LOOP_TARGET_HEIGHT_M + 16)
         expect(Math.min(...depths)).toBe(-29)
         expect(Math.max(...depths)).toBe(-13)
         expect(points.getX(0)).toBe(index === 0 ? -5 : 5)
@@ -1125,7 +1128,7 @@ describe('flight scene reference contract', () => {
         expect(scene.scene.getObjectByName(name)?.visible).toBe(false)
       }
       for (const id of ['hover-zone', 'orbit-poi', 'split-s-reference']) expect(scene.getReference(id)?.object.visible).toBe(false)
-      for (const [stage, color, y, z] of [[0, 0x45d7f7, -SPLIT_S_TARGET_HEIGHT_M + 0.1, 0], [1, 0x45d7f7, 0, -24], [2, 0x45d7f7, 0, -24], [3, 0xffc978, 0, -24], [4, 0xffc978, -6, -30], [5, 0xffc978, -12, -24], [6, 0xffc978, -12, -19], [7, 0xb8f36b, -12, -14], [8, 0xb8f36b, -12, -14]]) {
+      for (const [stage, color, y, z] of [[0, 0x45d7f7, -SPLIT_S_TARGET_HEIGHT_M + 0.1, 0], [1, 0x45d7f7, 0, -40], [2, 0x45d7f7, 0, -40], [3, 0xffc978, 0, -44], [4, 0xffc978, -8, -52], [5, 0xffc978, -16, -44], [6, 0xffc978, -16, -39], [7, 0xb8f36b, -16, -32], [8, 0xb8f36b, -16, -32]]) {
         scene.setSplitSStage(stage)
         expect(accent.visible).toBe(true)
         expect(guide.material.color.getHex()).toBe(color)
@@ -1168,7 +1171,8 @@ describe('flight scene reference contract', () => {
       expect(floor.getWorldPosition(floor.position.clone()).y).toBeCloseTo(5.025)
       const meshes: THREE.Object3D[] = []
       reference.object.traverse((object) => { if ((object as THREE.Mesh).isMesh) meshes.push(object) })
-      expect(meshes).toEqual([floor])
+      expect(meshes[0]).toBe(floor)
+      expect(meshes.filter((object) => object.name.startsWith('split-reference-'))).toHaveLength(21)
       expect(floor.material.transparent).toBe(true)
       for (const [index, side] of ['left', 'right'].entries()) {
         const outline = scene.scene.getObjectByName(`split-outline-${side}`) as THREE.Line<THREE.BufferGeometry, THREE.LineDashedMaterial>
@@ -1176,9 +1180,9 @@ describe('flight scene reference contract', () => {
         const heights = Array.from({ length: points.count }, (_, i) => points.getY(i) + reference.positionM.y)
         const depths = Array.from({ length: points.count }, (_, i) => points.getZ(i) + reference.positionM.z)
         expect(Math.max(...heights)).toBe(5 + SPLIT_S_TARGET_HEIGHT_M)
-        expect(Math.min(...heights)).toBe(5 + SPLIT_S_TARGET_HEIGHT_M - 12)
-        expect(Math.min(...depths)).toBe(-33)
-        expect(Math.max(...depths)).toBe(-27)
+        expect(Math.min(...heights)).toBe(5 + SPLIT_S_TARGET_HEIGHT_M - 16)
+        expect(Math.min(...depths)).toBe(-55)
+        expect(Math.max(...depths)).toBe(-47)
         expect(points.getX(0)).toBe(index === 0 ? -5 : 5)
         expect(outline.material.isLineDashedMaterial).toBe(true)
         expect(outline.geometry.getAttribute('lineDistance')).toBeDefined()
@@ -1200,13 +1204,92 @@ describe('flight scene reference contract', () => {
 
   it('disposes every split descent outline, floor, height band and direction marker exactly once', () => {
     const scene = createFlightScene()
-    const resources = ['split-area-boundary', 'split-outline-left', 'split-outline-right', 'split-height-poles', 'split-entry-height-band', 'split-reversed-exit', 'split-stage-reference'].flatMap((name) => {
+    const resources = ['split-area-boundary', 'split-outline-left', 'split-outline-right', 'split-height-poles', 'split-entry-height-band', 'split-over-beam-approach', 'split-reversed-exit', 'split-stage-reference'].flatMap((name) => {
       const object = scene.scene.getObjectByName(name) as THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>
       return [object.geometry, object.material]
     })
     const dispose = resources.map((resource) => vi.spyOn(resource, 'dispose'))
     scene.dispose()
     for (const spy of dispose) expect(spy).toHaveBeenCalledOnce()
+  })
+
+  it('shows an opaque orange gantry between the retained upper approach and lower reverse-exit paths', () => {
+    const defaults = createDefaultDroneConfig()
+    const config = { ...defaults, ground: { ...defaults.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 35, z: -3 } }
+    const scene = createFlightScene(config)
+    const gantry = scene.scene.getObjectByName('split-reference-gantry')!
+    const beam = scene.scene.getObjectByName('split-reference-beam') as THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>
+    scene.scene.updateMatrixWorld(true)
+    const resourceDisposals: ReturnType<typeof vi.spyOn>[] = []
+    try {
+      expect(gantry.parent).toBe(scene.getReference('split-zone')?.object)
+      expect(gantry.userData).toEqual({ teachingReference: '破S 參考橫樑', collision: false })
+      expect(beam.geometry.parameters).toMatchObject({ width: 22, height: 1, depth: 2 })
+      expect(beam.material.transparent).toBe(false)
+      expect(beam.material.opacity).toBe(1)
+      expect(beam.material.color.getHex()).toBe(0xffba52)
+      const bounds = new THREE.Box3().setFromObject(beam)
+      expect(bounds.min.toArray()).toEqual([-5, 22.5, -44])
+      expect(bounds.max.toArray()).toEqual([17, 23.5, -42])
+      const before = beam.matrixWorld.toArray()
+      scene.setLessonTarget('split-s')
+      for (const phase of [0, 3, 4, 8, null]) {
+        scene.setSplitSStage(phase)
+        expect(beam.visible).toBe(true)
+        expect(scene.getReference('split-zone')?.object.visible).toBe(true)
+        expect(scene.scene.getObjectByName('split-outline-left')?.visible).toBe(true)
+        expect(beam.matrixWorld.toArray()).toEqual(before)
+      }
+      const approach = scene.scene.getObjectByName('split-over-beam-approach') as THREE.LineSegments<THREE.BufferGeometry>
+      const exit = scene.scene.getObjectByName('split-reversed-exit') as THREE.LineSegments<THREE.BufferGeometry>
+      expect(approach.geometry.getAttribute('position').getY(0) + 5 + SPLIT_S_TARGET_HEIGHT_M).toBeGreaterThan(bounds.max.y + 3)
+      expect(exit.geometry.getAttribute('position').getY(0) + 5 + SPLIT_S_TARGET_HEIGHT_M).toBeLessThan(bounds.min.y - 3)
+      scene.setLessonTarget('power-loop')
+      expect(gantry.parent?.visible).toBe(false)
+      const resources = new Set<THREE.BufferGeometry | THREE.Material>()
+      gantry.traverse((object) => {
+        const mesh = object as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>
+        if (!mesh.isMesh) return
+        resources.add(mesh.geometry)
+        resources.add(mesh.material)
+      })
+      for (const resource of resources) resourceDisposals.push(vi.spyOn(resource, 'dispose'))
+    } finally { scene.dispose() }
+    for (const spy of resourceDisposals) expect(spy).toHaveBeenCalledOnce()
+  })
+
+  it.each(['beginner', 'standard', 'raised-field'] as const)('keeps the actual %s demonstration above then below the reference beam without intersecting its visible structure', (preset) => {
+    const base = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
+    const settings = preset === 'raised-field' ? { ...base, drone: { ...base.drone,
+      ground: { ...base.drone.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 35, z: -3 } } } : base
+    const scene = createFlightScene(settings.drone)
+    try {
+      scene.scene.updateMatrixWorld(true)
+      const beam = scene.scene.getObjectByName('split-reference-beam')!
+      const gantry = scene.scene.getObjectByName('split-reference-gantry')!
+      const beamBounds = new THREE.Box3().setFromObject(beam)
+      const centerZ = beam.getWorldPosition(new THREE.Vector3()).z
+      const bounds: THREE.Box3[] = []
+      gantry.traverse((object) => { if ((object as THREE.Mesh).isMesh) bounds.push(new THREE.Box3().setFromObject(object).expandByScalar(0.5)) })
+      const demo = createTeachingDemonstration(settings, 'split-s')
+      let over = false
+      let under = false
+      for (const [index, sample] of demo.recording.samples.entries()) {
+        const position = new THREE.Vector3(sample.positionM.x, sample.positionM.y, sample.positionM.z)
+        expect(bounds.some((box) => box.containsPoint(position)), `structure overlap at ${sample.timestampSeconds}s`).toBe(false)
+        const previous = demo.recording.samples[index - 1]
+        if (!previous) continue
+        if (previous.positionM.z > centerZ && sample.positionM.z <= centerZ) {
+          expect(sample.positionM.y).toBeGreaterThan(beamBounds.max.y + 3)
+          over = true
+        }
+        if (previous.positionM.z < centerZ && sample.positionM.z >= centerZ) {
+          expect(sample.positionM.y).toBeLessThan(beamBounds.min.y - 3)
+          under = true
+        }
+      }
+      expect({ over, under }).toEqual({ over: true, under: true })
+    } finally { scene.dispose() }
   })
 
 })

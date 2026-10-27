@@ -202,6 +202,43 @@ describe('interactive Free camera controls', () => {
     expect(rig.chase.matrixWorld.equals(chase)).toBe(true)
   })
 
+  it.each([
+    { name: 'forward', rightM: 0, forwardM: 1 },
+    { name: 'backward', rightM: 0, forwardM: -1 },
+    { name: 'left', rightM: -1, forwardM: 0 },
+    { name: 'right', rightM: 1, forwardM: 0 },
+  ])('moves one metre $name on the horizontal plane after the view is rotated and pitched', ({ rightM, forwardM }) => {
+    const { canvas, rig, controls } = fixture()
+    controls.setEnabled(true)
+    pointer(canvas, 'pointerdown', 200, 200)
+    pointer(canvas, 'pointermove', 330, 270)
+    pointer(canvas, 'pointerup', 330, 270)
+    canvas.blur()
+    const before = controls.getState()
+    const orientation = rig.free.quaternion.clone()
+    const forward = rig.free.getWorldDirection(rig.free.position.clone()).setY(0).normalize()
+    const right = forward.clone().cross(rig.free.up).normalize()
+    const expected = forward.multiplyScalar(forwardM).addScaledVector(right, rightM)
+    const fpv = rig.fpv.matrixWorld.clone()
+    const chase = rig.chase.matrixWorld.clone()
+
+    controls.moveHorizontally(rightM, forwardM)
+    const moved = controls.getState()
+    expect(distance(moved.targetM, before.targetM)).toBeCloseTo(1)
+    expect(moved.targetM.y).toBe(before.targetM.y)
+    expect(moved.positionM.y).toBeCloseTo(before.positionM.y)
+    for (const axis of ['x', 'z'] as const) {
+      expect(moved.targetM[axis] - before.targetM[axis]).toBeCloseTo(expected[axis])
+      expect(moved.positionM[axis] - before.positionM[axis]).toBeCloseTo(expected[axis])
+    }
+    expect(moved.distanceM).toBeCloseTo(before.distanceM)
+    expect(rig.free.quaternion.angleTo(orientation)).toBeLessThan(1e-6)
+    expect(rig.fpv.matrixWorld.equals(fpv)).toBe(true)
+    expect(rig.chase.matrixWorld.equals(chase)).toBe(true)
+    controls.moveHorizontally(-rightM, -forwardM)
+    expect(distance(controls.getState().targetM, before.targetM)).toBeLessThan(1e-6)
+  })
+
   it('keeps Page Up and Page Down vertical while Shift is held for camera orbit', () => {
     const { canvas, rig, controls } = fixture()
     controls.setEnabled(true)
@@ -244,9 +281,14 @@ describe('interactive Free camera controls', () => {
     const { controls } = fixture()
     const inactive = controls.getState()
     controls.moveVertically(1)
+    controls.moveHorizontally(1, 1)
     expect(controls.getState()).toEqual(inactive)
     controls.setEnabled(true)
-    for (const delta of [NaN, Infinity, -Infinity]) controls.moveVertically(delta)
+    for (const delta of [NaN, Infinity, -Infinity]) {
+      controls.moveVertically(delta)
+      controls.moveHorizontally(delta, 1)
+      controls.moveHorizontally(1, delta)
+    }
     expect(controls.getState()).toEqual(inactive)
 
     for (const delta of [Number.MAX_VALUE, -Number.MAX_VALUE]) {
@@ -261,6 +303,7 @@ describe('interactive Free camera controls', () => {
     controls.dispose()
     const disposed = controls.getState()
     controls.moveVertically(1)
+    controls.moveHorizontally(1, 1)
     expect(controls.getState()).toEqual(disposed)
   })
 
