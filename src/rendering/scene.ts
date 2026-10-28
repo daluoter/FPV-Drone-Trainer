@@ -15,6 +15,7 @@ import { FULL_FLIP_AREA_RADIUS_M, FULL_FLIP_MIN_PREPARATION_HEIGHT_M, FULL_FLIP_
 import { POWER_LOOP_AREA_RADIUS_M, POWER_LOOP_TARGET_HEIGHT_M } from '../training/powerLoop'
 import { SPLIT_S_AREA_RADIUS_M, SPLIT_S_MIN_HEIGHT_M, SPLIT_S_TARGET_HEIGHT_M } from '../training/splitS'
 import { createOrbitTarget, ORBIT_TARGET_HEIGHT_M, ORBIT_TARGET_RADIUS_M, ORBIT_MIN_RADIUS_M, ORBIT_MAX_RADIUS_M, ORBIT_MIN_ENTRY_HEIGHT_M, ORBIT_MAX_ENTRY_HEIGHT_M } from '../training/orbit'
+import { BACKWARD_FLIGHT_TARGET_HEIGHT_M } from '../training/backwardFlight'
 import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
 import type { Vector3 } from '../math/vector'
 import type { ReplayGhostState } from '../replay'
@@ -69,6 +70,8 @@ export interface FlightScene {
   setSplitSStage(stage: number | null): void
   /** Highlight ground, entry and lap milestones while leaving the target fixed. */
   setOrbitStage(stage: number | null): void
+  /** Show nose-versus-travel guidance without changing actual velocity or heading. */
+  setBackwardFlightStage(stage: number | null): void
   /** Presentation-only bounded path trace; evaluators remain renderer-independent. */
   setTrainingPath(path: readonly Vector3[]): void
   setReplayPath(path: readonly Vector3[]): void
@@ -1229,9 +1232,93 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   const orbitReference: FlightSceneReference = { id: 'orbit-zone', kind: 'zone', object: orbitField,
     positionM: { ...orbitTarget }, sizeM: { x: ORBIT_MAX_RADIUS_M * 2, y: ORBIT_MAX_ENTRY_HEIGHT_M - ORBIT_MIN_ENTRY_HEIGHT_M, z: ORBIT_MAX_RADIUS_M * 2 } }
 
+  // The short broad corridor supplies landmarks in both viewing directions.
+  // It is a visual reference: there are no new collision surfaces, narrow
+  // gates, forced headings or hidden route checks.
+  const backwardHeightM = BACKWARD_FLIGHT_TARGET_HEIGHT_M
+  const backwardField = new THREE.Group()
+  backwardField.name = 'backward-field'
+  backwardField.position.set(field.launch.x, config.ground.heightM + backwardHeightM, field.launch.z - 25)
+  backwardField.visible = false
+  backwardField.userData = { teachingReference: '後退飛行寬走廊', collision: false }
+  const backwardCorridor = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([
+    ...[-14, 14].flatMap((x) => [
+      new THREE.Vector3(x, -backwardHeightM + 0.025, 39), new THREE.Vector3(x, -backwardHeightM + 0.025, -25),
+      new THREE.Vector3(x, 0, 39), new THREE.Vector3(x, 0, -25),
+    ]),
+    ...[-15, 5, 25].flatMap((z) => [-14, 14].flatMap((x) => [
+      new THREE.Vector3(x, -backwardHeightM, z), new THREE.Vector3(x, 10, z),
+      new THREE.Vector3(x - 0.6, -6, z), new THREE.Vector3(x + 0.6, -6, z),
+      new THREE.Vector3(x - 0.6, 0, z), new THREE.Vector3(x + 0.6, 0, z),
+    ])),
+  ]), new THREE.LineBasicMaterial({ color: 0x8abac4, transparent: true, opacity: 0.4, depthWrite: false }))
+  backwardCorridor.name = 'backward-broad-corridor'
+  backwardField.add(backwardCorridor)
+  for (const [name, count, z, color, label] of [
+    ['arrival', 2, 35, 0x45d7f7, '來向：青色雙柱'],
+    ['departure', 3, -15, 0xffc978, '去向：金色三柱'],
+  ] as const) {
+    const landmark = new THREE.Group()
+    landmark.name = `backward-${name}-landmark`
+    landmark.position.z = z
+    landmark.userData = { teachingReference: label, collision: false }
+    for (let index = 0; index < count; index += 1) {
+      const column = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.7, 14, 8), material(color))
+      column.name = `backward-${name}-column-${index}`
+      column.position.set((index - (count - 1) / 2) * 5, 7 - backwardHeightM, 0)
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(1.1, 1.6, 4), material(color))
+      cap.name = `backward-${name}-cap-${index}`
+      cap.position.set(column.position.x, 14.8 - backwardHeightM, 0)
+      landmark.add(column, cap)
+    }
+    backwardField.add(landmark)
+  }
+  const backwardTravelPoints = [-10, 2, 14, 26].flatMap((z) => [-backwardHeightM + 0.06, 0].flatMap((y) => [
+    new THREE.Vector3(0, y, z + 3), new THREE.Vector3(0, y, z - 3),
+    new THREE.Vector3(-1.1, y, z - 1.5), new THREE.Vector3(0, y, z - 3),
+    new THREE.Vector3(1.1, y, z - 1.5), new THREE.Vector3(0, y, z - 3),
+  ]))
+  const backwardTravelGuide = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(backwardTravelPoints),
+    new THREE.LineBasicMaterial({ color: 0xffc978, transparent: true, opacity: 0.5, depthWrite: false }))
+  backwardTravelGuide.name = 'backward-original-travel-guide'
+  backwardTravelGuide.userData = { teachingReference: '原移動方向：往金色三柱', collision: false }
+  backwardField.add(backwardTravelGuide)
+  const backwardAccent = new THREE.Group()
+  backwardAccent.name = 'backward-stage-guidance'
+  backwardAccent.position.set(0, -backwardHeightM + 0.1, 25)
+  const backwardStageMaterial = new THREE.LineBasicMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.95, depthWrite: false })
+  const backwardStageReference = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 40 }, (_, index) => {
+    const angle = index / 40 * Math.PI * 2
+    return new THREE.Vector3(Math.sin(angle) * 3, 0, Math.cos(angle) * 3)
+  })), backwardStageMaterial)
+  backwardStageReference.name = 'backward-stage-reference'
+  backwardAccent.add(backwardStageReference)
+  const backwardNoseArrow = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 2), new THREE.Vector3(0, 0, -2),
+    new THREE.Vector3(-0.8, 0, -0.8), new THREE.Vector3(0, 0, -2),
+    new THREE.Vector3(0.8, 0, -0.8), new THREE.Vector3(0, 0, -2),
+  ]), new THREE.LineBasicMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.95, depthWrite: false }))
+  backwardNoseArrow.name = 'backward-nose-direction-example'
+  backwardNoseArrow.userData = { teachingReference: '機頭方向示意；不是即時飛行狀態', collision: false }
+  backwardNoseArrow.position.x = -4
+  const backwardMomentumArrow = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 2), new THREE.Vector3(0, 0, -2),
+    new THREE.Vector3(-0.8, 0, -0.8), new THREE.Vector3(0, 0, -2),
+    new THREE.Vector3(0.8, 0, -0.8), new THREE.Vector3(0, 0, -2),
+  ]), new THREE.LineBasicMaterial({ color: 0xffc978, transparent: true, opacity: 0.95, depthWrite: false }))
+  backwardMomentumArrow.name = 'backward-travel-direction-example'
+  backwardMomentumArrow.userData = { teachingReference: '原移動方向示意；不是即時速度', collision: false }
+  backwardMomentumArrow.position.x = 4
+  backwardAccent.add(backwardNoseArrow, backwardMomentumArrow)
+  backwardField.add(backwardAccent)
+  scene.add(backwardField)
+  const backwardReference: FlightSceneReference = { id: 'backward-zone', kind: 'zone', object: backwardField,
+    positionM: { x: field.launch.x, y: config.ground.heightM + backwardHeightM, z: field.launch.z - 25 },
+    sizeM: { x: 28, y: 20, z: 64 } }
+
   const landingSurface: FlightSceneReference = { id: 'landing-surface', kind: 'zone', object: landingTarget, positionM: { ...field.landing }, sizeM: { x: LANDING_ZONE_RADIUS_M * 2, y: 0, z: LANDING_ZONE_RADIUS_M * 2 } }
   const launchReference: FlightSceneReference = { id: 'training-launch', kind: 'pad', object: takeoffPad, positionM: { ...field.launch } }
-  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, recoveryReference, rollReference, flipReference, loopReference, splitReference, orbitReference]
+  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, recoveryReference, rollReference, flipReference, loopReference, splitReference, orbitReference, backwardReference]
   const referenceById = new Map(sceneReferences.map((reference) => [reference.id, reference]))
 
   const drone = createQuadVisual()
@@ -1316,7 +1403,8 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     loopField.visible = lessonId === 'power-loop'
     splitField.visible = lessonId === 'split-s'
     orbitField.visible = lessonId === 'orbit'
-    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit'].includes(lessonId ?? '')
+    backwardField.visible = lessonId === 'backward-flight'
+    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'backward-flight'].includes(lessonId ?? '')
     for (const reference of referenceSet.contract) {
       reference.object.visible = !beginner
     }
@@ -1422,6 +1510,18 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
       stage <= 1 ? field.launch.z - orbitTarget.z : stage === 2 ? ORBIT_TARGET_RADIUS_M : 0)
   }
 
+  const setBackwardFlightStage = (stage: number | null): void => {
+    if (stage === null || !Number.isInteger(stage) || stage < 0 || stage > 7) {
+      backwardAccent.visible = false
+      return
+    }
+    backwardAccent.visible = true
+    backwardStageMaterial.color.set(stage >= 6 ? 0xb8f36b : stage >= 2 ? 0xffc978 : 0x45d7f7)
+    backwardAccent.position.set(0, stage === 0 ? -backwardHeightM + 0.1 : 0, stage <= 1 ? 25 : 7)
+    // The paired arrows explain the exercise, never follow or steer the drone.
+    backwardNoseArrow.rotation.y = stage >= 3 ? Math.PI : 0
+  }
+
   const setPath = (line: THREE.Line, path: readonly Vector3[], yOffset: number): void => {
     const maximumPoints = 1_200
     const stride = Math.max(1, Math.ceil(path.length / maximumPoints))
@@ -1473,6 +1573,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     setPowerLoopStage,
     setSplitSStage,
     setOrbitStage,
+    setBackwardFlightStage,
     setTrainingPath,
     setReplayPath,
     dispose: () => disposeFlightScene(scene),

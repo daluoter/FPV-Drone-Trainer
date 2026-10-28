@@ -105,7 +105,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if response is None or response.status != 200:
                 raise AssertionError("The production entry page did not return HTTP 200.")
             expect(page).to_have_title("FPV Drone Trainer")
-            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.28.1")
+            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.28.2")
             report["release"] = page.get_by_test_id("app-release").inner_text()
 
             asset_urls = page.locator("script[src], link[rel='stylesheet'][href]").evaluate_all(
@@ -271,13 +271,13 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(mode).to_have_value("practice")
             expect(lesson).to_have_value("takeoff")
             expect(lesson.locator("option:checked")).to_contain_text("L01")
-            expect(lesson.locator("option")).to_have_count(15)
+            expect(lesson.locator("option")).to_have_count(16)
             expect(lesson.locator("option[value='hover']")).to_have_count(0)
             expect(lesson.locator("option[value='full-flip']")).to_have_count(0)
             active_codes = lesson.locator("option").evaluate_all(
                 "options => options.map(option => option.textContent.trim().match(/^L\\d{2}/)?.[0])"
             )
-            if active_codes != ["L01", "L02", "L03", "L04", "L05", "L06", "L07", "L08", "L09", "L10", "L11", "L12", "L13", "L14", "L15"]:
+            if active_codes != ["L01", "L02", "L03", "L04", "L05", "L06", "L07", "L08", "L09", "L10", "L11", "L12", "L13", "L14", "L15", "L17"]:
                 raise AssertionError(f"Active course numbers do not match the merged curriculum: {active_codes}")
             report["active_course_codes"] = active_codes
             expect(training.get_by_role("heading", name="起飛與定點懸停", exact=True)).to_be_visible()
@@ -291,13 +291,16 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(lesson.locator("option[value='power-loop']")).to_contain_text("L13")
             expect(lesson.locator("option[value='split-s']")).to_contain_text("L14")
             expect(lesson.locator("option[value='orbit']")).to_contain_text("L15")
+            expect(lesson.locator("option[value='backward-flight']")).to_contain_text("L17")
+            expect(lesson.locator("option").filter(has_text=re.compile(r"^L16"))).to_have_count(0)
             for option in lesson.locator("option").all_text_contents():
                 title = re.sub(r"^L\d{2}\s*[·：:]?\s*", "", option.strip())
                 if title != "破S" and re.search(r"[A-Za-z]", title):
                     raise AssertionError(f"A visible course title still contains English: {option}")
-            expect(flight.locator(".school-demo-toolbar").get_by_role("button")).to_have_count(18)
+            expect(flight.locator(".school-demo-toolbar").get_by_role("button")).to_have_count(19)
             expect(flight.get_by_role("button", name="L15 正刷鍋示範", exact=True)).to_be_visible()
-            checks.append("Chinese course titles including the requested 破S name, fifteen active lessons and eighteen distinct demonstrations")
+            expect(flight.get_by_role("button", name="L17 後退飛行示範", exact=True)).to_be_visible()
+            checks.append("Chinese course titles including 破S, sixteen active lessons with L16 reserved and nineteen distinct demonstrations")
             progress_before_waiting = training_progress(page)
             training.get_by_role("button", name="開始課程", exact=True).click()
             expect(phase).to_have_text("倒數準備")
@@ -454,7 +457,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
             if training_progress(page) != stored_attempts:
                 raise AssertionError("Changing learning mode modified stored flight results.")
-            checks.append("default practice mode, fifteen active lessons and persisted practice/challenge isolation")
+            checks.append("default practice mode, sixteen active lessons and persisted practice/challenge isolation")
 
             # Answer the actual radios/form. Wrong answers must not unlock the
             # next step; knowledge completion is separate from flight progress.
@@ -1685,6 +1688,176 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             checks.append("L15 orbit progress, radius and target-heading instruments fit desktop, short desktop and mobile with the altitude/XYZ and playback banner")
             checks.append("L15 orbit selection and unchanged live checkpoints persist across reload and separate L00 roll playback")
 
+            lesson.select_option("backward-flight")
+            expect(training.get_by_role("heading", name="後退飛行", exact=True)).to_be_visible()
+            backward_hud = flight.get_by_role("group", name="後退飛行即時狀態", exact=True)
+            backward_fields = {
+                "yaw_degrees": flight.get_by_test_id("backward-yaw"),
+                "backward_speed_mps": flight.get_by_test_id("backward-speed"),
+                "distance_m": flight.get_by_test_id("backward-distance"),
+            }
+            backward_direction = flight.get_by_test_id("backward-motion-direction")
+
+            def backward_motion() -> dict:
+                values = {}
+                for key, field in backward_fields.items():
+                    expect(field).to_be_visible()
+                    match = re.match(r"^[+-]?\d+(?:\.\d+)?", field.inner_text())
+                    if not match:
+                        raise AssertionError(f"L17 measured motion readout is not numeric: {key}.")
+                    values[key] = float(match.group())
+                values["direction"] = backward_direction.inner_text()
+                return values
+
+            original_backward_canvas = canvas.element_handle()
+            before_backward_demo = training_progress(page)
+            prior_backward_steps = training.get_by_role("list", name="本課步驟", exact=True).get_by_role("listitem").all_text_contents()
+            if len(prior_backward_steps) != 7:
+                raise AssertionError("L17 does not expose seven ground-to-backward-flight checkpoints.")
+            expect(backward_hud).to_contain_text("即時")
+            expect(backward_hud).to_contain_text("青色雙柱")
+            expect(backward_hud).to_contain_text("金色三柱")
+            flight.get_by_role("button", name="L17 後退飛行示範", exact=True).click()
+            expect(flight.get_by_role("button", name="0.5×", exact=True)).to_have_attribute("aria-pressed", "true")
+            expect(arm).to_be_disabled()
+            expect(lesson).to_be_disabled()
+            flight.get_by_role("button", name="Pause", exact=True).click()
+            expect(backward_hud).to_contain_text("回放")
+            timeline.press("Home")
+            demonstration_snapshot("L17", 7)
+            expect(altitude).to_have_text("0.0 m")
+            home_backward = backward_motion()
+            if abs(home_backward["yaw_degrees"]) > .05 or abs(home_backward["distance_m"]) > .05 or abs(home_backward["backward_speed_mps"]) > .05:
+                raise AssertionError(f"L17 does not begin on actual ground without prior turn or backward credit: {home_backward}")
+            if screenshot:
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l17-demonstration-ground.png"))
+            timeline.press("End")
+            demonstration_snapshot("L17", 7, complete=True)
+            end_backward = backward_motion()
+            if end_backward["distance_m"] < 3 or end_backward["yaw_degrees"] < 120:
+                raise AssertionError(f"L17 completion lacks actual backward travel after a reversed heading: {end_backward}")
+            if float(altitude.inner_text().split()[0]) < 1.5:
+                raise AssertionError("L17 ends on the ground instead of recovering in flight.")
+            held_backward_position = position_hud.inner_text()
+            paused_backward_time = float(timeline.input_value())
+            page.wait_for_timeout(200)
+            if backward_motion() != end_backward or position_hud.inner_text() != held_backward_position or abs(float(timeline.input_value()) - paused_backward_time) > .02:
+                raise AssertionError("L17 paused ghost, independent clock or recorded backward motion kept advancing.")
+            if screenshot:
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l17-demonstration-end.png"))
+            backward_chapters = demo_progress.get_by_role("list", name="示範步驟", exact=True).get_by_role("button")
+            expect(backward_chapters).to_have_count(7)
+            backward_chapters.nth(3).click()
+            expect(demo_progress).to_contain_text("3 / 7 個示範步驟完成")
+            forward_backward = backward_motion()
+            forward_time = float(timeline.input_value())
+            forward_z = float(flight.get_by_test_id("flight-position-z").inner_text().split()[0])
+            if forward_backward["backward_speed_mps"] >= -.5:
+                raise AssertionError(f"L17 forward chapter has no actual prior forward momentum: {forward_backward}")
+            backward_chapters.nth(5).click()
+            expect(demo_progress).to_contain_text("5 / 7 個示範步驟完成")
+            moving_backward = backward_motion()
+            moving_time = float(timeline.input_value())
+            moving_z = float(flight.get_by_test_id("flight-position-z").inner_text().split()[0])
+            if moving_backward["yaw_degrees"] < 120 or moving_backward["backward_speed_mps"] < .7 or "後退" not in moving_backward["direction"] or moving_z >= forward_z:
+                raise AssertionError(f"L17 turn does not preserve travel while the nose reverses: {moving_backward}, forwardz={forward_z}, movingz={moving_z}")
+            page.wait_for_timeout(200)
+            if backward_motion() != moving_backward or abs(float(timeline.input_value()) - moving_time) > .02:
+                raise AssertionError("L17 chapter seek did not pause backward-flight measurements and its own clock.")
+            if screenshot:
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l17-demonstration-backward-fpv.png"))
+            backward_chapters.nth(6).click()
+            expect(demo_progress).to_contain_text("6 / 7 個示範步驟完成")
+            maintained_backward = backward_motion()
+            maintained_z = float(flight.get_by_test_id("flight-position-z").inner_text().split()[0])
+            if maintained_backward["distance_m"] < 3 or maintained_z >= moving_z:
+                raise AssertionError(f"L17 maintained chapter does not show sustained real movement: {maintained_backward}")
+            for camera_name in ("Chase", "Free / debug", "FPV"):
+                camera = flight.get_by_role("button", name=camera_name, exact=True)
+                camera.click()
+                expect(camera).to_have_attribute("aria-pressed", "true")
+                if camera_name == "Free / debug":
+                    flight.get_by_role("button", name="定位飛機", exact=True).click()
+                    canvas.scroll_into_view_if_needed()
+                    backward_bounds = canvas.bounding_box()
+                    page.mouse.move(backward_bounds["x"] + backward_bounds["width"] * .7,
+                        backward_bounds["y"] + backward_bounds["height"] * .7)
+                    page.mouse.wheel(0, 1000)
+                    page.wait_for_timeout(100)
+                if screenshot:
+                    suffix = {"Chase": "chase", "Free / debug": "free", "FPV": "fpv"}[camera_name]
+                    flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / f"l17-reference-{suffix}.png"))
+            backward_chapters.nth(3).click()
+            expect(demo_progress).to_contain_text("3 / 7 個示範步驟完成")
+            if backward_motion() != forward_backward or abs(float(timeline.input_value()) - forward_time) > .02:
+                raise AssertionError("L17 backward seek retained future turn angle, speed or travel distance.")
+            backward_chapters.nth(5).click()
+            report["backward_flight_course"] = {"lesson_id": "backward-flight", "course_code": "L17", "home": home_backward,
+                "forward": {"time_seconds": forward_time, "z_m": forward_z, **forward_backward},
+                "turned_and_moving": {"time_seconds": moving_time, "z_m": moving_z, **moving_backward},
+                "maintained": {"z_m": maintained_z, **maintained_backward},
+                "end": {"time_seconds": paused_backward_time, **end_backward}}
+            report["backward_hud_layouts"] = {}
+            for width, height in ((1280, 720), (1280, 600), (375, 720)):
+                page.set_viewport_size({"width": width, "height": height})
+                position_hud.scroll_into_view_if_needed()
+                viewport_bounds = flight.locator(".free-flight-viewport").bounding_box()
+                backward_bounds = backward_hud.bounding_box()
+                if not viewport_bounds or not backward_bounds:
+                    raise AssertionError(f"L17 instruments have no layout bounds at {width}x{height}.")
+                if (backward_bounds['x'] < viewport_bounds['x']
+                        or backward_bounds['x'] + backward_bounds['width'] > viewport_bounds['x'] + viewport_bounds['width']
+                        or backward_bounds['y'] < viewport_bounds['y']
+                        or backward_bounds['y'] + backward_bounds['height'] > viewport_bounds['y'] + viewport_bounds['height']):
+                    raise AssertionError(f"L17 instruments overflow the viewport at {width}x{height}.")
+                for other, label in ((position_hud.bounding_box(), "position HUD"), (flight.locator(".flight-safe-overlay").bounding_box(), "playback banner")):
+                    if not other:
+                        raise AssertionError(f"L17 {label} has no bounds at {width}x{height}.")
+                    overlap_x = min(backward_bounds['x'] + backward_bounds['width'], other['x'] + other['width']) - max(backward_bounds['x'], other['x'])
+                    overlap_y = min(backward_bounds['y'] + backward_bounds['height'], other['y'] + other['height']) - max(backward_bounds['y'], other['y'])
+                    if overlap_x > 0 and overlap_y > 0:
+                        raise AssertionError(f"L17 instruments overlap {label} at {width}x{height}.")
+                if page.evaluate("document.documentElement.scrollWidth > innerWidth + 1"):
+                    raise AssertionError(f"L17 controls or demonstration toolbar overflow the page at {width}x{height}.")
+                report["backward_hud_layouts"][f"{width}x{height}"] = {"backward_hud": backward_bounds, "viewport": viewport_bounds}
+                if screenshot and width == 375:
+                    flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l17-hud-375.png"))
+            page.set_viewport_size({"width": 1280, "height": 720})
+            timeline.press("Home")
+            demonstration_snapshot("L17", 7)
+            expect(altitude).to_have_text("0.0 m")
+            if backward_motion() != home_backward:
+                raise AssertionError("L17 Home seek does not restore its own ground-start measurements.")
+            timeline.press("End")
+            demonstration_snapshot("L17", 7, complete=True)
+            flight.get_by_role("button", name="結束示範", exact=True).click()
+            expect(arm).to_be_enabled()
+            expect(disarm).to_be_disabled()
+            expect(backward_hud).to_contain_text("即時")
+            expect(demo_progress).to_have_count(0)
+            expect(training.get_by_role("list", name="本課步驟", exact=True).get_by_role("listitem")).to_have_text(prior_backward_steps)
+            if not original_backward_canvas or not original_backward_canvas.evaluate("element => element === document.querySelector('#free-flight canvas')"):
+                raise AssertionError("L17 demonstration replaced the shared live flight canvas.")
+            if training_progress(page) != before_backward_demo:
+                raise AssertionError("L17 demonstration wrote a live attempt or saved result.")
+            flight.get_by_role("button", name="偏航", exact=True).click()
+            flight.get_by_role("button", name="Pause", exact=True).click()
+            timeline.press("End")
+            demonstration_snapshot("L00", 5, complete=True)
+            expect(backward_hud).to_have_count(0)
+            flight.get_by_role("button", name="結束示範", exact=True).click()
+            expect(backward_hud).to_be_visible()
+            expect(lesson).to_have_value("backward-flight")
+            if training_progress(page) != before_backward_demo:
+                raise AssertionError("L00 yaw illustration changed the selected L17 result.")
+            page.reload(wait_until="networkidle")
+            expect(lesson).to_have_value("backward-flight")
+            source.select_option("keyboard")
+            expect(training.locator(".school-progress")).to_contain_text("已練 0 次")
+            checks.append("L17 physical forward-momentum and upright yaw-reversal demo, measured backward speed and travel, seven independent chapters, pause and rewind without live-result writes")
+            checks.append("L17 motion and landmark instruments fit desktop, short desktop and mobile with altitude/XYZ, playback banner and all three cameras")
+            checks.append("L17 selection and unchanged live checkpoints persist across reload and separate L00 yaw playback")
+
             # Ground-based lessons wait on actual supported ground and remain
             # safe after arm at zero throttle while the learner prepares to lift off.
             hud = flight.get_by_role("checkbox", name="Developer HUD", exact=True)
@@ -1693,7 +1866,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 has=page.get_by_text("Position m", exact=True)
             ).locator("code")
             report["ground_start_positions"] = {}
-            for lesson_id in ("landing", "straight-line", "direction-control", "coordinated-turn", "square-route", "figure-eight", "wide-gate", "basic-recovery", "full-roll", "front-flip", "back-flip", "power-loop", "split-s", "orbit"):
+            for lesson_id in ("landing", "straight-line", "direction-control", "coordinated-turn", "square-route", "figure-eight", "wide-gate", "basic-recovery", "full-roll", "front-flip", "back-flip", "power-loop", "split-s", "orbit", "backward-flight"):
                 lesson.select_option(lesson_id)
                 training.get_by_role("button", name="開始課程", exact=True).click()
                 coords = [float(value.strip()) for value in position.inner_text().split(",")]
@@ -1721,7 +1894,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 expect(source).to_be_enabled()
             hud.uncheck()
             lesson.select_option("basic-recovery")
-            checks.append("L02/L03/L04/L05/L06/L07/L08/L09/L10/L11/L12/L13/L14/L15 actual ground start, safe low-throttle arm and visible stage guidance")
+            checks.append("L02/L03/L04/L05/L06/L07/L08/L09/L10/L11/L12/L13/L14/L15/L17 actual ground start, safe low-throttle arm and visible stage guidance")
 
             fullscreen = flight.locator(".school-fullscreen")
             fullscreen.click()

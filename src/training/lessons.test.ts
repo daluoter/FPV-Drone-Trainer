@@ -6,7 +6,7 @@ import { lessonLearningContent } from './catalog'
 
 describe('lesson catalog', () => {
   it('keeps existing lesson IDs and the historical hover definition stable', () => {
-    expect(DEFAULT_LESSONS).toHaveLength(17)
+    expect(DEFAULT_LESSONS).toHaveLength(18)
     expect(DEFAULT_LESSONS.map((lesson) => lesson.id)).toEqual([
       'hover',
       'coordinated-turn',
@@ -25,6 +25,7 @@ describe('lesson catalog', () => {
       'front-flip',
       'back-flip',
       'power-loop',
+      'backward-flight',
     ])
     expect(DEFAULT_LESSONS.map((lesson) => lesson.title)).toEqual([
       '定點懸停',
@@ -44,6 +45,7 @@ describe('lesson catalog', () => {
       '前翻',
       '後翻',
       '大迴旋',
+      '後退飛行',
     ])
     expect(DEFAULT_LESSONS.every((lesson) => lesson.available && lesson.availability === 'available' && lesson.evaluator)).toBe(true)
     expect(DEFAULT_LESSONS.map((lesson) => lesson.setup.sceneReferenceIds)).toEqual([
@@ -64,12 +66,13 @@ describe('lesson catalog', () => {
       ['training-launch', 'landing-surface'],
       ['training-launch', 'landing-surface'],
       ['training-launch', 'landing-surface', 'loop-zone'],
+      ['training-launch', 'landing-surface', 'backward-zone'],
     ])
   })
 
   it('offers learning content in prerequisite order without requiring completion to select a lesson', () => {
     const ordered = [...LEARNING_LESSONS].sort((left, right) => left.priority - right.priority)
-    expect(ordered.map((lesson) => lessonLearningContent(lesson.id)?.code)).toEqual(['L01', 'L02', 'L03', 'L04', 'L05', 'L06', 'L07', 'L08', 'L09', 'L10', 'L11', 'L12', 'L13', 'L14', 'L15'])
+    expect(ordered.map((lesson) => lessonLearningContent(lesson.id)?.code)).toEqual(['L01', 'L02', 'L03', 'L04', 'L05', 'L06', 'L07', 'L08', 'L09', 'L10', 'L11', 'L12', 'L13', 'L14', 'L15', 'L17'])
     expect(lessonLearningContent('takeoff')?.prerequisiteIds).toEqual(['intro'])
     expect(lessonLearningContent('hover')?.prerequisiteIds).toEqual(['takeoff'])
     expect(lessonLearningContent('direction-control')?.prerequisiteIds).toEqual(['landing'])
@@ -94,7 +97,7 @@ describe('lesson catalog', () => {
     const ordered = [...LEARNING_LESSONS].sort((left, right) => left.priority - right.priority)
     expect(ordered.map((lesson) => lesson.id)).toEqual([
       'takeoff', 'straight-line', 'landing', 'direction-control', 'coordinated-turn',
-      'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit',
+      'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'backward-flight',
     ])
     expect(TRAINING_LESSONS).toBe(LEARNING_LESSONS)
     expect(LEARNING_LESSONS.every((lesson) => lessonById(lesson.id) === lesson)).toBe(true)

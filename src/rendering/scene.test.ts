@@ -214,6 +214,7 @@ describe('flight scene reference contract', () => {
         'loop-zone',
         'split-zone',
         'orbit-zone',
+        'backward-zone',
       ])
       expect(scene.getReference('hover-zone')?.kind).toBe('zone')
       expect(scene.getReference('hover-zone')?.positionM).toEqual({ x: 0, y: 3, z: 0 })
@@ -872,7 +873,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('roll-zone')!
-      expect(scene.sceneReferences.at(-5)?.id).toBe('roll-zone')
+      expect(scene.sceneReferences.at(-6)?.id).toBe('roll-zone')
       expect(reference.kind).toBe('zone')
       expect(reference.positionM).toEqual({ x: 6, y: 15, z: -3 })
       expect(reference.object.position.toArray()).toEqual([6, 15, -3])
@@ -968,7 +969,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('flip-zone')!
-      expect(scene.sceneReferences.at(-4)?.id).toBe('flip-zone')
+      expect(scene.sceneReferences.at(-5)?.id).toBe('flip-zone')
       expect(reference.kind).toBe('zone')
       expect(reference.positionM).toEqual({ x: 6, y: 15, z: -3 })
       expect(reference.object.position.toArray()).toEqual([6, 15, -3])
@@ -1070,7 +1071,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('loop-zone')!
-      expect(scene.sceneReferences.at(-3)?.id).toBe('loop-zone')
+      expect(scene.sceneReferences.at(-4)?.id).toBe('loop-zone')
       expect(reference.positionM).toEqual({ x: 6, y: 5 + POWER_LOOP_TARGET_HEIGHT_M, z: -3 })
       expect(reference.object.position.toArray()).toEqual([6, 5 + POWER_LOOP_TARGET_HEIGHT_M, -3])
       expect(reference.sizeM).toEqual({ x: 240, y: 16, z: 240 })
@@ -1164,7 +1165,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('split-zone')!
-      expect(scene.sceneReferences.at(-2)?.id).toBe('split-zone')
+      expect(scene.sceneReferences.at(-3)?.id).toBe('split-zone')
       expect(reference.positionM).toEqual({ x: 6, y: 5 + SPLIT_S_TARGET_HEIGHT_M, z: -3 })
       expect(reference.object.position.toArray()).toEqual([6, 5 + SPLIT_S_TARGET_HEIGHT_M, -3])
       expect(reference.sizeM).toEqual({ x: 300, y: SPLIT_S_TARGET_HEIGHT_M - SPLIT_S_MIN_HEIGHT_M, z: 300 })
@@ -1303,7 +1304,7 @@ describe('flight scene reference contract', () => {
       const field = scene.getReference('orbit-zone')!
       const launch = scene.getReference('training-launch')!.positionM
       const target = createOrbitTarget(launch, config.ground.heightM)
-      expect(scene.sceneReferences.at(-1)?.id).toBe('orbit-zone')
+      expect(scene.sceneReferences.at(-2)?.id).toBe('orbit-zone')
       expect(field.positionM).toEqual(target)
       expect(field.object.position.toArray()).toEqual([target.x, target.y, target.z])
       expect(field.sizeM?.x).toBe(ORBIT_MAX_RADIUS_M * 2)
@@ -1369,6 +1370,91 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene()
     const resources = new Set<THREE.BufferGeometry | THREE.Material>()
     scene.getReference('orbit-zone')!.object.traverse((object) => {
+      const visual = object as THREE.Mesh<THREE.BufferGeometry, THREE.Material | THREE.Material[]>
+      if (visual.geometry) resources.add(visual.geometry)
+      for (const material of Array.isArray(visual.material) ? visual.material : visual.material ? [visual.material] : []) resources.add(material)
+    })
+    const disposals = [...resources].map((resource) => vi.spyOn(resource, 'dispose'))
+    scene.dispose()
+    for (const dispose of disposals) expect(dispose).toHaveBeenCalledOnce()
+  })
+
+  it('appends a broad ground-relative backward corridor with distinct landmarks visible from either heading', () => {
+    const defaults = createDefaultDroneConfig()
+    const config = { ...defaults, ground: { ...defaults.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 35, z: -3 } }
+    const original = JSON.stringify(config)
+    const scene = createFlightScene(config)
+    try {
+      const reference = scene.getReference('backward-zone')!
+      expect(scene.sceneReferences.at(-1)?.id).toBe('backward-zone')
+      expect(reference.positionM).toEqual({ x: 6, y: 15, z: -28 })
+      expect(reference.sizeM).toEqual({ x: 28, y: 20, z: 64 })
+      expect(reference.object.position.toArray()).toEqual([6, 15, -28])
+      expect(reference.object.userData).toEqual({ teachingReference: '後退飛行寬走廊', collision: false })
+      expect(reference.object.visible).toBe(false)
+      const anchors = scene.sceneReferences.map(({ id, positionM }) => ({ id, positionM: { ...positionM } }))
+      scene.setLessonTarget('backward-flight')
+      expect(reference.object.visible).toBe(true)
+      for (const name of ['orbit-field', 'split-s-field', 'power-loop-field', 'full-flip-field', 'wide-gate-field', 'straight-line-targets']) {
+        expect(scene.scene.getObjectByName(name)?.visible).toBe(false)
+      }
+      for (const id of ['hover-zone', 'orbit-poi', 'split-s-reference']) expect(scene.getReference(id)?.object.visible).toBe(false)
+      const arrival = scene.scene.getObjectByName('backward-arrival-landmark')!
+      const departure = scene.scene.getObjectByName('backward-departure-landmark')!
+      expect(arrival.children.filter(({ name }) => name.includes('-column-'))).toHaveLength(2)
+      expect(departure.children.filter(({ name }) => name.includes('-column-'))).toHaveLength(3)
+      scene.scene.updateMatrixWorld(true)
+      expect(arrival.getWorldPosition(new THREE.Vector3()).z).toBe(7)
+      expect(departure.getWorldPosition(new THREE.Vector3()).z).toBe(-43)
+      for (const landmark of [arrival, departure]) {
+        const column = landmark.children.find(({ name }) => name.includes('-column-')) as THREE.Mesh<THREE.CylinderGeometry, THREE.MeshStandardMaterial>
+        const bounds = new THREE.Box3().setFromObject(column)
+        expect(bounds.min.y).toBeCloseTo(5)
+        expect(bounds.max.y).toBeCloseTo(19)
+        expect(column.material.transparent).toBe(false)
+      }
+      const travel = scene.scene.getObjectByName('backward-original-travel-guide') as THREE.LineSegments<THREE.BufferGeometry>
+      const points = travel.geometry.getAttribute('position')
+      for (let index = 0; index < points.count; index += 6) expect(points.getZ(index + 1)).toBeLessThan(points.getZ(index))
+      const corridor = scene.scene.getObjectByName('backward-broad-corridor') as THREE.LineSegments<THREE.BufferGeometry>
+      corridor.geometry.computeBoundingBox()
+      expect(corridor.geometry.boundingBox!.min.x).toBeCloseTo(-14.6)
+      expect(corridor.geometry.boundingBox!.max.x).toBeCloseTo(14.6)
+      const dronePose = scene.drone.matrixWorld.clone()
+      const arrivalPose = arrival.matrixWorld.clone()
+      const accent = scene.scene.getObjectByName('backward-stage-guidance')!
+      const nose = scene.scene.getObjectByName('backward-nose-direction-example')!
+      const momentum = scene.scene.getObjectByName('backward-travel-direction-example')!
+      const guide = scene.scene.getObjectByName('backward-stage-reference') as THREE.LineLoop<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      for (const stage of [0, 1, 2, 3, 4, 5, 6, 7]) {
+        scene.setBackwardFlightStage(stage)
+        expect(accent.visible).toBe(true)
+        expect(guide.material.color.getHex()).toBe(stage >= 6 ? 0xb8f36b : stage >= 2 ? 0xffc978 : 0x45d7f7)
+        expect(nose.rotation.y).toBe(stage >= 3 ? Math.PI : 0)
+        expect(momentum.rotation.y).toBe(0)
+        expect(scene.drone.matrixWorld.equals(dronePose)).toBe(true)
+        expect(arrival.matrixWorld.equals(arrivalPose)).toBe(true)
+      }
+      for (const stage of [null, -1, 8, 1.5, Number.NaN]) {
+        scene.setBackwardFlightStage(stage)
+        expect(accent.visible).toBe(false)
+        expect(travel.visible).toBe(true)
+        expect(arrival.visible).toBe(true)
+        expect(departure.visible).toBe(true)
+      }
+      expect(scene.sceneReferences.map(({ id, positionM }) => ({ id, positionM }))).toEqual(anchors)
+      scene.setLessonTarget('orbit')
+      expect(reference.object.visible).toBe(false)
+      scene.setLessonTarget(null)
+      expect(scene.getReference('orbit-poi')?.object.visible).toBe(true)
+      expect(JSON.stringify(config)).toBe(original)
+    } finally { scene.dispose() }
+  })
+
+  it('disposes every backward corridor, landmark and direction-example resource once', () => {
+    const scene = createFlightScene()
+    const resources = new Set<THREE.BufferGeometry | THREE.Material>()
+    scene.getReference('backward-zone')!.object.traverse((object) => {
       const visual = object as THREE.Mesh<THREE.BufferGeometry, THREE.Material | THREE.Material[]>
       if (visual.geometry) resources.add(visual.geometry)
       for (const material of Array.isArray(visual.material) ? visual.material : visual.material ? [visual.material] : []) resources.add(material)

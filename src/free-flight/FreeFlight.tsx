@@ -17,7 +17,7 @@ import {
 import Mode2StickOverlay from '../training/StickOverlay'
 import { trainingHint, trainingObjective, wideGateCollisionCause } from '../training/feedback'
 import { createResultReplaySnapshot, type ResultReplayMarker, type ResultReplaySnapshot } from '../training/resultReplay'
-import { createTeachingDemonstration, teachingCueAt, teachingTargetAt, teachingRecoveryPhaseAt, teachingFullRollPhaseAt, teachingFullFlipPhaseAt, teachingPowerLoopPhaseAt, teachingSplitSPhaseAt, teachingOrbitPhaseAt, type TeachingDemonstration, type TeachingDemonstrationKind } from '../training/demonstrations'
+import { createTeachingDemonstration, teachingCueAt, teachingTargetAt, teachingRecoveryPhaseAt, teachingFullRollPhaseAt, teachingFullFlipPhaseAt, teachingPowerLoopPhaseAt, teachingSplitSPhaseAt, teachingOrbitPhaseAt, teachingBackwardFlightPhaseAt, type TeachingDemonstration, type TeachingDemonstrationKind } from '../training/demonstrations'
 import { DIRECTION_CONTROL_TARGET_IDS } from '../training/directionControl'
 import { COORDINATED_TURN_TARGET_IDS } from '../training/coordinatedTurn'
 import { SQUARE_ROUTE_TARGET_IDS } from '../training/squareRoute'
@@ -390,7 +390,11 @@ export default function FreeFlight({
       ? demonstration ? teachingOrbitPhaseAt(demonstration, telemetry.replay.currentTimeSeconds) : null
       : trainingState?.lastEvaluation?.metrics?.orbitPhase ?? 0
     rendererRef.current?.setOrbitStage?.(orbitPhase)
-  }, [trainingState?.lessonId, trainingState?.lastEvaluation?.metrics?.directionTargetIndex, trainingState?.lastEvaluation?.metrics?.turnTargetIndex, trainingState?.lastEvaluation?.metrics?.squareTargetIndex, trainingState?.lastEvaluation?.metrics?.eightTargetIndex, trainingState?.lastEvaluation?.metrics?.gateTargetIndex, trainingState?.lastEvaluation?.metrics?.recoveryPhase, trainingState?.lastEvaluation?.metrics?.rollPhase, trainingState?.lastEvaluation?.metrics?.flipPhase, trainingState?.lastEvaluation?.metrics?.loopPhase, trainingState?.lastEvaluation?.metrics?.splitPhase, trainingState?.lastEvaluation?.metrics?.orbitPhase, rendererRetryKey, telemetry?.replay.active, telemetry?.replay.currentTimeSeconds, demonstration])
+    const backwardPhase = lessonId !== 'backward-flight' ? null : telemetry?.replay.active
+      ? demonstration ? teachingBackwardFlightPhaseAt(demonstration, telemetry.replay.currentTimeSeconds) : null
+      : trainingState?.lastEvaluation?.metrics?.backwardPhase ?? 0
+    rendererRef.current?.setBackwardFlightStage?.(backwardPhase)
+  }, [trainingState?.lessonId, trainingState?.lastEvaluation?.metrics?.directionTargetIndex, trainingState?.lastEvaluation?.metrics?.turnTargetIndex, trainingState?.lastEvaluation?.metrics?.squareTargetIndex, trainingState?.lastEvaluation?.metrics?.eightTargetIndex, trainingState?.lastEvaluation?.metrics?.gateTargetIndex, trainingState?.lastEvaluation?.metrics?.recoveryPhase, trainingState?.lastEvaluation?.metrics?.rollPhase, trainingState?.lastEvaluation?.metrics?.flipPhase, trainingState?.lastEvaluation?.metrics?.loopPhase, trainingState?.lastEvaluation?.metrics?.splitPhase, trainingState?.lastEvaluation?.metrics?.orbitPhase, trainingState?.lastEvaluation?.metrics?.backwardPhase, rendererRetryKey, telemetry?.replay.active, telemetry?.replay.currentTimeSeconds, demonstration])
 
   useEffect(() => {
     rendererRef.current?.setTrainingPath(trainingPath.map((sample) => sample.state.positionM))
@@ -551,7 +555,7 @@ export default function FreeFlight({
       setDemonstrationSettings(recordedSettings)
       setDemonstration(demo)
       setDemoError(null)
-      runtime.setReplaySpeed(kind === 'basic-recovery' || kind === 'full-roll' || kind === 'full-flip' || kind === 'front-flip' || kind === 'back-flip' || kind === 'power-loop' || kind === 'split-s' || kind === 'orbit' ? 0.5 : 1)
+      runtime.setReplaySpeed(kind === 'basic-recovery' || kind === 'full-roll' || kind === 'full-flip' || kind === 'front-flip' || kind === 'back-flip' || kind === 'power-loop' || kind === 'split-s' || kind === 'orbit' || kind === 'backward-flight' ? 0.5 : 1)
       runtime.playReplay()
       setTelemetry(runtime.getTelemetry())
     } catch {
@@ -597,7 +601,12 @@ export default function FreeFlight({
   const splitMetrics = telemetry?.replay.active ? demonstrationProgress?.metrics : trainingState?.lastEvaluation?.metrics
   const showOrbitHud = (telemetry?.replay.active ? demonstration?.lessonId : trainingState?.lessonId) === 'orbit'
   const orbitMetrics = telemetry?.replay.active ? demonstrationProgress?.metrics : trainingState?.lastEvaluation?.metrics
-  const showMotionHud = showRecoveryHud || showRollHud || showFlipHud || showLoopHud || showSplitHud || showOrbitHud
+  const showBackwardHud = (telemetry?.replay.active ? demonstration?.lessonId : trainingState?.lessonId) === 'backward-flight'
+  const backwardMetrics = telemetry?.replay.active ? demonstrationProgress?.metrics : trainingState?.lastEvaluation?.metrics
+  const backwardSpeed = backwardMetrics?.backwardSpeedMps
+  const backwardMotionDirection = backwardSpeed === undefined || !Number.isFinite(backwardSpeed) ? '等待實際飛行資料'
+    : backwardSpeed > 0.25 ? '往機尾移動（後退）' : backwardSpeed < -0.25 ? '往機頭移動（前進）' : '前後移動很慢'
+  const showMotionHud = showRecoveryHud || showRollHud || showFlipHud || showLoopHud || showSplitHud || showOrbitHud || showBackwardHud
   const rollMotion = showRollHud && recoveryMotionState ? measureBasicRecoveryMotion(recoveryMotionState) : null
   const rollProgress = telemetry?.replay.active ? demonstrationProgress?.metrics?.rollProgressDegrees : trainingState?.lastEvaluation?.metrics?.rollProgressDegrees
   const rollRate = showRollHud && recoveryMotionState ? -recoveryMotionState.angularVelocityBodyRadPerSec.z * 180 / Math.PI : undefined
@@ -628,7 +637,7 @@ export default function FreeFlight({
 
       <div className="school-demo-bar school-demo-toolbar" aria-label="四軸與課程示範">
         <strong>L00 看懂四軸</strong>
-        {([['roll', '橫滾'], ['pitch', '俯仰'], ['yaw', '偏航'], ['takeoff', '起飛與懸停示範'], ['straight-line', '直線示範'], ['landing', '降落示範'], ['direction-control', '方向示範'], ['coordinated-turn', '轉彎示範'], ['square-route', '方形示範'], ['figure-eight', '八字示範'], ['wide-gate', '穿門示範'], ['basic-recovery', '恢復示範'], ['full-roll', '橫滾示範'], ['front-flip', '前翻示範'], ['back-flip', '後翻示範'], ['power-loop', '大迴旋示範'], ['split-s', '破S示範'], ['orbit', '正刷鍋示範']] as const).map(([kind, label]) => {
+        {([['roll', '橫滾'], ['pitch', '俯仰'], ['yaw', '偏航'], ['takeoff', '起飛與懸停示範'], ['straight-line', '直線示範'], ['landing', '降落示範'], ['direction-control', '方向示範'], ['coordinated-turn', '轉彎示範'], ['square-route', '方形示範'], ['figure-eight', '八字示範'], ['wide-gate', '穿門示範'], ['basic-recovery', '恢復示範'], ['full-roll', '橫滾示範'], ['front-flip', '前翻示範'], ['back-flip', '後翻示範'], ['power-loop', '大迴旋示範'], ['split-s', '破S示範'], ['orbit', '正刷鍋示範'], ['backward-flight', '後退飛行示範']] as const).map(([kind, label]) => {
           const course = lessonLearningContent(kind)
           return <button className="lab-button lab-button-small" type="button" key={kind} disabled={trainingSettingsLocked || Boolean(telemetry?.armed) || renderingState !== 'ready'} onClick={() => startDemonstration(kind)}>{course ? `${course.code} ${label}` : label}</button>
         })}
@@ -644,7 +653,7 @@ export default function FreeFlight({
             <button className="lab-button lab-button-primary" type="button" onClick={exitReplay}>{demonstration ? '結束示範' : '結束回放'}</button>
             <span>結束後回到練習，仍需自行解鎖。</span>
           </div>}
-          <div className={`free-flight-viewport${showMotionHud ? ' has-recovery-hud' : ''}${showOrbitHud ? ' has-orbit-hud' : ''}`} role="group" aria-label="Three.js Free Flight simulation viewport">
+          <div className={`free-flight-viewport${showMotionHud ? ' has-recovery-hud' : ''}${showOrbitHud ? ' has-orbit-hud' : ''}${showBackwardHud ? ' has-backward-hud' : ''}`} role="group" aria-label="Three.js Free Flight simulation viewport">
             <canvas key={rendererRetryKey} ref={canvasRef} className={`flight-canvas${cameraMode === 'free' ? ' is-free-camera' : ''}`} aria-label="Free Flight 3D scene"
               tabIndex={cameraMode === 'free' ? 0 : -1} aria-describedby={cameraMode === 'free' ? 'free-camera-help' : undefined} />
             <div className="flight-viewport-overlay" aria-hidden="true">
@@ -709,6 +718,16 @@ export default function FreeFlight({
                   <span>機頭偏差<b data-testid="orbit-heading">{format(orbitMetrics?.orbitHeadingErrorDegrees, 0)}°</b></span>
                 </div>
               </div>}
+              {showBackwardHud && <div className="flight-recovery-hud flight-backward-hud" role="group" aria-label="後退飛行即時狀態">
+                <strong>{telemetry?.replay.active ? '回放後退飛行數值' : '即時後退飛行數值'}</strong>
+                <div>
+                  <span>機頭轉向<b data-testid="backward-yaw">{format(backwardMetrics?.backwardYawDegrees ?? 0, 0)}°</b></span>
+                  <span>後退速度（＋）<b data-testid="backward-speed">{format(backwardSpeed, 1)} m/s</b></span>
+                  <span>實際後退距離<b data-testid="backward-distance">{format(backwardMetrics?.backwardDistanceM ?? 0, 1)} m</b></span>
+                </div>
+                <small data-testid="backward-motion-direction" aria-label="相對機頭的移動方向">{backwardMotionDirection}</small>
+                <small>青色雙柱＝來向 · 金色三柱＝去向</small>
+              </div>}
             </div>
             {renderingState !== 'ready' && (
               <div className="flight-rendering-error" role="alert" data-testid="flight-rendering-error">
@@ -733,7 +752,7 @@ export default function FreeFlight({
               : demonstration ? demonstration.title : '飛行回放'} · 真人飛行已停止</div>}
             {trainingState?.phase === 'ACTIVE' && <div tabIndex={0} aria-label="目前練習提示" className={`school-viewport-hint${recovery ? ' is-recovering' : ''}`}>{recovery
               ? <><strong>重練原因（當時數值）：{recovery.message}</strong><span>{recovery.hint}</span></>
-              : currentObjective && trainingState.lastEvaluation?.recovery !== 'restart' ? <><strong>{currentObjective.title}</strong><span>{trainingState.lessonId === 'direction-control' || trainingState.lessonId === 'coordinated-turn' || trainingState.lessonId === 'square-route' || trainingState.lessonId === 'figure-eight' || trainingState.lessonId === 'wide-gate' || trainingState.lessonId === 'basic-recovery' || trainingState.lessonId === 'full-roll' || isFlipLesson(trainingState.lessonId) || trainingState.lessonId === 'power-loop' || trainingState.lessonId === 'split-s' || trainingState.lessonId === 'orbit' || !trainingState.lastEvaluation?.hint ? currentObjective.detail : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</span></> : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>}
+              : currentObjective && trainingState.lastEvaluation?.recovery !== 'restart' ? <><strong>{currentObjective.title}</strong><span>{trainingState.lessonId === 'direction-control' || trainingState.lessonId === 'coordinated-turn' || trainingState.lessonId === 'square-route' || trainingState.lessonId === 'figure-eight' || trainingState.lessonId === 'wide-gate' || trainingState.lessonId === 'basic-recovery' || trainingState.lessonId === 'full-roll' || isFlipLesson(trainingState.lessonId) || trainingState.lessonId === 'power-loop' || trainingState.lessonId === 'split-s' || trainingState.lessonId === 'orbit' || trainingState.lessonId === 'backward-flight' || !trainingState.lastEvaluation?.hint ? currentObjective.detail : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</span></> : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>}
           </div>
           <div className="flight-controls" aria-label="Flight controls">
             <div className="flight-control-group">

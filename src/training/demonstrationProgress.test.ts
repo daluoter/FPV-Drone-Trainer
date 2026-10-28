@@ -7,7 +7,7 @@ import { createDemonstrationProgress, demonstrationProgressAt } from './demonstr
 import { lessonById } from './lessons'
 import { ORBIT_COMPLETION_DEGREES, ORBIT_REQUIRED_LAPS } from './orbit'
 
-const COURSE_KINDS = ['takeoff', 'straight-line', 'landing', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit'] as const
+const COURSE_KINDS = ['takeoff', 'straight-line', 'landing', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'backward-flight'] as const
 
 describe('independent teaching demonstration progress', () => {
   it.each(COURSE_KINDS)('observes all %s checkpoints from the actual recording and exposes chapter seeks', (kind) => {
@@ -27,7 +27,7 @@ describe('independent teaching demonstration progress', () => {
     expect(finish.steps.every((step) => step.startedAtSeconds !== null && step.startedAtSeconds <= step.completedAtSeconds!)).toBe(true)
     const retained = new Set(demonstration.recording.samples.map((sample) => sample.timestampSeconds))
     expect(finish.steps.every((step) => retained.has(step.completedAtSeconds!))).toBe(true)
-    expect(timeline.frames.length).toBeLessThanOrEqual(['full-roll', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit'].includes(kind) ? demonstration.recording.samples.length + 1 : lesson.checkpoints.length + 2)
+    expect(timeline.frames.length).toBeLessThanOrEqual(['full-roll', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'backward-flight'].includes(kind) ? demonstration.recording.samples.length + 1 : lesson.checkpoints.length + 2)
     expect(timeline.title).toMatch(/^L\d\d /u)
     expect(Object.isFrozen(timeline)).toBe(true)
     expect(Object.isFrozen(timeline.steps)).toBe(true)
@@ -38,6 +38,37 @@ describe('independent teaching demonstration progress', () => {
     expect(beginning.complete).toBe(false)
     expect(beginning.completedSteps).toBeLessThan(lesson.checkpoints.length)
     expect(beginning.steps.filter((step) => step.status === 'current')).toHaveLength(1)
+  })
+
+  it('shows actual backward movement and braking on its own seven-step clock, including backward seeks', () => {
+    const settings = createTuningPreset('beginner')
+    const demo = createTeachingDemonstration(settings, 'backward-flight')
+    const timeline = createDemonstrationProgress(demo, settings)
+    const end = demonstrationProgressAt(timeline, timeline.durationSeconds)
+    expect(end).toMatchObject({ kind: 'backward-flight', lessonId: 'backward-flight', complete: true, completedSteps: 7, totalSteps: 7 })
+    expect(end.metrics?.backwardDistanceM).toBeGreaterThanOrEqual(3)
+    expect(end.metrics?.backwardHoldSeconds).toBeGreaterThanOrEqual(0.6)
+    const movement = demonstrationProgressAt(timeline, end.steps[4].completedAtSeconds!)
+    expect(movement).toMatchObject({ complete: false, completedSteps: 5 })
+    expect(movement.metrics?.backwardYawDegrees).toBeGreaterThanOrEqual(120)
+    expect(movement.metrics?.backwardSpeedMps).toBeGreaterThanOrEqual(0.75)
+    expect(movement.metrics?.backwardVelocityHeadingDegrees).toBeGreaterThanOrEqual(120)
+    expect(demonstrationProgressAt(timeline, end.steps[4].completedAtSeconds! - 0.001).completedSteps).toBe(4)
+    // The successful tail still projects speed from its own moving ghost.
+    const firstSuccess = demonstrationProgressAt(timeline, end.steps[6].completedAtSeconds!)
+    expect(end.metrics?.backwardSpeedMps).toBeLessThan(firstSuccess.metrics?.backwardSpeedMps ?? 0)
+    const beginning = demonstrationProgressAt(timeline, 0)
+    expect(beginning).toMatchObject({ complete: false, completedSteps: 1,
+      metrics: { backwardPhase: 1, backwardYawDegrees: 0, backwardDistanceM: 0, backwardHoldSeconds: 0 } })
+    expect(beginning.steps.slice(1).every((step) => step.completedAtSeconds === null)).toBe(true)
+    expect(timeline.frames.every((frame) => !frame.metrics || Object.isFrozen(frame.metrics))).toBe(true)
+    // Future captions cannot complete a movie stopped before maintenance/recovery.
+    const stopAt = end.steps[4].completedAtSeconds!
+    const samples = demo.recording.samples.filter((pose) => pose.timestampSeconds <= stopAt)
+    const truncated = { ...demo, cues: [{ timeSeconds: 0, text: '七步已完成', backwardPhase: 7 }],
+      recording: { ...demo.recording, samples, durationSeconds: samples.at(-1)!.timestampSeconds } }
+    const partial = createDemonstrationProgress(truncated, settings)
+    expect(demonstrationProgressAt(partial, partial.durationSeconds)).toMatchObject({ complete: false, completedSteps: 5 })
   })
 
   it('keeps measured spatial-loop progress independent and restores earlier geometry on backward seeks', () => {
@@ -264,7 +295,7 @@ describe('independent teaching demonstration progress', () => {
     expect(backward.steps.slice(1).every((step) => step.completedAtSeconds === null)).toBe(true)
   })
 
-  it.each(['basic-recovery', 'front-flip', 'back-flip', 'orbit'] as const)('follows the paused, slowed and seeked %s playback clock without storage or live-session writes', (kind) => {
+  it.each(['basic-recovery', 'front-flip', 'back-flip', 'orbit', 'backward-flight'] as const)('follows the paused, slowed and seeked %s playback clock without storage or live-session writes', (kind) => {
     const settings = createTuningPreset('beginner')
     const demo = createTeachingDemonstration(settings, kind)
     const write = vi.spyOn(Storage.prototype, 'setItem')
@@ -291,7 +322,7 @@ describe('independent teaching demonstration progress', () => {
     }
   })
 
-  it.each(['takeoff', 'landing', 'wide-gate', 'basic-recovery', 'full-roll', 'front-flip', 'back-flip'] as const)('uses recorded raised-ground anchors for %s and rejects a different settings snapshot', (kind) => {
+  it.each(['takeoff', 'landing', 'wide-gate', 'basic-recovery', 'full-roll', 'front-flip', 'back-flip', 'backward-flight'] as const)('uses recorded raised-ground anchors for %s and rejects a different settings snapshot', (kind) => {
     const defaults = createTuningPreset('standard')
     const settings = { ...defaults, drone: { ...defaults.drone, ground: { ...defaults.drone.ground, heightM: 10 }, spawnPositionM: { x: 6, y: 25, z: -3 } } }
     const demo = createTeachingDemonstration(settings, kind)

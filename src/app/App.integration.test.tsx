@@ -310,6 +310,7 @@ describe('integrated training/runtime UI boundaries', () => {
     { lessonId: 'back-flip', code: 'L12', steps: 6, nextCode: 'L13' },
     { lessonId: 'power-loop', code: 'L13', steps: 8, nextCode: 'L14' },
     { lessonId: 'split-s', code: 'L14', steps: 8, nextCode: 'L15' },
+    { lessonId: 'backward-flight', code: 'L17', steps: 7, nextCode: null },
   ] as const)('records an ordered $code result once and restores its current-rule progress after reload', ({ lessonId, steps, nextCode }) => {
     const { unmount } = render(<App />)
     const training = trainingSection()
@@ -349,7 +350,8 @@ describe('integrated training/runtime UI boundaries', () => {
       if (lessonId === 'split-s') expect(persistedAttempts('power-loop')).toBe(0)
     }
     expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
-    expect(within(training).getByRole('button', { name: new RegExp(`^下一課：${nextCode}`) })).toBeEnabled()
+    if (nextCode) expect(within(training).getByRole('button', { name: new RegExp(`^下一課：${nextCode}`) })).toBeEnabled()
+    else expect(within(training).queryByRole('button', { name: /^下一課：/ })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /^Disarm$/ }))
     unmount()
     render(<App />)

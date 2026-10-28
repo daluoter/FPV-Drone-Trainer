@@ -130,6 +130,7 @@ export function createDemonstrationProgress(
     { id: 'takeoff-pad', kind: 'pad', positionM: pad },
     { id: 'training-launch', kind: 'spawn', positionM: launch },
     { id: 'landing-surface', kind: 'ground', positionM: landing },
+    { id: 'backward-zone', kind: 'zone', positionM: { x: launch.x, y: settings.drone.ground.heightM + 10, z: launch.z - 25 } },
     { id: 'orbit-zone', kind: 'zone', positionM: createOrbitTarget(launch, settings.drone.ground.heightM) },
   ]
   const firstTime = demonstration.recording.samples[0]?.timestampSeconds ?? 0
@@ -183,7 +184,7 @@ export function createDemonstrationProgress(
     // Complete-turn instruments follow each retained observation rather
     // than guessing progress from captions, elapsed time or the wrapped pose.
     const flip = demonstration.lessonId === 'full-flip' || demonstration.lessonId === 'front-flip' || demonstration.lessonId === 'back-flip'
-    if (changed || complete || demonstration.kind === 'full-roll' || flip || demonstration.kind === 'power-loop' || demonstration.kind === 'split-s' || demonstration.kind === 'orbit') {
+    if (changed || complete || demonstration.kind === 'full-roll' || flip || demonstration.kind === 'power-loop' || demonstration.kind === 'split-s' || demonstration.kind === 'orbit' || demonstration.kind === 'backward-flight') {
       const metrics: Readonly<Record<string, number>> | undefined = demonstration.kind === 'full-roll' ? {
         rollProgressDegrees: evaluation.metrics?.rollProgressDegrees ?? 0,
         rollSignedDegrees: evaluation.metrics?.rollSignedDegrees ?? 0,
@@ -214,6 +215,18 @@ export function createDemonstrationProgress(
         orbitRadiusM: evaluation.metrics?.orbitRadiusM ?? 0,
         orbitHeadingErrorDegrees: evaluation.metrics?.orbitHeadingErrorDegrees ?? 0,
         orbitDirection: evaluation.metrics?.orbitDirection ?? 0,
+      } : demonstration.kind === 'backward-flight' ? {
+        backwardPhase: evaluation.metrics?.backwardPhase ?? 0,
+        backwardYawDegrees: evaluation.metrics?.backwardYawDegrees ?? 0,
+        backwardSpeedMps: evaluation.metrics?.backwardSpeedMps ?? 0,
+        backwardDistanceM: evaluation.metrics?.backwardDistanceM ?? 0,
+        backwardHoldSeconds: evaluation.metrics?.backwardHoldSeconds ?? 0,
+        backwardForwardSpeedMps: evaluation.metrics?.backwardForwardSpeedMps ?? 0,
+        backwardHeadingErrorDegrees: evaluation.metrics?.backwardHeadingErrorDegrees ?? 0,
+        backwardVelocityHeadingDegrees: evaluation.metrics?.backwardVelocityHeadingDegrees ?? 0,
+        backwardEntryDirectionX: evaluation.metrics?.backwardEntryDirectionX ?? 0,
+        backwardEntryDirectionZ: evaluation.metrics?.backwardEntryDirectionZ ?? 0,
+        backwardMaintained: evaluation.metrics?.backwardMaintained ?? 0,
       } : undefined
       frames.push(frozenFrame(time, completed, complete, null, metrics))
     }
@@ -221,7 +234,7 @@ export function createDemonstrationProgress(
       frames.push(frozenFrame(time, completed, false, '這段示範尚未完成全部課程步驟。', frames.at(-1)?.metrics))
       break
     }
-    if (complete && demonstration.kind !== 'orbit') break
+    if (complete && demonstration.kind !== 'orbit' && demonstration.kind !== 'backward-flight') break
     previous = sample
     previousFlight = sample
     previousEvaluation = evaluation

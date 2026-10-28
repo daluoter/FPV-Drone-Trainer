@@ -18,10 +18,11 @@ import { recordFullFlipDemonstration } from './flipDemonstration'
 import { recordPowerLoopDemonstration } from './powerLoopDemonstration'
 import { recordSplitSDemonstration } from './splitSDemonstration'
 import { recordOrbitDemonstration } from './orbitDemonstration'
+import { recordBackwardFlightDemonstration } from './backwardFlightDemonstration'
 import { BACK_FLIP_LESSON, FRONT_FLIP_LESSON, FULL_FLIP_LESSON } from './fullFlip'
 import { lessonLearningContent } from './catalog'
 
-export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'front-flip' | 'back-flip' | 'power-loop' | 'split-s' | 'orbit' | 'roll' | 'pitch' | 'yaw'
+export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'front-flip' | 'back-flip' | 'power-loop' | 'split-s' | 'orbit' | 'backward-flight' | 'roll' | 'pitch' | 'yaw'
 
 export interface TeachingCue {
   readonly timeSeconds: number
@@ -33,12 +34,13 @@ export interface TeachingCue {
   readonly splitSPhase?: number
   readonly powerLoopPhase?: number
   readonly orbitPhase?: number
+  readonly backwardPhase?: number
 }
 
 export interface TeachingDemonstration {
   readonly schemaVersion: 1
   readonly kind: TeachingDemonstrationKind
-  readonly lessonId: 'intro' | 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'front-flip' | 'back-flip' | 'power-loop' | 'split-s' | 'orbit'
+  readonly lessonId: 'intro' | 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'front-flip' | 'back-flip' | 'power-loop' | 'split-s' | 'orbit' | 'backward-flight'
   readonly rulesVersion: TrainingAttemptContext['rulesVersion']
   readonly physicsVersion: 1
   readonly presetId: TuningPresetSelection
@@ -189,13 +191,24 @@ export function createTeachingDemonstration(
   kind: TeachingDemonstrationKind,
 ): TeachingDemonstration {
   if (!validateTuningSettings(settings).valid) throw new RangeError('示範設定未通過驗證，請先還原有效設定。')
-  if (!['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'roll', 'pitch', 'yaw'].includes(kind)) {
+  if (!['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'backward-flight', 'roll', 'pitch', 'yaw'].includes(kind)) {
     throw new RangeError('不支援此示範種類。')
   }
   const simulation = new FlightSimulation(flightSimulationConfigFromTuning(settings))
   const maximumThrust = settings.drone.motors.reduce((sum, motor) => sum + motor.maxThrustN, 0)
   if (settings.drone.massKg * settings.drone.gravityMps2 / maximumThrust >= 0.8) {
     throw new RangeError('目前推力不足以完成穩定示範，請檢查機體設定。')
+  }
+  if (kind === 'backward-flight') {
+    const { recording, cues } = recordBackwardFlightDemonstration(simulation, settings, stickForRate, collectiveThrottle)
+    return Object.freeze({
+      schemaVersion: 1, kind, lessonId: kind,
+      rulesVersion: trainingRulesVersionForLesson(kind), physicsVersion: 1,
+      presetId: identifyTuningPreset(settings), settingsFingerprint: fingerprintTrainingSettings(settings),
+      title: courseDemonstrationTitle(kind, '地面起飛、前進轉頭、後退飛行與減速恢復'),
+      description: '模擬示範，以實際搖桿與物理先建立前進動量、偏航轉頭，保持機腹朝下並實際後退；真人練習全程自行操控，觀看不計入通關。',
+      source: 'simulated', recording, cues,
+    })
   }
   if (kind === 'orbit') {
     const { recording, cues } = recordOrbitDemonstration(simulation, settings, stickForRate, collectiveThrottle)
@@ -470,6 +483,18 @@ export function teachingOrbitPhaseAt(demonstration: TeachingDemonstration, timeS
     if (cue.timeSeconds > time + TEACHING_CLOCK_TOLERANCE_SECONDS) break
     const candidate = cue.orbitPhase
     if (typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 0 && candidate <= 9) phase = candidate
+  }
+  return phase
+}
+
+/** Backward-flight guidance follows actual observed phases on the independent recording clock. */
+export function teachingBackwardFlightPhaseAt(demonstration: TeachingDemonstration, timeSeconds: number): number | null {
+  const time = Number.isFinite(timeSeconds) ? Math.max(0, timeSeconds) : 0
+  let phase: number | null = null
+  for (const cue of demonstration.cues) {
+    if (cue.timeSeconds > time + TEACHING_CLOCK_TOLERANCE_SECONDS) break
+    const candidate = cue.backwardPhase
+    if (typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 0 && candidate <= 7) phase = candidate
   }
   return phase
 }

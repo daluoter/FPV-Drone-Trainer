@@ -78,6 +78,7 @@ describe('training attempt provenance', () => {
     expect(trainingRulesVersionForLesson('power-loop')).toBe(6)
     expect(trainingRulesVersionForLesson('split-s')).toBe(6)
     expect(trainingRulesVersionForLesson('orbit')).toBe(6)
+    expect(trainingRulesVersionForLesson('backward-flight')).toBe(6)
     for (const lessonId of [null, 'takeoff', 'hover', 'straight-line', 'landing', 'direction-control']) {
       expect(trainingRulesVersionForLesson(lessonId)).toBe(4)
     }

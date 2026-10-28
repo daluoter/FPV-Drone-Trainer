@@ -1848,6 +1848,9 @@ h1 em {
 .has-recovery-hud .school-viewport-hint { max-height: calc(100% - 202px); }
 .has-orbit-hud .flight-safe-overlay { top: max(220px, 62%); }
 .has-orbit-hud .school-viewport-hint { max-height: calc(100% - 222px); }
+.flight-backward-hud > small { display: block; margin-top: 4px; color: #afc6c5; font-size: 10px; }
+.has-backward-hud .flight-safe-overlay { top: max(246px, 62%); }
+.has-backward-hud .school-viewport-hint { max-height: calc(100% - 248px); }
 
 .flight-rendering-error {
   position: absolute;

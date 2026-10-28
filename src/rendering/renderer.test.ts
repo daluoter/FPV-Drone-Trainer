@@ -267,6 +267,45 @@ describe('interactive free camera renderer integration', () => {
 
 })
 
+describe('FlightRenderer backward-flight presentation', () => {
+  it('retains backward references and phase after rebuild while preserving canvas and live state', () => {
+    const canvas = document.createElement('canvas')
+    const rendererStub = createRendererStub()
+    const renderer = new FlightRenderer(canvas, { rendererFactory: () => rendererStub })
+    try {
+      renderer.setLessonTarget('backward-flight')
+      renderer.setBackwardFlightStage(4)
+      const state = createInitialDroneState(DEFAULT_DRONE_CONFIG)
+      const original = JSON.stringify(state)
+      renderer.render(state)
+      const previous = renderer.flightScene
+      const dispose = vi.spyOn(previous, 'dispose')
+      renderer.reconfigureScene({ ...DEFAULT_DRONE_CONFIG, ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 35, z: -3 } })
+      expect(renderer.canvas).toBe(canvas)
+      expect(renderer.renderer).toBe(rendererStub)
+      expect(dispose).toHaveBeenCalledOnce()
+      expect(renderer.flightScene.getReference('backward-zone')?.positionM).toEqual({ x: 6, y: 15, z: -28 })
+      expect(renderer.scene.getObjectByName('backward-field')?.visible).toBe(true)
+      expect(renderer.scene.getObjectByName('orbit-field')?.visible).toBe(false)
+      expect(renderer.flightScene.getReference('orbit-poi')?.positionM).toEqual({ x: 4, y: 7.5, z: 4 })
+      expect(renderer.flightScene.getReference('orbit-poi')?.object.visible).toBe(false)
+      const nose = renderer.scene.getObjectByName('backward-nose-direction-example')!
+      expect(nose.rotation.y).toBe(Math.PI)
+      const guide = renderer.scene.getObjectByName('backward-stage-reference') as THREE.LineLoop<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      expect(guide.material.color.getHex()).toBe(0xffc978)
+      renderer.setBackwardFlightStage(7)
+      expect(guide.material.color.getHex()).toBe(0xb8f36b)
+      renderer.setBackwardFlightStage(null)
+      renderer.reconfigureScene(DEFAULT_DRONE_CONFIG)
+      expect(renderer.scene.getObjectByName('backward-stage-guidance')?.visible).toBe(false)
+      renderer.setLessonTarget('orbit')
+      expect(renderer.scene.getObjectByName('backward-field')?.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('orbit-field')?.visible).toBe(true)
+      expect(JSON.stringify(state)).toBe(original)
+    } finally { renderer.dispose() }
+  })
+})
+
 describe('FlightRenderer lifecycle and failure contract', () => {
   it('reuses a canvas after disposal without forcing its WebGL context lost', () => {
     const canvas = document.createElement('canvas')

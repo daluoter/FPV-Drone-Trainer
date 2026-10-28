@@ -238,6 +238,101 @@ describe('interactive free camera', () => {
 })
 
 describe('Free Flight native navigation confirmation', () => {
+  it('shows signed movement relative to the nose and clears unobserved backward-flight readings when changing lessons', () => {
+    const props = { poller: createBrowserGamepadPoller(), profile: null, settings: createDefaultTuningSettings() }
+    const base = createTrainingMachineState({ initialLessonId: 'backward-flight' })
+    const { rerender } = render(<FreeFlight {...props} trainingState={base} />)
+    const hud = () => screen.getByRole('group', { name: '後退飛行即時狀態' })
+    expect(hud()).toHaveTextContent('即時後退飛行數值')
+    expect(hud()).toHaveTextContent('青色雙柱＝來向 · 金色三柱＝去向')
+    expect(screen.getByTestId('backward-speed')).toHaveTextContent('—')
+    expect(screen.getByTestId('backward-motion-direction')).toHaveTextContent('等待實際飛行資料')
+    const observed: TrainingMachineState = { ...base, phase: 'ACTIVE', lastEvaluation: { status: 'continue', metrics: {
+      backwardPhase: 4, backwardYawDegrees: 176, backwardSpeedMps: 2.5, backwardDistanceM: 1.7,
+    } } }
+    rerender(<FreeFlight {...props} trainingState={observed} />)
+    expect(screen.getByTestId('backward-yaw')).toHaveTextContent('176°')
+    expect(screen.getByTestId('backward-speed')).toHaveTextContent('2.5 m/s')
+    expect(screen.getByTestId('backward-distance')).toHaveTextContent('1.7 m')
+    expect(screen.getByTestId('backward-motion-direction')).toHaveTextContent('往機尾移動（後退）')
+    rerender(<FreeFlight {...props} trainingState={{ ...observed, lastEvaluation: { status: 'continue', metrics: {
+      backwardPhase: 6, backwardYawDegrees: 10, backwardSpeedMps: -2,
+    } } }} />)
+    expect(screen.getByTestId('backward-speed')).toHaveTextContent('-2.0 m/s')
+    expect(screen.getByTestId('backward-motion-direction')).toHaveTextContent('往機頭移動（前進）')
+    rerender(<FreeFlight {...props} trainingState={createTrainingMachineState({ initialLessonId: 'takeoff' })} />)
+    expect(screen.queryByRole('group', { name: '後退飛行即時狀態' })).not.toBeInTheDocument()
+    rerender(<FreeFlight {...props} trainingState={base} />)
+    expect(screen.getByTestId('backward-speed')).toHaveTextContent('—')
+    expect(screen.getByTestId('backward-yaw')).toHaveTextContent('0°')
+    expect(screen.getByTestId('backward-distance')).toHaveTextContent('0.0 m')
+  })
+
+  it('plays seven measured backward-flight steps and restores their direction and distance without updating live results', () => {
+    window.localStorage.clear()
+    render(<App />)
+    const canvas = screen.getByLabelText('Free Flight 3D scene')
+    fireEvent.change(screen.getByLabelText('選擇課程'), { target: { value: 'backward-flight' } })
+    fireEvent.change(screen.getByLabelText('控制方式'), { target: { value: 'keyboard' } })
+    const hud = () => screen.getByRole('group', { name: '後退飛行即時狀態' })
+    expect(hud()).toHaveTextContent('即時')
+    expect(frames.renderer!.scene.getObjectByName('backward-field')?.visible).toBe(true)
+    expect(frames.runtime!.simulation.getStaticObstacles()).toHaveLength(0)
+    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(19)
+    const initialAltitude = screen.getByTestId('flight-altitude').textContent
+    const liveSteps = screen.getByRole('list', { name: '本課步驟' }).textContent
+    const stored = () => Object.fromEntries(Object.entries(window.localStorage).filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.')))
+    const before = stored()
+    fireEvent.click(screen.getByRole('button', { name: 'L17 後退飛行示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    expect(screen.getByRole('button', { name: '0.5×' })).toHaveAttribute('aria-pressed', 'true')
+    const progress = screen.getByRole('region', { name: '示範進度' })
+    expect(progress).toHaveTextContent('L17 後退飛行')
+    const chapters = within(progress).getAllByRole('button')
+    expect(chapters).toHaveLength(7)
+    fireEvent.click(chapters[5])
+    const playback = frames.runtime!.getReplayPlayback()!
+    expect(playback.isPlaying()).toBe(false)
+    expect(Number.parseFloat(screen.getByTestId('backward-yaw').textContent!)).toBeGreaterThanOrEqual(120)
+    expect(Number.parseFloat(screen.getByTestId('backward-speed').textContent!)).toBeGreaterThan(0.25)
+    expect(screen.getByTestId('backward-motion-direction')).toHaveTextContent('往機尾移動（後退）')
+    const held = hud().textContent
+    const pausedTime = playback.getState().currentTimeSeconds
+    const live = JSON.stringify(frames.runtime!.simulation.getState())
+    frame(400)
+    expect(hud().textContent).toBe(held)
+    expect(playback.getState().currentTimeSeconds).toBe(pausedTime)
+    expect(JSON.stringify(frames.runtime!.simulation.getState())).toBe(live)
+    fireEvent.change(screen.getByRole('slider'), { target: { value: playback.durationSeconds } })
+    expect(progress).toHaveTextContent('7 / 7 個示範步驟完成')
+    expect(Number.parseFloat(screen.getByTestId('backward-distance').textContent!)).toBeGreaterThanOrEqual(3)
+    expect(Number.parseFloat(screen.getByTestId('flight-altitude').textContent!)).toBeGreaterThan(1.5)
+    fireEvent.change(screen.getByRole('slider'), { target: { value: 0 } })
+    expect(screen.getByTestId('backward-yaw')).toHaveTextContent('0°')
+    expect(screen.getByTestId('backward-distance')).toHaveTextContent('0.0 m')
+    expect(progress).not.toHaveTextContent('7 / 7 個示範步驟完成')
+    expect(stored()).toEqual(before)
+    fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
+    expect(screen.getByRole('list', { name: '本課步驟' }).textContent).toBe(liveSteps)
+    expect(hud()).toHaveTextContent('即時')
+    expect(screen.getByTestId('backward-speed')).toHaveTextContent('—')
+    act(() => { expect(frames.runtime!.enterReplay(playback.recording)).toBe(true) })
+    frame(500)
+    expect(screen.queryByRole('group', { name: '後退飛行即時狀態' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '示範進度' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '結束回放' }))
+    fireEvent.click(screen.getByRole('button', { name: /^偏航$/ }))
+    expect(screen.queryByRole('group', { name: '後退飛行即時狀態' })).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '示範進度' })).toHaveTextContent('L00')
+    fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
+    expect(screen.getByLabelText('選擇課程')).toHaveValue('backward-flight')
+    expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
+    expect(screen.getByTestId('flight-altitude').textContent).toBe(initialAltitude)
+    expect(screen.getByRole('button', { name: /^Arm$/ })).toBeEnabled()
+    expect(stored()).toEqual(before)
+  })
+
+  // Recording five physical laps simulates over 100 seconds at 240 Hz.
   it('tracks five full inward-facing laps and restores their recorded counts without changing live flight or saved progress', () => {
     window.localStorage.clear()
     render(<App />)
@@ -250,7 +345,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(screen.getByTestId('orbit-progress')).toHaveTextContent('0°')
     expect(screen.getByTestId('orbit-radius')).toHaveTextContent('—')
     expect(screen.getByTestId('orbit-heading')).toHaveTextContent('—')
-    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(18)
+    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(19)
     expect(frames.renderer!.scene.getObjectByName('orbit-field')?.visible).toBe(true)
     expect(frames.renderer!.scene.getObjectByName('orbit-reference-tower')).toBeDefined()
     expect(frames.renderer!.flightScene.getReference('orbit-poi')?.object.visible).toBe(false)
@@ -317,7 +412,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
     expect(screen.getByTestId('flight-altitude').textContent).toBe(initialAltitude)
     expect(screen.getByRole('button', { name: /^Arm$/ })).toBeEnabled()
-  })
+  }, 15_000)
 
   it('keeps the L14 roll-then-dive movie and its measured eight steps separate from live training', () => {
     window.localStorage.clear()

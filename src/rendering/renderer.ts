@@ -71,6 +71,7 @@ export class FlightRenderer {
   private powerLoopStage: number | null = 0
   private splitSStage: number | null = 0
   private orbitStage: number | null = 0
+  private backwardFlightStage: number | null = 0
   public get flightScene(): FlightScene { return this.currentFlightScene }
   public readonly cameraRig: FlightCameraRig
   public readonly renderer: THREE.WebGLRenderer
@@ -248,6 +249,13 @@ export class FlightRenderer {
     this.flightScene.setOrbitStage(stage)
   }
 
+  /** Show the retained-momentum exercise without changing the live aircraft. */
+  public setBackwardFlightStage(stage: number | null): void {
+    if (this.disposed) return
+    this.backwardFlightStage = stage
+    this.flightScene.setBackwardFlightStage(stage)
+  }
+
   /** Rebuild anchors only after the owner has explicitly reset and disarmed. */
   public reconfigureScene(config: DroneConfig): void {
     if (this.disposed) return
@@ -265,6 +273,7 @@ export class FlightRenderer {
     this.currentFlightScene.setPowerLoopStage(this.powerLoopStage)
     this.currentFlightScene.setSplitSStage(this.splitSStage)
     this.currentFlightScene.setOrbitStage(this.orbitStage)
+    this.currentFlightScene.setBackwardFlightStage(this.backwardFlightStage)
     previous.dispose()
   }
 
