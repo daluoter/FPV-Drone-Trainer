@@ -5,8 +5,9 @@ import { createTuningPreset } from '../tuning/presets'
 import { createTeachingDemonstration } from './demonstrations'
 import { createDemonstrationProgress, demonstrationProgressAt } from './demonstrationProgress'
 import { lessonById } from './lessons'
+import { ORBIT_COMPLETION_DEGREES, ORBIT_REQUIRED_LAPS } from './orbit'
 
-const COURSE_KINDS = ['takeoff', 'straight-line', 'landing', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'front-flip', 'back-flip', 'power-loop', 'split-s'] as const
+const COURSE_KINDS = ['takeoff', 'straight-line', 'landing', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit'] as const
 
 describe('independent teaching demonstration progress', () => {
   it.each(COURSE_KINDS)('observes all %s checkpoints from the actual recording and exposes chapter seeks', (kind) => {
@@ -26,7 +27,7 @@ describe('independent teaching demonstration progress', () => {
     expect(finish.steps.every((step) => step.startedAtSeconds !== null && step.startedAtSeconds <= step.completedAtSeconds!)).toBe(true)
     const retained = new Set(demonstration.recording.samples.map((sample) => sample.timestampSeconds))
     expect(finish.steps.every((step) => retained.has(step.completedAtSeconds!))).toBe(true)
-    expect(timeline.frames.length).toBeLessThanOrEqual(['full-roll', 'front-flip', 'back-flip', 'power-loop', 'split-s'].includes(kind) ? demonstration.recording.samples.length + 1 : lesson.checkpoints.length + 2)
+    expect(timeline.frames.length).toBeLessThanOrEqual(['full-roll', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit'].includes(kind) ? demonstration.recording.samples.length + 1 : lesson.checkpoints.length + 2)
     expect(timeline.title).toMatch(/^L\d\d /u)
     expect(Object.isFrozen(timeline)).toBe(true)
     expect(Object.isFrozen(timeline.steps)).toBe(true)
@@ -60,6 +61,49 @@ describe('independent teaching demonstration progress', () => {
     expect(timeline.frames.length).toBeLessThanOrEqual(demo.recording.samples.length + 1)
     expect(timeline.frames.every((frame) => !frame.metrics || Object.isFrozen(frame.metrics))).toBe(true)
     expect(JSON.stringify(demo)).toBe(before)
+  })
+
+  it('keeps five full orbit laps, inward heading and radius synchronized through backward seeks without credit from captions', () => {
+    const settings = createTuningPreset('beginner')
+    const demo = createTeachingDemonstration(settings, 'orbit')
+    const before = JSON.stringify(demo)
+    const timeline = createDemonstrationProgress(demo, settings)
+    const end = demonstrationProgressAt(timeline, timeline.durationSeconds)
+    expect(end).toMatchObject({ kind: 'orbit', lessonId: 'orbit', complete: true, completedSteps: 9, totalSteps: 9 })
+    expect(end.metrics?.orbitProgressDegrees).toBeGreaterThanOrEqual(ORBIT_COMPLETION_DEGREES)
+    expect(end.metrics?.orbitCompletedLaps).toBe(ORBIT_REQUIRED_LAPS)
+    expect(Math.abs(end.metrics?.orbitDirection ?? 0)).toBe(1)
+    for (let lap = 1; lap <= ORBIT_REQUIRED_LAPS; lap += 1) {
+      const index = lap + 2
+      const time = end.steps[index].completedAtSeconds!
+      const observed = demonstrationProgressAt(timeline, time)
+      expect(observed.completedSteps).toBe(index + 1)
+      expect(observed.complete).toBe(false)
+      expect(observed.metrics?.orbitCompletedLaps).toBe(lap)
+      expect(observed.metrics?.orbitProgressDegrees).toBeGreaterThanOrEqual(lap * 360)
+      expect(observed.metrics?.orbitProgressDegrees).toBeLessThan(lap * 360 + 2)
+      expect(observed.metrics?.orbitRadiusM).toBeGreaterThan(6)
+      expect(observed.metrics?.orbitRadiusM).toBeLessThan(30)
+      expect(observed.metrics?.orbitHeadingErrorDegrees).toBeLessThan(80)
+      expect(demonstrationProgressAt(timeline, time - 0.001).completedSteps).toBe(index)
+    }
+    expect(demonstrationProgressAt(timeline, 0)).toMatchObject({ complete: false, completedSteps: 1,
+      metrics: { orbitPhase: 1, orbitProgressDegrees: 0, orbitCompletedLaps: 0, orbitRadiusM: 30, orbitDirection: 0 } })
+    expect(timeline.frames.length).toBeLessThanOrEqual(demo.recording.samples.length + 1)
+    expect(timeline.frames.every((frame) => !frame.metrics || Object.isFrozen(frame.metrics))).toBe(true)
+    expect(JSON.stringify(demo)).toBe(before)
+    // One complete circle and even four complete circles remain incomplete.
+    // Five complete circles still require a separately observed controlled exit.
+    for (const laps of [1, 4, 5]) {
+      const cutTime = end.steps[laps + 2].completedAtSeconds!
+      const samples = demo.recording.samples.filter((pose) => pose.timestampSeconds <= cutTime)
+      const truncated = { ...demo, recording: { ...demo.recording, samples, durationSeconds: samples.at(-1)!.timestampSeconds },
+        cues: [{ timeSeconds: 0, text: '九步已完成', orbitPhase: 9 }] }
+      const partial = createDemonstrationProgress(truncated, settings)
+      const finish = demonstrationProgressAt(partial, partial.durationSeconds)
+      expect(finish).toMatchObject({ complete: false, completedSteps: laps + 3, metrics: { orbitCompletedLaps: laps } })
+      expect(finish.steps.slice(laps + 3).every((step) => step.completedAtSeconds === null)).toBe(true)
+    }
   })
 
   it('keeps actual half-roll, descending half-loop and reversal progress synchronized through backward seeks', () => {
@@ -220,7 +264,7 @@ describe('independent teaching demonstration progress', () => {
     expect(backward.steps.slice(1).every((step) => step.completedAtSeconds === null)).toBe(true)
   })
 
-  it.each(['basic-recovery', 'front-flip', 'back-flip'] as const)('follows the paused, slowed and seeked %s playback clock without storage or live-session writes', (kind) => {
+  it.each(['basic-recovery', 'front-flip', 'back-flip', 'orbit'] as const)('follows the paused, slowed and seeked %s playback clock without storage or live-session writes', (kind) => {
     const settings = createTuningPreset('beginner')
     const demo = createTeachingDemonstration(settings, kind)
     const write = vi.spyOn(Storage.prototype, 'setItem')

@@ -1846,6 +1846,8 @@ h1 em {
 .school-flight .free-flight-viewport.has-recovery-hud { min-height: 320px; height: clamp(320px, 45vh, 480px); }
 .has-recovery-hud .flight-safe-overlay { top: max(200px, 62%); }
 .has-recovery-hud .school-viewport-hint { max-height: calc(100% - 202px); }
+.has-orbit-hud .flight-safe-overlay { top: max(220px, 62%); }
+.has-orbit-hud .school-viewport-hint { max-height: calc(100% - 222px); }
 
 .flight-rendering-error {
   position: absolute;

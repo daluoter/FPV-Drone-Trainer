@@ -6,6 +6,7 @@ import { fingerprintTrainingSettings } from './attempt'
 import { lessonLearningContent } from './catalog'
 import type { TeachingDemonstration, TeachingDemonstrationKind } from './demonstrations'
 import { createTrainingFieldAnchors } from './field'
+import { createOrbitTarget } from './orbit'
 import { lessonById } from './lessons'
 import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample } from './types'
 
@@ -129,6 +130,7 @@ export function createDemonstrationProgress(
     { id: 'takeoff-pad', kind: 'pad', positionM: pad },
     { id: 'training-launch', kind: 'spawn', positionM: launch },
     { id: 'landing-surface', kind: 'ground', positionM: landing },
+    { id: 'orbit-zone', kind: 'zone', positionM: createOrbitTarget(launch, settings.drone.ground.heightM) },
   ]
   const firstTime = demonstration.recording.samples[0]?.timestampSeconds ?? 0
   const steps = lesson.checkpoints.map((checkpoint, index) => ({ id: checkpoint.id, title: checkpoint.title,
@@ -181,7 +183,7 @@ export function createDemonstrationProgress(
     // Complete-turn instruments follow each retained observation rather
     // than guessing progress from captions, elapsed time or the wrapped pose.
     const flip = demonstration.lessonId === 'full-flip' || demonstration.lessonId === 'front-flip' || demonstration.lessonId === 'back-flip'
-    if (changed || complete || demonstration.kind === 'full-roll' || flip || demonstration.kind === 'power-loop' || demonstration.kind === 'split-s') {
+    if (changed || complete || demonstration.kind === 'full-roll' || flip || demonstration.kind === 'power-loop' || demonstration.kind === 'split-s' || demonstration.kind === 'orbit') {
       const metrics: Readonly<Record<string, number>> | undefined = demonstration.kind === 'full-roll' ? {
         rollProgressDegrees: evaluation.metrics?.rollProgressDegrees ?? 0,
         rollSignedDegrees: evaluation.metrics?.rollSignedDegrees ?? 0,
@@ -203,20 +205,29 @@ export function createDemonstrationProgress(
         splitHeightLossM: evaluation.metrics?.splitHeightLossM ?? 0,
         splitHeadingChangeDegrees: evaluation.metrics?.splitHeadingChangeDegrees ?? 0,
         splitReverseTravelM: evaluation.metrics?.splitReverseTravelM ?? 0,
+      } : demonstration.kind === 'orbit' ? {
+        orbitPhase: evaluation.metrics?.orbitPhase ?? 0,
+        orbitProgressDegrees: evaluation.metrics?.orbitProgressDegrees ?? 0,
+        orbitCompletedLaps: evaluation.metrics?.orbitCompletedLaps ?? 0,
+        orbitCurrentLap: evaluation.metrics?.orbitCurrentLap ?? 1,
+        orbitExitDistanceM: evaluation.metrics?.orbitExitDistanceM ?? 0,
+        orbitRadiusM: evaluation.metrics?.orbitRadiusM ?? 0,
+        orbitHeadingErrorDegrees: evaluation.metrics?.orbitHeadingErrorDegrees ?? 0,
+        orbitDirection: evaluation.metrics?.orbitDirection ?? 0,
       } : undefined
       frames.push(frozenFrame(time, completed, complete, null, metrics))
     }
     if (evaluation.status === 'failure') {
-      frames.push(frozenFrame(time, completed, false, '這段示範尚未完成全部課程步驟。'))
+      frames.push(frozenFrame(time, completed, false, '這段示範尚未完成全部課程步驟。', frames.at(-1)?.metrics))
       break
     }
-    if (complete) break
+    if (complete && demonstration.kind !== 'orbit') break
     previous = sample
     previousFlight = sample
     previousEvaluation = evaluation
   }
   if (!complete) {
-    frames.push(frozenFrame(demonstration.recording.durationSeconds, completed, false, '這段示範尚未完成全部課程步驟。'))
+    frames.push(frozenFrame(demonstration.recording.durationSeconds, completed, false, '這段示範尚未完成全部課程步驟。', frames.at(-1)?.metrics))
   }
   const content = lessonLearningContent(lesson.id)
   return freezeTimeline({ kind: demonstration.kind, title: `${content?.code ?? ''} ${content?.title ?? lesson.title}`.trim(),

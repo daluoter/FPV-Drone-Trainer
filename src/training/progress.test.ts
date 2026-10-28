@@ -61,6 +61,39 @@ function context(overrides: Partial<TrainingAttemptContext> = {}): TrainingAttem
 }
 
 describe('training progress persistence', () => {
+  it('preserves rule-4 orbit history while saving the new nine-step ground course separately', () => {
+    const storage = new MemoryStorage()
+    const store = new TrainingProgressStore(storage)
+    const previous = context({ rulesVersion: 4, mode: 'practice' })
+    const current = { ...previous, rulesVersion: 6 } as const
+    expect(store.recordResult(result({ lessonId: 'orbit', sessionId: 'orbit:prototype', attemptContext: previous,
+      completedCheckpoints: 3, totalCheckpoints: 3, metrics: { orbitProgress: Math.PI * 2 } })).saved).toBe(true)
+    for (const lessonId of ['power-loop', 'split-s']) expect(store.recordResult(result({ lessonId,
+      sessionId: `${lessonId}:accepted`, attemptContext: current, completedCheckpoints: 8, totalCheckpoints: 8 })).saved).toBe(true)
+    const oldKey = trainingAttemptContextKey(previous)
+    const oldRaw = storage.getItem(oldKey)
+    const empty = { recent: null, best: null, completed: false, attempts: 0 }
+    expect(store.loadCurrent(current).progress.lessons.orbit).toEqual(empty)
+    expect(store.load(previous).progress.lessons.orbit).toMatchObject({ completed: true, attempts: 1,
+      best: { sessionId: 'orbit:prototype', totalCheckpoints: 3 } })
+    expect(storage.getItem(oldKey)).toBe(oldRaw)
+    expect(store.recordResult(result({ lessonId: 'orbit', sessionId: 'orbit:retry', attemptContext: current,
+      outcome: 'FAILED', score: 0, completedCheckpoints: 4, totalCheckpoints: 9, metrics: { orbitPhase: 4 } })).saved).toBe(true)
+    expect(store.loadCurrent(current).progress.lessons.orbit).toMatchObject({ completed: false, attempts: 1, best: null })
+    expect(store.recordResult(result({ lessonId: 'orbit', sessionId: 'orbit:ground-complete', attemptContext: current,
+      completedCheckpoints: 9, totalCheckpoints: 9, metrics: { orbitPhase: 9, orbitProgressDegrees: 1805, orbitCompletedLaps: 5 } })).saved).toBe(true)
+    const reloaded = new TrainingProgressStore(storage).loadCurrent(current)
+    expect(reloaded.errors).toEqual([])
+    expect(reloaded.progress.lessons.orbit).toMatchObject({ completed: true, attempts: 2,
+      best: { sessionId: 'orbit:ground-complete', totalCheckpoints: 9 } })
+    for (const lessonId of ['power-loop', 'split-s']) expect(reloaded.progress.lessons[lessonId]).toMatchObject({
+      completed: true, attempts: 1, best: { sessionId: `${lessonId}:accepted` } })
+    expect(storage.getItem(oldKey)).toBe(oldRaw)
+    for (const variant of [{ ...current, mode: 'challenge' as const }, { ...current, inputSource: 'keyboard' as const }]) {
+      expect(store.loadCurrent(variant).progress.lessons.orbit).toEqual(empty)
+    }
+  })
+
   it('keeps airborne split-s rule-4 history separate from the ground-start rule-6 course', () => {
     const storage = new MemoryStorage()
     const store = new TrainingProgressStore(storage)
@@ -89,7 +122,8 @@ describe('training progress persistence', () => {
     expect(reloaded.errors).toEqual([])
     expect(reloaded.progress.lessons['split-s']).toMatchObject({ completed: true, attempts: 2,
       best: { sessionId: 'split-s:ground-start-complete', totalCheckpoints: 8, metrics: { splitPhase: 8 } } })
-    expect(reloaded.progress.lessons.orbit).toMatchObject({ completed: true, attempts: 1, best: { sessionId: 'orbit:historical' } })
+    expect(reloaded.progress.lessons.orbit).toEqual(empty)
+    expect(store.load(previous).progress.lessons.orbit).toMatchObject({ completed: true, attempts: 1, best: { sessionId: 'orbit:historical' } })
     expect(reloaded.progress.lessons['power-loop']).toEqual(empty)
     expect(storage.getItem(previousKey)).toBe(previousRaw)
     for (const variant of [{ ...current, mode: 'challenge' as const }, { ...current, inputSource: 'keyboard' as const }]) {
@@ -158,7 +192,8 @@ describe('training progress persistence', () => {
     expect(active.find(({ id }) => id === 'basic-recovery')).toMatchObject({ code: 'L09', progress: { best: { sessionId: 'old-L10:passed' } } })
     expect(active.find(({ id }) => id === 'split-s')).toMatchObject({ code: 'L14', progress: { completed: false, attempts: 0, best: null } })
     expect(store.load(baseline).progress.lessons['split-s']).toMatchObject({ completed: true, best: { sessionId: 'old-L12:passed' } })
-    expect(active.find(({ id }) => id === 'orbit')).toMatchObject({ code: 'L15', progress: { best: { sessionId: 'old-L13:passed' } } })
+    expect(active.find(({ id }) => id === 'orbit')).toMatchObject({ code: 'L15', progress: { completed: false, attempts: 0, best: null } })
+    expect(store.load(baseline).progress.lessons.orbit).toMatchObject({ completed: true, best: { sessionId: 'old-L13:passed' } })
     expect(loaded.progress.lessons['full-roll']).toMatchObject({ completed: false, attempts: 0, best: null })
     expect(keys.map((key) => storage.getItem(key))).toEqual(original)
     const keyboard = new TrainingProgressStore(storage).loadCurrent({ ...recovery, inputSource: 'keyboard' })

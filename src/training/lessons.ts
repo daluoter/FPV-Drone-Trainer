@@ -10,9 +10,9 @@ import { FULL_ROLL_LESSON } from './fullRoll'
 import { BACK_FLIP_LESSON, FRONT_FLIP_LESSON, FULL_FLIP_LESSON } from './fullFlip'
 import { POWER_LOOP_LESSON } from './powerLoop'
 import { SPLIT_S_LESSON } from './splitS'
+import { ORBIT_LESSON } from './orbit'
 import {
   hoverEvaluator,
-  orbitEvaluator,
 } from './evaluators'
 import { takeoffEvaluator } from './takeoff'
 import type { LessonDefinition, LessonSetup } from './types'
@@ -91,50 +91,7 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
   }),
   COORDINATED_TURN_LESSON,
   SPLIT_S_LESSON,
-  phase7Lesson({
-    id: 'orbit',
-    priority: 4,
-    title: '正刷鍋',
-    description: 'Fly one directed geometric lap around the orbit tower while preserving radius, height, speed, and camera heading.',
-    objectives: [
-      'Enter the orbit at the reference height and approximately ten-metre radius.',
-      'Hold one directed path with valid speed and tangent/camera relation.',
-      'Complete a full unwrapped lap without teleport, yaw-in-place, or oscillatory partial arcs.',
-    ],
-    setup: lessonSetup(['takeoff-pad', 'orbit-poi']),
-    checkpoints: [
-      { id: 'orbit-entry', title: 'Orbit entry', description: 'Reach the POI orbit envelope with real lateral motion.' },
-      { id: 'orbit-lap', title: 'Orbit lap', description: 'Complete one unwrapped directed geometric lap.' },
-      { id: 'orbit-exit', title: 'Orbit exit', description: 'Hold a valid final sample with bounded radius, height, speed, and heading.' },
-    ],
-    success: {
-      title: 'Orbit verified',
-      description: 'One directed geometric lap was completed with valid radial, altitude, speed, and camera-heading statistics.',
-      criteria: ['Unwrapped 2π progress', 'Valid radius/height/speed', 'Continuous tangent-directed path'],
-    },
-    failure: {
-      title: 'Orbit not completed',
-      description: 'The path did not make one valid directed lap around the POI.',
-      criteria: ['No yaw-in-place pass', 'No oscillatory partial arc', 'No telemetry gap or teleport'],
-    },
-    scoring: {
-      maxScore: 100,
-      minimumPassingScore: 70,
-      minimumActiveSeconds: 8,
-      metricLabels: [
-        'radialErrorM',
-        'altitudeErrorM',
-        'orbitRadiusM',
-        'orbitSpeedMps',
-        'headingErrorDegrees',
-        'cameraHeadingErrorDegrees',
-        'orbitProgress',
-        'pathLengthM',
-      ],
-    },
-    hints: ['Keep the POI in a steady camera reference while preserving one direction, radius, altitude, and speed.'],
-    evaluator: orbitEvaluator,
-  }),
+  ORBIT_LESSON,
   phase7Lesson({
     id: 'takeoff',
     priority: 0,

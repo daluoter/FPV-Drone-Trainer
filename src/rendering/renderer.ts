@@ -70,6 +70,7 @@ export class FlightRenderer {
   private fullFlipStage: number | null = 0
   private powerLoopStage: number | null = 0
   private splitSStage: number | null = 0
+  private orbitStage: number | null = 0
   public get flightScene(): FlightScene { return this.currentFlightScene }
   public readonly cameraRig: FlightCameraRig
   public readonly renderer: THREE.WebGLRenderer
@@ -240,6 +241,13 @@ export class FlightRenderer {
     this.flightScene.setSplitSStage(stage)
   }
 
+  /** Update the fixed orbit subject and entry accent without changing flight. */
+  public setOrbitStage(stage: number | null): void {
+    if (this.disposed) return
+    this.orbitStage = stage
+    this.flightScene.setOrbitStage(stage)
+  }
+
   /** Rebuild anchors only after the owner has explicitly reset and disarmed. */
   public reconfigureScene(config: DroneConfig): void {
     if (this.disposed) return
@@ -256,6 +264,7 @@ export class FlightRenderer {
     this.currentFlightScene.setFullFlipStage(this.fullFlipStage)
     this.currentFlightScene.setPowerLoopStage(this.powerLoopStage)
     this.currentFlightScene.setSplitSStage(this.splitSStage)
+    this.currentFlightScene.setOrbitStage(this.orbitStage)
     previous.dispose()
   }
 

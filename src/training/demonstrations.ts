@@ -17,10 +17,11 @@ import { recordFullRollDemonstration } from './rollDemonstration'
 import { recordFullFlipDemonstration } from './flipDemonstration'
 import { recordPowerLoopDemonstration } from './powerLoopDemonstration'
 import { recordSplitSDemonstration } from './splitSDemonstration'
+import { recordOrbitDemonstration } from './orbitDemonstration'
 import { BACK_FLIP_LESSON, FRONT_FLIP_LESSON, FULL_FLIP_LESSON } from './fullFlip'
 import { lessonLearningContent } from './catalog'
 
-export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'front-flip' | 'back-flip' | 'power-loop' | 'split-s' | 'roll' | 'pitch' | 'yaw'
+export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'front-flip' | 'back-flip' | 'power-loop' | 'split-s' | 'orbit' | 'roll' | 'pitch' | 'yaw'
 
 export interface TeachingCue {
   readonly timeSeconds: number
@@ -31,12 +32,13 @@ export interface TeachingCue {
   readonly fullFlipPhase?: number
   readonly splitSPhase?: number
   readonly powerLoopPhase?: number
+  readonly orbitPhase?: number
 }
 
 export interface TeachingDemonstration {
   readonly schemaVersion: 1
   readonly kind: TeachingDemonstrationKind
-  readonly lessonId: 'intro' | 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'front-flip' | 'back-flip' | 'power-loop' | 'split-s'
+  readonly lessonId: 'intro' | 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'front-flip' | 'back-flip' | 'power-loop' | 'split-s' | 'orbit'
   readonly rulesVersion: TrainingAttemptContext['rulesVersion']
   readonly physicsVersion: 1
   readonly presetId: TuningPresetSelection
@@ -187,13 +189,24 @@ export function createTeachingDemonstration(
   kind: TeachingDemonstrationKind,
 ): TeachingDemonstration {
   if (!validateTuningSettings(settings).valid) throw new RangeError('示範設定未通過驗證，請先還原有效設定。')
-  if (!['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'roll', 'pitch', 'yaw'].includes(kind)) {
+  if (!['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'roll', 'pitch', 'yaw'].includes(kind)) {
     throw new RangeError('不支援此示範種類。')
   }
   const simulation = new FlightSimulation(flightSimulationConfigFromTuning(settings))
   const maximumThrust = settings.drone.motors.reduce((sum, motor) => sum + motor.maxThrustN, 0)
   if (settings.drone.massKg * settings.drone.gravityMps2 / maximumThrust >= 0.8) {
     throw new RangeError('目前推力不足以完成穩定示範，請檢查機體設定。')
+  }
+  if (kind === 'orbit') {
+    const { recording, cues } = recordOrbitDemonstration(simulation, settings, stickForRate, collectiveThrottle)
+    return Object.freeze({
+      schemaVersion: 1, kind, lessonId: kind,
+      rulesVersion: trainingRulesVersionForLesson(kind), physicsVersion: 1,
+      presetId: identifyTuningPreset(settings), settingsFingerprint: fingerprintTrainingSettings(settings),
+      title: courseDemonstrationTitle(kind, '地面起飛、面向目標連續五圈與向外飛離'),
+      description: '模擬示範，以實際搖桿輸入與物理完成面向目標連續五圈的正刷鍋；真人練習全程自行操控，觀看不計入通關。',
+      source: 'simulated', recording, cues,
+    })
   }
   if (kind === 'split-s') {
     const { recording, cues } = recordSplitSDemonstration(simulation, settings, stickForRate, collectiveThrottle)
@@ -445,6 +458,18 @@ export function teachingSplitSPhaseAt(demonstration: TeachingDemonstration, time
     if (cue.timeSeconds > time + TEACHING_CLOCK_TOLERANCE_SECONDS) break
     const candidate = cue.splitSPhase
     if (typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 0 && candidate <= 8) phase = candidate
+  }
+  return phase
+}
+
+/** Orbit guidance follows real measured checkpoints on the replay clock. */
+export function teachingOrbitPhaseAt(demonstration: TeachingDemonstration, timeSeconds: number): number | null {
+  const time = Number.isFinite(timeSeconds) ? Math.max(0, timeSeconds) : 0
+  let phase: number | null = null
+  for (const cue of demonstration.cues) {
+    if (cue.timeSeconds > time + TEACHING_CLOCK_TOLERANCE_SECONDS) break
+    const candidate = cue.orbitPhase
+    if (typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 0 && candidate <= 9) phase = candidate
   }
   return phase
 }

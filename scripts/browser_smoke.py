@@ -105,7 +105,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if response is None or response.status != 200:
                 raise AssertionError("The production entry page did not return HTTP 200.")
             expect(page).to_have_title("FPV Drone Trainer")
-            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.27.2")
+            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.28.1")
             report["release"] = page.get_by_test_id("app-release").inner_text()
 
             asset_urls = page.locator("script[src], link[rel='stylesheet'][href]").evaluate_all(
@@ -295,8 +295,9 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 title = re.sub(r"^L\d{2}\s*[·：:]?\s*", "", option.strip())
                 if title != "破S" and re.search(r"[A-Za-z]", title):
                     raise AssertionError(f"A visible course title still contains English: {option}")
-            expect(flight.locator(".school-demo-toolbar").get_by_role("button")).to_have_count(17)
-            checks.append("Chinese course titles including the requested 破S name, fifteen active lessons and seventeen distinct demonstrations")
+            expect(flight.locator(".school-demo-toolbar").get_by_role("button")).to_have_count(18)
+            expect(flight.get_by_role("button", name="L15 正刷鍋示範", exact=True)).to_be_visible()
+            checks.append("Chinese course titles including the requested 破S name, fifteen active lessons and eighteen distinct demonstrations")
             progress_before_waiting = training_progress(page)
             training.get_by_role("button", name="開始課程", exact=True).click()
             expect(phase).to_have_text("倒數準備")
@@ -1523,6 +1524,167 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             checks.append("L14 roll and descent instruments fit desktop, short desktop and mobile without overlapping altitude/XYZ or playback banner")
             checks.append("L14 selection persists across reload while L00 roll illustration and prior saved results remain independent")
 
+            lesson.select_option("orbit")
+            expect(training.get_by_role("heading", name="正刷鍋", exact=True)).to_be_visible()
+            orbit_hud = flight.get_by_role("group", name="正刷鍋即時狀態", exact=True)
+            orbit_fields = {
+                "completed_laps": flight.get_by_test_id("orbit-laps"),
+                "progress_degrees": flight.get_by_test_id("orbit-progress"),
+                "radius_m": flight.get_by_test_id("orbit-radius"),
+                "heading_error_degrees": flight.get_by_test_id("orbit-heading"),
+            }
+
+            def orbit_motion() -> dict:
+                values = {}
+                for key, field in orbit_fields.items():
+                    expect(field).to_be_visible()
+                    match = re.match(r"^[+-]?\d+(?:\.\d+)?", field.inner_text())
+                    if not match:
+                        raise AssertionError(f"L15 measured orbit readout is not numeric: {key}.")
+                    values[key] = float(match.group())
+                return values
+
+            original_orbit_canvas = canvas.element_handle()
+            before_orbit_demo = training_progress(page)
+            prior_orbit_steps = training.get_by_role("list", name="本課步驟", exact=True).get_by_role("listitem").all_text_contents()
+            if len(prior_orbit_steps) != 9:
+                raise AssertionError("L15 does not expose nine ground-to-five-circle checkpoints.")
+            expect(orbit_hud).to_contain_text("即時")
+            flight.get_by_role("button", name="L15 正刷鍋示範", exact=True).click()
+            expect(flight.get_by_role("button", name="0.5×", exact=True)).to_have_attribute("aria-pressed", "true")
+            expect(arm).to_be_disabled()
+            expect(lesson).to_be_disabled()
+            flight.get_by_role("button", name="Pause", exact=True).click()
+            expect(orbit_hud).to_contain_text("回放")
+            timeline.press("Home")
+            demonstration_snapshot("L15", 9)
+            expect(altitude).to_have_text("0.0 m")
+            home_orbit = orbit_motion()
+            if abs(home_orbit["progress_degrees"]) > .05 or home_orbit["completed_laps"] != 0 or abs(home_orbit["radius_m"] - 30) > .15:
+                raise AssertionError(f"L15 does not begin at the actual ground launch relative to its target: {home_orbit}")
+            if screenshot:
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l15-demonstration-ground.png"))
+            timeline.press("End")
+            demonstration_snapshot("L15", 9, complete=True)
+            end_orbit = orbit_motion()
+            if end_orbit["progress_degrees"] < 1800 or end_orbit["completed_laps"] != 5 or end_orbit["radius_m"] < 18:
+                raise AssertionError(f"L15 completion does not show five full circles followed by an outward departure: {end_orbit}")
+            if float(altitude.inner_text().split()[0]) < 1.5:
+                raise AssertionError("L15 ends on the ground instead of recovering in flight.")
+            held_orbit_position = position_hud.inner_text()
+            paused_orbit_time = float(timeline.input_value())
+            page.wait_for_timeout(200)
+            if orbit_motion() != end_orbit or position_hud.inner_text() != held_orbit_position or abs(float(timeline.input_value()) - paused_orbit_time) > .02:
+                raise AssertionError("L15 paused ghost, movie clock or recorded orbit measurements kept advancing.")
+            if screenshot:
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l15-demonstration-end.png"))
+                flight.get_by_role("button", name="Chase", exact=True).click()
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l15-demonstration-chase.png"))
+                flight.get_by_role("button", name="Free / debug", exact=True).click()
+                flight.get_by_role("button", name="定位飛機", exact=True).click()
+                canvas.scroll_into_view_if_needed()
+                orbit_bounds = canvas.bounding_box()
+                page.mouse.move(orbit_bounds["x"] + orbit_bounds["width"] * .7,
+                    orbit_bounds["y"] + orbit_bounds["height"] * .7)
+                page.mouse.wheel(0, 1000)
+                page.wait_for_timeout(100)
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l15-reference-orbit-free.png"))
+                flight.get_by_role("button", name="FPV", exact=True).click()
+            orbit_chapters = demo_progress.get_by_role("list", name="示範步驟", exact=True).get_by_role("button")
+            expect(orbit_chapters).to_have_count(9)
+            recorded_laps = {}
+            for completed_laps in range(1, 6):
+                # The next chapter begins after the preceding full-circle proof.
+                orbit_chapters.nth(completed_laps + 3).click()
+                expect(flight.get_by_role("button", name="Play", exact=True)).to_be_enabled()
+                snapshot = demonstration_snapshot("L15", 9)
+                if snapshot["completed"] != completed_laps + 3:
+                    raise AssertionError(f"L15 lap {completed_laps} chapter has the wrong observed checkpoint count: {snapshot}")
+                lap = orbit_motion()
+                if lap["completed_laps"] != completed_laps or not (360 * completed_laps - .05 <= lap["progress_degrees"] < 360 * (completed_laps + 1)):
+                    raise AssertionError(f"L15 lap {completed_laps} chapter does not show {completed_laps} complete 360-degree circles: {lap}")
+                if not (6 <= lap["radius_m"] <= 30) or lap["heading_error_degrees"] > 80:
+                    raise AssertionError(f"L15 lap {completed_laps} is not an actual target-facing orbit: {lap}")
+                recorded_laps[completed_laps] = {"time_seconds": float(timeline.input_value()), **lap}
+                if screenshot:
+                    flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / f"l15-demonstration-lap-{completed_laps}.png"))
+            # Even the fifth circle is followed by a distinct controlled-exit step.
+            expect(demo_progress).to_contain_text("8 / 9 個示範步驟完成")
+            orbit_chapters.nth(6).click()
+            expect(demo_progress).to_contain_text("6 / 9 個示範步驟完成")
+            three_laps = orbit_motion()
+            three_lap_time = float(timeline.input_value())
+            page.wait_for_timeout(200)
+            if abs(float(timeline.input_value()) - three_lap_time) > .02 or orbit_motion() != three_laps:
+                raise AssertionError("L15 three-circle chapter did not pause its own clock and measured path.")
+            orbit_chapters.nth(4).click()
+            expect(demo_progress).to_contain_text("4 / 9 個示範步驟完成")
+            if orbit_motion() != {key: recorded_laps[1][key] for key in orbit_fields} or abs(float(timeline.input_value()) - recorded_laps[1]["time_seconds"]) > .02:
+                raise AssertionError("L15 backward chapter seek kept future lap counts or measured dimensions.")
+            report["orbit_course"] = {"lesson_id": "orbit", "course_code": "L15", "home": home_orbit,
+                "completed_lap_chapters": recorded_laps,
+                "end": {"time_seconds": paused_orbit_time, **end_orbit}}
+            report["orbit_hud_layouts"] = {}
+            for width, height in ((1280, 720), (1280, 600), (375, 720)):
+                page.set_viewport_size({"width": width, "height": height})
+                position_hud.scroll_into_view_if_needed()
+                viewport_bounds = flight.locator(".free-flight-viewport").bounding_box()
+                orbit_bounds = orbit_hud.bounding_box()
+                if not viewport_bounds or not orbit_bounds:
+                    raise AssertionError(f"L15 instruments have no layout bounds at {width}x{height}.")
+                if (orbit_bounds['x'] < viewport_bounds['x']
+                        or orbit_bounds['x'] + orbit_bounds['width'] > viewport_bounds['x'] + viewport_bounds['width']
+                        or orbit_bounds['y'] < viewport_bounds['y']
+                        or orbit_bounds['y'] + orbit_bounds['height'] > viewport_bounds['y'] + viewport_bounds['height']):
+                    raise AssertionError(f"L15 instruments overflow the viewport at {width}x{height}.")
+                for other, label in ((position_hud.bounding_box(), "position HUD"), (flight.locator(".flight-safe-overlay").bounding_box(), "playback banner")):
+                    if not other:
+                        raise AssertionError(f"L15 {label} has no bounds at {width}x{height}.")
+                    overlap_x = min(orbit_bounds['x'] + orbit_bounds['width'], other['x'] + other['width']) - max(orbit_bounds['x'], other['x'])
+                    overlap_y = min(orbit_bounds['y'] + orbit_bounds['height'], other['y'] + other['height']) - max(orbit_bounds['y'], other['y'])
+                    if overlap_x > 0 and overlap_y > 0:
+                        raise AssertionError(f"L15 instruments overlap {label} at {width}x{height}.")
+                if page.evaluate("document.documentElement.scrollWidth > innerWidth + 1"):
+                    raise AssertionError(f"L15 controls or demonstration toolbar overflow the page at {width}x{height}.")
+                report["orbit_hud_layouts"][f"{width}x{height}"] = {"orbit_hud": orbit_bounds, "viewport": viewport_bounds}
+                if screenshot and width == 375:
+                    flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l15-hud-375.png"))
+            page.set_viewport_size({"width": 1280, "height": 720})
+            timeline.press("Home")
+            demonstration_snapshot("L15", 9)
+            expect(altitude).to_have_text("0.0 m")
+            if orbit_motion() != home_orbit:
+                raise AssertionError("L15 Home seek does not restore its own ground-start measurements.")
+            timeline.press("End")
+            demonstration_snapshot("L15", 9, complete=True)
+            flight.get_by_role("button", name="結束示範", exact=True).click()
+            expect(arm).to_be_enabled()
+            expect(disarm).to_be_disabled()
+            expect(orbit_hud).to_contain_text("即時")
+            expect(demo_progress).to_have_count(0)
+            expect(training.get_by_role("list", name="本課步驟", exact=True).get_by_role("listitem")).to_have_text(prior_orbit_steps)
+            if not original_orbit_canvas or not original_orbit_canvas.evaluate("element => element === document.querySelector('#free-flight canvas')"):
+                raise AssertionError("L15 demonstration replaced the shared live flight canvas.")
+            if training_progress(page) != before_orbit_demo:
+                raise AssertionError("L15 demonstration wrote a live attempt or saved result.")
+            flight.get_by_role("button", name="橫滾", exact=True).click()
+            flight.get_by_role("button", name="Pause", exact=True).click()
+            timeline.press("End")
+            demonstration_snapshot("L00", 5, complete=True)
+            expect(orbit_hud).to_have_count(0)
+            flight.get_by_role("button", name="結束示範", exact=True).click()
+            expect(orbit_hud).to_be_visible()
+            expect(lesson).to_have_value("orbit")
+            if training_progress(page) != before_orbit_demo:
+                raise AssertionError("L00 roll illustration changed the selected L15 result.")
+            page.reload(wait_until="networkidle")
+            expect(lesson).to_have_value("orbit")
+            source.select_option("keyboard")
+            expect(training.locator(".school-progress")).to_contain_text("已練 0 次")
+            checks.append("L15 physical target-facing five-circle orbit demo, five measured 360-degree laps, nine independent chapters, separate controlled exit, pause and rewind without live-result writes")
+            checks.append("L15 orbit progress, radius and target-heading instruments fit desktop, short desktop and mobile with the altitude/XYZ and playback banner")
+            checks.append("L15 orbit selection and unchanged live checkpoints persist across reload and separate L00 roll playback")
+
             # Ground-based lessons wait on actual supported ground and remain
             # safe after arm at zero throttle while the learner prepares to lift off.
             hud = flight.get_by_role("checkbox", name="Developer HUD", exact=True)
@@ -1531,7 +1693,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 has=page.get_by_text("Position m", exact=True)
             ).locator("code")
             report["ground_start_positions"] = {}
-            for lesson_id in ("landing", "straight-line", "direction-control", "coordinated-turn", "square-route", "figure-eight", "wide-gate", "basic-recovery", "full-roll", "front-flip", "back-flip", "power-loop", "split-s"):
+            for lesson_id in ("landing", "straight-line", "direction-control", "coordinated-turn", "square-route", "figure-eight", "wide-gate", "basic-recovery", "full-roll", "front-flip", "back-flip", "power-loop", "split-s", "orbit"):
                 lesson.select_option(lesson_id)
                 training.get_by_role("button", name="開始課程", exact=True).click()
                 coords = [float(value.strip()) for value in position.inner_text().split(",")]
@@ -1559,7 +1721,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 expect(source).to_be_enabled()
             hud.uncheck()
             lesson.select_option("basic-recovery")
-            checks.append("L02/L03/L04/L05/L06/L07/L08/L09/L10/L11/L12/L13/L14 actual ground start, safe low-throttle arm and visible stage guidance")
+            checks.append("L02/L03/L04/L05/L06/L07/L08/L09/L10/L11/L12/L13/L14/L15 actual ground start, safe low-throttle arm and visible stage guidance")
 
             fullscreen = flight.locator(".school-fullscreen")
             fullscreen.click()

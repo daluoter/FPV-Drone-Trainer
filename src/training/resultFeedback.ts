@@ -42,6 +42,8 @@ import {
   FULL_FLIP_RECOVERY_CLIMB_MPS as FLIP_RECOVERY_CLIMB,
 } from './fullFlip'
 import type { TrainingResult } from './types'
+import { orbitResultFeedback } from './orbitFeedback'
+import { POWER_LOOP_TARGET_HEIGHT_M } from './powerLoop'
 
 export interface TrainingResultFeedback {
   readonly observedStrength: string | null
@@ -256,7 +258,7 @@ function powerLoopResultFeedback(result: TrainingResult, scope: string): Trainin
     if (/墜毀|撞擊|crash|impact|Obstacle collision:/iu.test(message)) return {
       observedStrength: null,
       observedGap: '本次發生墜毀，大迴旋與空中改出尚未完成。',
-      nextPractice: `先重設場景。${restart}下次保留約 10 m 進場高度，下降時提早拉平並補油止降。`,
+      nextPractice: `先重設場景。${restart}下次保留約 ${POWER_LOOP_TARGET_HEIGHT_M} m 進場高度，下降時提早拉平並補油止降。`,
       scopeNote: scope,
     }
     if (/解除解鎖|上鎖|失焦|失去焦點|斷線|disarm|focus|disconnect/iu.test(message)) return {
@@ -1024,6 +1026,8 @@ function phaseProgress(result: TrainingResult): { observedGap: string; nextPract
 /** Final-sample observations and checkpoint facts, never inferred causes or a claim about the whole flight. */
 export function summarizeTrainingResult(result: TrainingResult): TrainingResultFeedback {
   const scope = scopeNote(result)
+  const orbit = orbitResultFeedback(result, scope)
+  if (orbit) return orbit
   const split = splitSResultFeedback(result, scope)
   if (split) return split
   const loop = powerLoopResultFeedback(result, scope)

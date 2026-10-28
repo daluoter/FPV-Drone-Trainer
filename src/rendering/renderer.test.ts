@@ -229,6 +229,42 @@ describe('interactive free camera renderer integration', () => {
       next.dispose()
     } finally { renderer.dispose(); canvas.remove(); clock.mockRestore() }
   })
+  it('retains the orbit subject and stage across a raised-ground rebuild without replacing the canvas', () => {
+    const rendererStub = createRendererStub()
+    const canvas = document.createElement('canvas')
+    const renderer = new FlightRenderer(canvas, { rendererFactory: () => rendererStub })
+    try {
+      renderer.setLessonTarget('orbit')
+      renderer.setOrbitStage(5)
+      const stagePosition = renderer.scene.getObjectByName('orbit-stage-guidance')!.position.toArray()
+      const previous = renderer.flightScene
+      const disposePrevious = vi.spyOn(previous, 'dispose')
+      renderer.reconfigureScene({ ...DEFAULT_DRONE_CONFIG,
+        ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 35, z: -3 } })
+      expect(renderer.scene.getObjectByName('orbit-field')?.visible).toBe(true)
+      expect(renderer.flightScene.getReference('orbit-zone')?.positionM).toEqual({ x: 6, y: 15, z: -33 })
+      expect(renderer.flightScene.getReference('orbit-poi')?.positionM).toEqual({ x: 4, y: 7.5, z: 4 })
+      expect(renderer.flightScene.getReference('orbit-poi')?.object.visible).toBe(false)
+      const accent = renderer.scene.getObjectByName('orbit-stage-guidance')!
+      const guide = renderer.scene.getObjectByName('orbit-stage-reference') as THREE.LineLoop<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      expect(accent.position.toArray()).toEqual(stagePosition)
+      expect(guide.material.color.getHex()).toBe(0xffc978)
+      expect(renderer.scene.getObjectByName('split-s-field')?.visible).toBe(false)
+      expect(renderer.canvas).toBe(canvas)
+      expect(renderer.renderer).toBe(rendererStub)
+      expect(disposePrevious).toHaveBeenCalledOnce()
+      renderer.setOrbitStage(9)
+      expect(guide.material.color.getHex()).toBe(0xb8f36b)
+      expect(renderer.scene.getObjectByName('orbit-outward-exit-reference')?.visible).toBe(true)
+      renderer.setOrbitStage(null)
+      renderer.reconfigureScene(DEFAULT_DRONE_CONFIG)
+      expect(renderer.scene.getObjectByName('orbit-stage-guidance')?.visible).toBe(false)
+      renderer.setLessonTarget('split-s')
+      expect(renderer.scene.getObjectByName('orbit-field')?.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('split-s-field')?.visible).toBe(true)
+    } finally { renderer.dispose() }
+  })
+
 })
 
 describe('FlightRenderer lifecycle and failure contract', () => {

@@ -38,7 +38,15 @@ const legacySplitS: LessonDefinition = {
   scoring: { maxScore: 100, minimumPassingScore: 70, minimumActiveSeconds: 2, metricLabels: [] },
   evaluator: { evaluate: evaluateSplitS },
 }
-const prototypeLessons = DEFAULT_LESSONS.map((lesson) => lesson.id === legacyTurn.id ? legacyTurn : lesson.id === legacySplitS.id ? legacySplitS : lesson)
+// The original three-checkpoint orbit remains a historical evaluator fixture.
+const legacyOrbit: LessonDefinition = {
+  ...DEFAULT_LESSONS.find((lesson) => lesson.id === 'orbit')!,
+  setup: { requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: ['takeoff-pad', 'orbit-poi'] },
+  checkpoints: ['orbit-entry', 'orbit-lap', 'orbit-exit'].map((id) => ({ id, title: id, description: id })),
+  scoring: { maxScore: 100, minimumPassingScore: 70, minimumActiveSeconds: 8, metricLabels: [] },
+  evaluator: { evaluate: evaluateOrbit },
+}
+const prototypeLessons = DEFAULT_LESSONS.map((lesson) => lesson.id === legacyTurn.id ? legacyTurn : lesson.id === legacySplitS.id ? legacySplitS : lesson.id === legacyOrbit.id ? legacyOrbit : lesson)
 
 function context(lessonId: string, overrides: Partial<TrainingEvaluationContext> = {}): TrainingEvaluationContext {
   return {

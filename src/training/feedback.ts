@@ -1,4 +1,6 @@
 import type { TrainingEvaluation } from './types'
+import { orbitObjective, orbitRouteGuide, orbitTrainingHint } from './orbitFeedback'
+import { ORBIT_REQUIRED_LAPS } from './orbit'
 import {
   BASIC_RECOVERY_AREA_RADIUS_M as RECOVERY_AREA_RADIUS,
   BASIC_RECOVERY_TARGET_HEIGHT_M as RECOVERY_TARGET_HEIGHT,
@@ -187,6 +189,13 @@ const METRICS: Readonly<Record<string, MetricDefinition>> = {
   positionErrorM: { label: '位置偏差', unit: 'm', digits: 2 },
   radialErrorM: { label: '繞行半徑偏差', unit: 'm', digits: 2 },
   orbitRadiusM: { label: '繞行半徑', unit: 'm', digits: 2 },
+  orbitProgressDegrees: { label: '累積盤旋角度', unit: '°', digits: 1 },
+  orbitCompletedLaps: { label: '已完成盤旋圈數', unit: `/ ${ORBIT_REQUIRED_LAPS} 圈`, digits: 0 },
+  orbitExitDistanceM: { label: '完成五圈後向外飛離', unit: 'm', digits: 2 },
+  orbitHeadingErrorDegrees: { label: '機頭偏離目標', unit: '°', digits: 1 },
+  orbitTangentialSpeedMps: { label: '繞塔側向速度', unit: 'm/s', digits: 2 },
+  orbitRadialSpeedMps: { label: '往塔外速度（外＋）', unit: 'm/s', digits: 2 },
+  orbitRecoveryDwellSeconds: { label: '恢復控制確認', unit: 's', digits: 2 },
   orbitSpeedMps: { label: '繞行速度', unit: 'm/s', digits: 2 },
   headingErrorDegrees: { label: '航向偏差', unit: '°', digits: 1 },
   cameraHeadingErrorDegrees: { label: '鏡頭方向偏差', unit: '°', digits: 1 },
@@ -208,6 +217,11 @@ const LESSON_METRICS: Readonly<Record<string, readonly string[]>> = {
 }
 
 function metricPriorities(metrics: Readonly<Record<string, number>>, lessonId: string | null): readonly string[] {
+  if (lessonId === 'orbit' && Number.isFinite(metrics.orbitPhase)) {
+    if (metrics.orbitPhase <= 1) return ['altitudeM', 'groundTouching', 'orbitRadiusM']
+    if (metrics.orbitCompleted > 0.5) return ['orbitCompletedLaps', 'orbitExitDistanceM', 'orbitRadialSpeedMps']
+    return ['orbitCompletedLaps', 'orbitRadiusM', 'orbitHeadingErrorDegrees']
+  }
   if (lessonId === 'split-s' && Number.isFinite(metrics.splitPhase)) {
     if (metrics.splitPhase <= 1 || metrics.groundTouching > 0.5) return ['altitudeM', 'groundTouching', 'splitForwardSpeedMps']
     if (metrics.insideSplitArea === 0) return ['launchDistanceM', 'altitudeM', 'splitPitchProgressDegrees']
@@ -336,8 +350,8 @@ export function formatTrainingMetrics(
     const displayed = definition.transform?.(value) ?? value
     return [{
       key,
-      label: (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'power-loop' || lessonId === 'split-s' || isFullFlipLesson(lessonId)) && key === 'verticalSpeedMps' ? '升降速度（上＋／下−）'
-        : (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'power-loop' || lessonId === 'split-s' || isFullFlipLesson(lessonId)) && key === 'altitudeM' ? '離地高度'
+      label: (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'power-loop' || lessonId === 'split-s' || lessonId === 'orbit' || isFullFlipLesson(lessonId)) && key === 'verticalSpeedMps' ? '升降速度（上＋／下−）'
+        : (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'power-loop' || lessonId === 'split-s' || lessonId === 'orbit' || isFullFlipLesson(lessonId)) && key === 'altitudeM' ? '離地高度'
         : isFullFlipLesson(lessonId) && key === 'preparationDwellSeconds' ? '翻轉準備確認'
         : isFullFlipLesson(lessonId) && key === 'recoveryDwellSeconds' ? '正飛恢復確認'
         : lessonId === 'full-roll' && key === 'preparationDwellSeconds' ? '橫滾準備確認'
@@ -1110,6 +1124,7 @@ export function trainingObjective(
   evaluation: Pick<TrainingEvaluation, 'metrics'> | null | undefined,
 ): TrainingObjective | null {
   const metrics = evaluation?.metrics ?? {}
+  if (lessonId === 'orbit') return orbitObjective(metrics)
   if (lessonId === 'split-s') return splitSObjective(metrics)
   if (lessonId === 'power-loop') return powerLoopObjective(metrics)
   if (lessonId === 'full-roll') return fullRollObjective(metrics)
@@ -1160,6 +1175,7 @@ export function trainingObjective(
 
 /** Short route instructions remain visible before a lesson starts. */
 export function trainingRouteGuide(lessonId: string | null): string | null {
+  if (lessonId === 'orbit') return orbitRouteGuide()
   if (lessonId === 'split-s') return `地面自行起飛至至少 ${SPLIT_ENTRY_HEIGHT} m（建議約 ${SPLIT_TARGET_HEIGHT} m）→ 建立至少 ${SPLIT_ENTRY_SPEED} m/s 前速 → 向左或右橫滾半圈至倒置 → 後拉俯仰走下降半迴圈 → 反向飛往來路 → 拉平改出 → 空中恢復 ${SPLIT_HOLD} 秒。需先實際橫滾倒置，再下降至少 ${SPLIT_HEIGHT_LOSS} m 並往回移動至少 ${SPLIT_REVERSE} m；只偏航轉頭、原地前後翻或接地停住不能代替。練習區半徑 ${SPLIT_AREA_RADIUS} m，改出保留至少 ${SPLIT_MIN_HEIGHT} m，不要求回原點、穿窄門或降落。一般動作中斷後可重新進場，舊標記不代替新一段。引導練習不限時，挑戰 ${SPLIT_TIME_LIMIT} 秒。`
   if (lessonId === 'power-loop') return `地面自行起飛至至少 ${LOOP_ENTRY_HEIGHT} m（建議約 ${LOOP_TARGET_HEIGHT} m）→ 建立至少 ${LOOP_ENTRY_SPEED} m/s 前速 → 拉升 → 越頂倒置 → 下降 → 向前拉平改出 → 空中恢復 ${LOOP_HOLD} 秒。需真正飛出有高度與前後位移的垂直迴圈：拉升至少 ${LOOP_HEIGHT_GAIN} m、前後跨度至少 ${LOOP_SPAN} m、越頂後退至少 ${LOOP_REVERSE} m，且從頂點下降。原地後翻、純上下升降或反向拼湊不能代替。淡色迴圈是參考，不要求完美圓形、回原點、穿障礙或降落。練習區半徑 ${LOOP_AREA_RADIUS} m，改出保留至少 ${LOOP_MIN_HEIGHT} m；中斷後重新進場完成新一圈。引導練習不限時，挑戰 ${LOOP_TIME_LIMIT} 秒。`
   if (lessonId === 'full-roll') return `地面自行起飛至至少 ${ROLL_PREP_HEIGHT} m（建議約 ${ROLL_TARGET_HEIGHT} m）→ 短暫準備 ${ROLL_PREP_SECONDS} 秒 → 選左或右連續橫滾一圈 → 回中減緩旋轉、主動修回正飛 → 空中恢復控制 ${ROLL_HOLD_SECONDS} 秒。沿機頭到機尾的軸翻轉，需觀察到本圈實際倒置與完整橫滾；反向翻回、原地偏航或前後翻轉不代替 Roll。練習區為起飛點半徑 ${ROLL_AREA_RADIUS} m，恢復時保留至少 ${ROLL_MIN_HEIGHT} m 高度，不要求回原位置或降落。接地、過低或離區中斷本圈後，先重新準備，再完整做一圈；先前步驟保留。引導練習不限時，挑戰 ${ROLL_TIME_LIMIT} 秒。`
@@ -1185,6 +1201,7 @@ export function trainingHint(
 ): string {
   const hint = evaluation?.hint?.trim()
   const message = evaluation?.message?.trim()
+  if (lessonId === 'orbit' && evaluation && (Number.isFinite(evaluation.metrics?.orbitPhase) || /^正刷鍋/u.test(message ?? ''))) return orbitTrainingHint(evaluation)
   if (lessonId === 'split-s' && evaluation?.status === 'failure') {
     const restart = '本次練習已結束；按「再練一次」會清空本次步驟，從地面重新開始。'
     if (/墜毀|撞擊|crash|impact|Obstacle collision:/iu.test(message ?? '')) return `本次發生墜毀，破S已停止；先重設場景，下一次保留足夠進場高度並提早改出。${restart}`

@@ -14,6 +14,7 @@ import { FULL_ROLL_AREA_RADIUS_M, FULL_ROLL_MIN_PREPARATION_HEIGHT_M, FULL_ROLL_
 import { FULL_FLIP_AREA_RADIUS_M, FULL_FLIP_MIN_PREPARATION_HEIGHT_M, FULL_FLIP_TARGET_HEIGHT_M } from '../training/fullFlip'
 import { POWER_LOOP_AREA_RADIUS_M, POWER_LOOP_TARGET_HEIGHT_M } from '../training/powerLoop'
 import { SPLIT_S_AREA_RADIUS_M, SPLIT_S_MIN_HEIGHT_M, SPLIT_S_TARGET_HEIGHT_M } from '../training/splitS'
+import { createOrbitTarget, ORBIT_TARGET_HEIGHT_M, ORBIT_TARGET_RADIUS_M, ORBIT_MIN_RADIUS_M, ORBIT_MAX_RADIUS_M, ORBIT_MIN_ENTRY_HEIGHT_M, ORBIT_MAX_ENTRY_HEIGHT_M } from '../training/orbit'
 import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
 import type { Vector3 } from '../math/vector'
 import type { ReplayGhostState } from '../replay'
@@ -66,6 +67,8 @@ export interface FlightScene {
   setPowerLoopStage(stage: number | null): void
   /** Show entry, inverted descent and reversed exit without changing flight. */
   setSplitSStage(stage: number | null): void
+  /** Highlight ground, entry and lap milestones while leaving the target fixed. */
+  setOrbitStage(stage: number | null): void
   /** Presentation-only bounded path trace; evaluators remain renderer-independent. */
   setTrainingPath(path: readonly Vector3[]): void
   setReplayPath(path: readonly Vector3[]): void
@@ -1120,9 +1123,115 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     sizeM: { x: SPLIT_S_AREA_RADIUS_M * 2, y: SPLIT_S_TARGET_HEIGHT_M - SPLIT_S_MIN_HEIGHT_M, z: SPLIT_S_AREA_RADIUS_M * 2 },
   }
 
+  const orbitTarget = createOrbitTarget(field.launch, config.ground.heightM)
+  const orbitField = new THREE.Group()
+  orbitField.name = 'orbit-field'
+  orbitField.position.set(orbitTarget.x, orbitTarget.y, orbitTarget.z)
+  orbitField.visible = false
+  // This broad, recognizable tower is an orientation reference, not a new
+  // collision surface or a requirement to follow one exact-radius circle.
+  const orbitTower = new THREE.Group()
+  orbitTower.name = 'orbit-reference-tower'
+  orbitTower.userData = { teachingReference: '正刷鍋參考塔', collision: false }
+  const orbitTowerMaterial = material(0xd28bff, 0.65, 0.1)
+  orbitTowerMaterial.emissive.set(0x57376b)
+  orbitTowerMaterial.emissiveIntensity = 0.2
+  const orbitColumn = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 1, ORBIT_TARGET_HEIGHT_M + 2, 12), orbitTowerMaterial)
+  orbitColumn.name = 'orbit-reference-column'
+  orbitColumn.position.y = (ORBIT_TARGET_HEIGHT_M + 2) / 2 - ORBIT_TARGET_HEIGHT_M
+  orbitTower.add(orbitColumn)
+  const orbitFoot = new THREE.Mesh(new THREE.CylinderGeometry(2, 2.4, 0.3, 12), material(0x3a5560))
+  orbitFoot.name = 'orbit-reference-foot'
+  orbitFoot.position.y = -ORBIT_TARGET_HEIGHT_M + 0.15
+  orbitTower.add(orbitFoot)
+  for (const [index, height] of [4, 7, ORBIT_TARGET_HEIGHT_M, ORBIT_TARGET_HEIGHT_M + 2].entries()) {
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.25, 24), material(index === 2 ? 0xffc978 : 0x668691))
+    band.name = `orbit-reference-band-${index}`
+    band.position.y = height - ORBIT_TARGET_HEIGHT_M
+    orbitTower.add(band)
+  }
+  orbitField.add(orbitTower)
+
+  const orbitRouteMaterial = new THREE.LineDashedMaterial({ color: 0x8abac4, transparent: true, opacity: 0.5, dashSize: 0.85, gapSize: 0.6, depthWrite: false })
+  const orbitRoute = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 128 }, (_, index) => {
+    const angle = index / 128 * Math.PI * 2
+    return new THREE.Vector3(Math.sin(angle) * ORBIT_TARGET_RADIUS_M, 0, Math.cos(angle) * ORBIT_TARGET_RADIUS_M)
+  })), orbitRouteMaterial)
+  orbitRoute.name = 'orbit-route-ring'
+  orbitRoute.computeLineDistances()
+  orbitField.add(orbitRoute)
+  for (const [name, radius] of [['inner', ORBIT_MIN_RADIUS_M], ['outer', ORBIT_MAX_RADIUS_M]] as const) {
+    const boundary = new THREE.Mesh(new THREE.RingGeometry(radius - 0.06, radius, 128),
+      new THREE.MeshBasicMaterial({ color: 0xd28bff, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }))
+    boundary.name = `orbit-ground-boundary-${name}`
+    boundary.rotation.x = -Math.PI / 2
+    boundary.position.y = -ORBIT_TARGET_HEIGHT_M + 0.025
+    orbitField.add(boundary)
+  }
+  const orbitQuarterMarkers = new THREE.Group()
+  orbitQuarterMarkers.name = 'orbit-quarter-markers'
+  for (let index = 0; index < 4; index += 1) {
+    const angle = index / 4 * Math.PI * 2
+    const marker = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-1.4, 0, 0), new THREE.Vector3(1.4, 0, 0),
+      new THREE.Vector3(0, -1.4, 0), new THREE.Vector3(0, 1.4, 0),
+    ]), new THREE.LineBasicMaterial({ color: 0x8abac4, transparent: true, opacity: 0.6, depthWrite: false }))
+    marker.name = `orbit-quarter-reference-${index}`
+    marker.position.set(Math.sin(angle) * ORBIT_TARGET_RADIUS_M, 0, Math.cos(angle) * ORBIT_TARGET_RADIUS_M)
+    marker.rotation.y = angle
+    orbitQuarterMarkers.add(marker)
+  }
+  orbitField.add(orbitQuarterMarkers)
+  const orbitEntry = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-3, -2, ORBIT_TARGET_RADIUS_M), new THREE.Vector3(3, -2, ORBIT_TARGET_RADIUS_M),
+    new THREE.Vector3(3, 2, ORBIT_TARGET_RADIUS_M), new THREE.Vector3(-3, 2, ORBIT_TARGET_RADIUS_M),
+  ]), new THREE.LineDashedMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.65, dashSize: 0.6, gapSize: 0.45, depthWrite: false }))
+  orbitEntry.name = 'orbit-entry-band'
+  orbitEntry.computeLineDistances()
+  orbitField.add(orbitEntry)
+  const orbitHeightGuide = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-ORBIT_TARGET_RADIUS_M - 4, -ORBIT_TARGET_HEIGHT_M, ORBIT_TARGET_RADIUS_M),
+    new THREE.Vector3(-ORBIT_TARGET_RADIUS_M - 4, ORBIT_MAX_ENTRY_HEIGHT_M - ORBIT_TARGET_HEIGHT_M, ORBIT_TARGET_RADIUS_M),
+    ...[ORBIT_MIN_ENTRY_HEIGHT_M, ORBIT_TARGET_HEIGHT_M, ORBIT_MAX_ENTRY_HEIGHT_M].flatMap((height) => [
+      new THREE.Vector3(-ORBIT_TARGET_RADIUS_M - 4.5, height - ORBIT_TARGET_HEIGHT_M, ORBIT_TARGET_RADIUS_M),
+      new THREE.Vector3(-ORBIT_TARGET_RADIUS_M - 3.5, height - ORBIT_TARGET_HEIGHT_M, ORBIT_TARGET_RADIUS_M),
+    ]),
+  ]), new THREE.LineBasicMaterial({ color: 0x8abac4, transparent: true, opacity: 0.5, depthWrite: false }))
+  orbitHeightGuide.name = 'orbit-height-guide'
+  orbitField.add(orbitHeightGuide)
+  const orbitAccent = new THREE.Group()
+  orbitAccent.name = 'orbit-stage-guidance'
+  orbitAccent.position.set(0, -ORBIT_TARGET_HEIGHT_M + 0.1, field.launch.z - orbitTarget.z)
+  const orbitStageMaterial = new THREE.LineBasicMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.95, depthWrite: false })
+  const orbitStageReference = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 32 }, (_, index) => {
+    const angle = index / 32 * Math.PI * 2
+    return new THREE.Vector3(Math.sin(angle) * 2.4, 0, Math.cos(angle) * 2.4)
+  })), orbitStageMaterial)
+  orbitStageReference.name = 'orbit-stage-reference'
+  orbitAccent.add(orbitStageReference)
+  orbitField.add(orbitAccent)
+  const orbitExitPoints = [0, 1, 2, 3].flatMap((quadrant) => {
+    const angle = quadrant / 4 * Math.PI * 2
+    const radial = new THREE.Vector3(Math.sin(angle), 0, Math.cos(angle))
+    const tangent = new THREE.Vector3(Math.cos(angle), 0, -Math.sin(angle))
+    const tip = radial.clone().multiplyScalar(ORBIT_TARGET_RADIUS_M + 8)
+    const shoulder = radial.clone().multiplyScalar(ORBIT_TARGET_RADIUS_M + 6)
+    return [radial.clone().multiplyScalar(ORBIT_TARGET_RADIUS_M + 2), tip,
+      shoulder.clone().addScaledVector(tangent, -1.2), tip,
+      shoulder.clone().addScaledVector(tangent, 1.2), tip]
+  })
+  const orbitExit = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(orbitExitPoints),
+    new THREE.LineBasicMaterial({ color: 0xb8f36b, transparent: true, opacity: 0.8, depthWrite: false }))
+  orbitExit.name = 'orbit-outward-exit-reference'
+  orbitExit.visible = false
+  orbitField.add(orbitExit)
+  scene.add(orbitField)
+  const orbitReference: FlightSceneReference = { id: 'orbit-zone', kind: 'zone', object: orbitField,
+    positionM: { ...orbitTarget }, sizeM: { x: ORBIT_MAX_RADIUS_M * 2, y: ORBIT_MAX_ENTRY_HEIGHT_M - ORBIT_MIN_ENTRY_HEIGHT_M, z: ORBIT_MAX_RADIUS_M * 2 } }
+
   const landingSurface: FlightSceneReference = { id: 'landing-surface', kind: 'zone', object: landingTarget, positionM: { ...field.landing }, sizeM: { x: LANDING_ZONE_RADIUS_M * 2, y: 0, z: LANDING_ZONE_RADIUS_M * 2 } }
   const launchReference: FlightSceneReference = { id: 'training-launch', kind: 'pad', object: takeoffPad, positionM: { ...field.launch } }
-  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, recoveryReference, rollReference, flipReference, loopReference, splitReference]
+  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, recoveryReference, rollReference, flipReference, loopReference, splitReference, orbitReference]
   const referenceById = new Map(sceneReferences.map((reference) => [reference.id, reference]))
 
   const drone = createQuadVisual()
@@ -1206,7 +1315,8 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     flipField.visible = ['full-flip', 'front-flip', 'back-flip'].includes(lessonId ?? '')
     loopField.visible = lessonId === 'power-loop'
     splitField.visible = lessonId === 'split-s'
-    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s'].includes(lessonId ?? '')
+    orbitField.visible = lessonId === 'orbit'
+    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit'].includes(lessonId ?? '')
     for (const reference of referenceSet.contract) {
       reference.object.visible = !beginner
     }
@@ -1297,6 +1407,21 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     splitAccent.rotation.y = stage >= 5 ? Math.PI : 0
   }
 
+  const setOrbitStage = (stage: number | null): void => {
+    if (stage === null || !Number.isInteger(stage) || stage < 0 || stage > 9) {
+      orbitAccent.visible = false
+      orbitExit.visible = false
+      return
+    }
+    orbitAccent.visible = true
+    orbitExit.visible = stage >= 8
+    orbitStageMaterial.color.set(stage >= 9 ? 0xb8f36b : stage >= 3 ? 0xffc978 : 0x45d7f7)
+    // The accent identifies the launch, entry or central subject. Cardinal
+    // route markers stay neutral so left and right orbits are equally valid.
+    orbitAccent.position.set(0, stage === 0 ? -ORBIT_TARGET_HEIGHT_M + 0.1 : 0,
+      stage <= 1 ? field.launch.z - orbitTarget.z : stage === 2 ? ORBIT_TARGET_RADIUS_M : 0)
+  }
+
   const setPath = (line: THREE.Line, path: readonly Vector3[], yOffset: number): void => {
     const maximumPoints = 1_200
     const stride = Math.max(1, Math.ceil(path.length / maximumPoints))
@@ -1347,6 +1472,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     setFullFlipStage,
     setPowerLoopStage,
     setSplitSStage,
+    setOrbitStage,
     setTrainingPath,
     setReplayPath,
     dispose: () => disposeFlightScene(scene),

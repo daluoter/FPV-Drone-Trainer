@@ -50,7 +50,7 @@ describe('lesson catalog', () => {
       ['takeoff-pad', 'hover-zone'],
       ['training-launch', 'landing-surface'],
       ['training-launch', 'landing-surface', 'split-zone'],
-      ['takeoff-pad', 'orbit-poi'],
+      ['training-launch', 'landing-surface', 'orbit-zone'],
       ['takeoff-pad'],
       ['training-launch', 'landing-surface'],
       ['takeoff-pad', 'training-launch', 'landing-surface'],

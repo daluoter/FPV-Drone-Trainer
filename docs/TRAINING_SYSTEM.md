@@ -1,10 +1,10 @@
 # Training system
 
-Current release **2026.10.27.2** retains separate **L11 前翻** (`front-flip`) and **L12 後翻** (`back-flip`), both rules 6. **L13 大迴旋** (`power-loop`, rules 6) has user flight acceptance dated 2026-10-27; recommended height and the demonstration now use 25 m, retaining the 6 m minimum. **L14 破S** (`split-s`, rules 6) has ground-start eight-stage teaching and its own physics demonstration; a reference gantry supplements the retained route without a new collision or completion requirement. Its user acceptance remains pending. L15 正刷鍋 (`orbit`) retains its prototype and records.
+Current release **2026.10.28.1** expands **L15 正刷鍋** (`orbit`, rules 6) into ground-start nine-step, five-lap teaching, a visible reference target and an independent actual-physics demonstration. The user explicitly accepted Free camera, L13’s 25 m version and L14 破S with its reference gantry on 2026-10-28 (`2026.10.27.2` / `67c64f1` context). **L15 user acceptance remains pending**. Earlier L15 rule-4 prototype results retain their original scope and do not credit current nine-step completion.
 
 The learning menu has 15 courses; the registry has 17 definitions including historical `hover` and `full-flip`. `LEARNING_LESSONS` excludes both historical entries. L01 `takeoff` retains its 1.5-second settled-hover condition. Saved `hover` / `full-flip` selection opens `takeoff` / `front-flip`, without changing raw preferences during reading or crediting old results to replacements. Display numbers and the L14 title change are not storage keys.
 
-The user accepted original combined L11 in `2026.10.24.3` / `92517a8`, the split L11/L12 courses on 2026-10-26, and L13 大迴旋 on 2026-10-27. Their original IDs and rule scopes retain the approvals and records. L14 破S acceptance and common hardware/pilot calibration remain separate. See [compatibility](LEARNING_CONTRACT.md#課程編號與合併相容性), [the roadmap](LEARNING_ROADMAP.md), and [the directional-flip guide](L11_FULL_FLIP.md).
+The original combined and split flip-course approvals retain their recorded IDs/rule scopes. L01–L14 and Free camera have user acceptance; L15 does not yet. See [compatibility](LEARNING_CONTRACT.md#課程編號與合併相容性), [the roadmap](LEARNING_ROADMAP.md), and [the L15 guide](L15_ORBIT.md).
 
 The evaluator result is based on finite fixed-step drone state and geometry. A
 stick sequence cannot pass a lesson. Synthetic fixture success is deterministic
@@ -238,20 +238,13 @@ The active `split-s` lesson uses rule 6 and requests an explicit disarmed reset 
 
 The former airborne rule-4 five-phase evaluator remains for historical contracts and scores. Old results stay in their original scope and are not credited to the current ground-start lesson.
 
-### 正刷鍋 / 刷鍋
+### 正刷鍋
 
-The orbit point of interest is the `orbit-poi` tower. The evaluator requires
-real horizontal motion in the radius/height/speed envelope and tangent camera
-heading. It unwraps directed POI angle incrementally and requires a full
-`2π` geometric lap followed by a valid exit sample. It rejects yaw-in-place,
-teleport/path gaps, sustained invalid envelope, and oscillatory direction
-reversals. Each orbit displacement is also checked against the average reported
-velocity over its sample interval. A deliberately generous 65 m/s² `dt²`
-integration allowance covers accelerated/coarsely sampled flight while a 7.8 m
-jump in 0.2 s reporting 7.8 m/s remains inconsistent and fails. Metrics include
-radius, altitude, speed, radial rate, tangent/camera heading error, direction,
-unwrapped progress, reverse radians, path length, displacement speed, and
-velocity-consistency error.
+The current `orbit` lesson uses rules 6 and starts from supported ground. Its target is computed from `training-launch` and `landing-surface`: 30 m forward and 10 m above the configured ground. The new `orbit-zone` scene reference presents a clearly visible target and its teaching field; the legacy `orbit-poi` reference retains its original position and order for historical contracts.
+
+Following the user's updated requirement, nine phases observe ground, takeoff, entry, five complete laps and recovery. Either direction is accepted, but five 360° laps must belong to one continuous directed episode (at least 1,800° net travel), with the nose tracking the visible target. The evaluator measures actual lateral motion around the target, not camera yaw alone or a forward-facing tangent circle. Broad radius (6–30 m), altitude (4–20 m), tangent-speed (at least 0.75 m/s) and inward-heading (at most 80° error) bounds remain. The HUD shows lap count toward 5/5. Exiting before five completed laps cannot finish the lesson. Invalid gaps cannot bridge positive angle progress; reversals cannot pump lap count. Sustained invalid flight or excessive backtracking restarts local proof while preserving the first measured reason; latched teaching milestones cannot finish a replacement episode. Physics timestamps, displacement/velocity and quaternion/rate consistency remain authoritative.
+
+After the fifth complete lap, the evaluator freezes that completion radius. The pilot must actually depart outward by at least 3 m with outward radial speed at least 0.5 m/s, then maintain controlled airborne flight for 0.2 s. Slowing or hovering in place alone cannot complete the departure. The lesson does not demand landing, a perfect radius or a fixed exit point; practice is untimed and challenge allows 300 s. `orbitLearningEvaluator` observes flight only. It never modifies physics, sticks or scene state. The old `orbitEvaluator` remains a legacy rule-4 geometric contract; old three-step scores are preserved separately. See [the current criteria](LEARNING_CONTRACT.md) and [the L15 guide](L15_ORBIT.md).
 
 ## Scene references and visualization
 
@@ -305,10 +298,10 @@ rules-6 completion. Current progress loads the per-lesson rule scope. Physics
 context stays version 1; settings, input source and practice/challenge remain
 separate comparison conditions.
 
-The 17 displayed demonstrations cover three L00 axis examples and L01–L14, including separate L11 前翻, L12 後翻, L13 大迴旋 and L14 破S recordings.
+The 18 displayed demonstrations cover three L00 axis examples and L01–L15, including separate L11 前翻, L12 後翻, L13 大迴旋 and L14 破S recordings.
 Their bounded recordings are generated through the real 240 Hz simulator and
 play through the independent ghost. The L01 demonstration explicitly teaches both takeoff and continuous hover.
-L14 has its own eight-stage physics demonstration; L15 正刷鍋 still awaits its expanded teaching demonstration.
+L14 has an eight-stage physics demonstration; L15 has a separate nine-stage, five-full-lap recording. L15’s heading/radius/lap-count/directed-progress instruments follow the same retained observations as its chapters.
 
 `createDemonstrationProgress` observes each retained course recording once with
 its own checkpoint/evaluator state, outside the live session and progress store.
@@ -320,10 +313,9 @@ live objective/checkpoint/result presentation while viewing, then restores the
 unchanged learner view on exit. No demo progress is saved as learner completion.
 
 Pose, recorded sticks, captions, scene stage and independent progress share the
-same playback clock. L09 and L10 start at 0.5×. L09 has 2 s to read preparation and 0.75 s
+same playback clock. L09–L15 start at 0.5×. L09 has 2 s to read preparation and 0.75 s
 to observe a real onset before its recorded correction. The L08 demo uses the
-same physical frame field as live practice. All remain labeled as simulated
-pending pilot review; their generated controls never override live practice.
+same physical frame field as live practice. All remain labeled as simulated; their generated controls never override live practice.
 
 ## Historical beginner-school batch two (rules 2)
 

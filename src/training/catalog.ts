@@ -1,3 +1,4 @@
+import { ORBIT_LEARNING_CONTENT } from './orbit'
 import { LANDING_LEARNING_CONTENT } from './landing'
 import { STRAIGHT_LINE_LEARNING_CONTENT } from './straightLine'
 import { DIRECTION_CONTROL_LEARNING_CONTENT } from './directionControl'
@@ -75,24 +76,7 @@ const LEARNING_CONTENT: Readonly<Record<string, LessonLearningContent>> = {
   'back-flip': BACK_FLIP_LEARNING_CONTENT,
   'power-loop': POWER_LOOP_LEARNING_CONTENT,
   'split-s': SPLIT_S_LEARNING_CONTENT,
-  orbit: {
-    code: 'L15',
-    title: '正刷鍋',
-    level: '特技',
-    prerequisiteIds: ['coordinated-turn'],
-    objectives: ['繞塔完成同方向的一整圈實際軌跡。', '維持半徑、高度、速度與鏡頭朝向。'],
-    steps: [
-      '先到塔旁約 10 公尺半徑的參考高度，建立側向移動。',
-      '選定一個方向，用小幅姿態與偏航修正維持環繞。',
-      '觀察塔在畫面中的位置，避免半徑逐漸縮小或變大。',
-      '持續同方向完成一整圈，並讓最後一段速度與高度穩定。',
-    ],
-    commonMistakes: [
-      '原地轉機頭而沒有繞塔移動，無法累積環繞進度。',
-      '反覆來回走小段弧線，沒有完成同方向的一圈。',
-      '只顧鏡頭對準塔，忽略半徑、高度或速度持續偏離。',
-    ],
-  },
+  orbit: ORBIT_LEARNING_CONTENT,
 }
 
 export function lessonLearningContent(lessonId: string): LessonLearningContent | null {

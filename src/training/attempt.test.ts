@@ -77,7 +77,8 @@ describe('training attempt provenance', () => {
     expect(trainingRulesVersionForLesson('back-flip')).toBe(6)
     expect(trainingRulesVersionForLesson('power-loop')).toBe(6)
     expect(trainingRulesVersionForLesson('split-s')).toBe(6)
-    for (const lessonId of [null, 'takeoff', 'hover', 'straight-line', 'landing', 'direction-control', 'orbit']) {
+    expect(trainingRulesVersionForLesson('orbit')).toBe(6)
+    for (const lessonId of [null, 'takeoff', 'hover', 'straight-line', 'landing', 'direction-control']) {
       expect(trainingRulesVersionForLesson(lessonId)).toBe(4)
     }
     // Reading old contexts must not add fields or relabel their original rules.
