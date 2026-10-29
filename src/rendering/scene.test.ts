@@ -10,7 +10,9 @@ import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
 import { SPLIT_S_MIN_HEIGHT_M, SPLIT_S_TARGET_HEIGHT_M } from '../training/splitS'
 import { POWER_LOOP_TARGET_HEIGHT_M } from '../training/powerLoop'
 import { createOrbitTarget, ORBIT_TARGET_HEIGHT_M, ORBIT_TARGET_RADIUS_M, ORBIT_MAX_RADIUS_M } from '../training/orbit'
-import { createTeachingDemonstration } from '../training/demonstrations'
+import { createTeachingDemonstration, teachingReverseOrbitPhaseAt } from '../training/demonstrations'
+import { createReverseOrbitTarget, REVERSE_ORBIT_TARGET_HEIGHT_M, REVERSE_ORBIT_FLIGHT_HEIGHT_M, REVERSE_ORBIT_TARGET_RADIUS_M } from '../training/reverseOrbit'
+import { createCameraRig, updateCameraRig } from './camera'
 import { createTuningPreset } from '../tuning/presets'
 
 import { createFlightScene } from './scene'
@@ -215,6 +217,7 @@ describe('flight scene reference contract', () => {
         'split-zone',
         'orbit-zone',
         'backward-zone',
+        'reverse-orbit-zone',
       ])
       expect(scene.getReference('hover-zone')?.kind).toBe('zone')
       expect(scene.getReference('hover-zone')?.positionM).toEqual({ x: 0, y: 3, z: 0 })
@@ -873,7 +876,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('roll-zone')!
-      expect(scene.sceneReferences.at(-6)?.id).toBe('roll-zone')
+      expect(scene.sceneReferences.at(-7)?.id).toBe('roll-zone')
       expect(reference.kind).toBe('zone')
       expect(reference.positionM).toEqual({ x: 6, y: 15, z: -3 })
       expect(reference.object.position.toArray()).toEqual([6, 15, -3])
@@ -969,7 +972,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('flip-zone')!
-      expect(scene.sceneReferences.at(-5)?.id).toBe('flip-zone')
+      expect(scene.sceneReferences.at(-6)?.id).toBe('flip-zone')
       expect(reference.kind).toBe('zone')
       expect(reference.positionM).toEqual({ x: 6, y: 15, z: -3 })
       expect(reference.object.position.toArray()).toEqual([6, 15, -3])
@@ -1071,7 +1074,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('loop-zone')!
-      expect(scene.sceneReferences.at(-4)?.id).toBe('loop-zone')
+      expect(scene.sceneReferences.at(-5)?.id).toBe('loop-zone')
       expect(reference.positionM).toEqual({ x: 6, y: 5 + POWER_LOOP_TARGET_HEIGHT_M, z: -3 })
       expect(reference.object.position.toArray()).toEqual([6, 5 + POWER_LOOP_TARGET_HEIGHT_M, -3])
       expect(reference.sizeM).toEqual({ x: 240, y: 16, z: 240 })
@@ -1165,7 +1168,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('split-zone')!
-      expect(scene.sceneReferences.at(-3)?.id).toBe('split-zone')
+      expect(scene.sceneReferences.at(-4)?.id).toBe('split-zone')
       expect(reference.positionM).toEqual({ x: 6, y: 5 + SPLIT_S_TARGET_HEIGHT_M, z: -3 })
       expect(reference.object.position.toArray()).toEqual([6, 5 + SPLIT_S_TARGET_HEIGHT_M, -3])
       expect(reference.sizeM).toEqual({ x: 300, y: SPLIT_S_TARGET_HEIGHT_M - SPLIT_S_MIN_HEIGHT_M, z: 300 })
@@ -1304,7 +1307,7 @@ describe('flight scene reference contract', () => {
       const field = scene.getReference('orbit-zone')!
       const launch = scene.getReference('training-launch')!.positionM
       const target = createOrbitTarget(launch, config.ground.heightM)
-      expect(scene.sceneReferences.at(-2)?.id).toBe('orbit-zone')
+      expect(scene.sceneReferences.at(-3)?.id).toBe('orbit-zone')
       expect(field.positionM).toEqual(target)
       expect(field.object.position.toArray()).toEqual([target.x, target.y, target.z])
       expect(field.sizeM?.x).toBe(ORBIT_MAX_RADIUS_M * 2)
@@ -1386,7 +1389,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('backward-zone')!
-      expect(scene.sceneReferences.at(-1)?.id).toBe('backward-zone')
+      expect(scene.sceneReferences.at(-2)?.id).toBe('backward-zone')
       expect(reference.positionM).toEqual({ x: 6, y: 15, z: -28 })
       expect(reference.sizeM).toEqual({ x: 28, y: 20, z: 64 })
       expect(reference.object.position.toArray()).toEqual([6, 15, -28])
@@ -1462,6 +1465,122 @@ describe('flight scene reference contract', () => {
     const disposals = [...resources].map((resource) => vi.spyOn(resource, 'dispose'))
     scene.dispose()
     for (const dispose of disposals) expect(dispose).toHaveBeenCalledOnce()
+  })
+
+
+  it('provides a raised-ground tower crane with open jib, counterjib and hook while preserving existing anchors', () => {
+    const defaults = createDefaultDroneConfig()
+    const config = { ...defaults, ground: { ...defaults.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 35, z: -3 } }
+    const original = JSON.stringify(config)
+    const scene = createFlightScene(config)
+    try {
+      const reference = scene.getReference('reverse-orbit-zone')!
+      const launch = scene.getReference('training-launch')!.positionM
+      const target = createReverseOrbitTarget(launch, config.ground.heightM)
+      expect(scene.sceneReferences.at(-1)?.id).toBe('reverse-orbit-zone')
+      expect(reference.positionM).toEqual({ x: 6, y: 50, z: -33 })
+      expect(reference.positionM).toEqual(target)
+      expect(reference.object.position.toArray()).toEqual([target.x, target.y, target.z])
+      expect(scene.getReference('orbit-poi')?.positionM).toEqual({ x: 4, y: 7.5, z: 4 })
+      expect(scene.getReference('orbit-zone')?.positionM).toEqual({ x: 6, y: 15, z: -33 })
+      expect(scene.getReference('backward-zone')?.positionM).toEqual({ x: 6, y: 15, z: -28 })
+      const anchors = scene.sceneReferences.map(({ id, positionM }) => ({ id, positionM: { ...positionM } }))
+      expect(reference.object.visible).toBe(false)
+      scene.setLessonTarget('reverse-orbit')
+      expect(reference.object.visible).toBe(true)
+      for (const name of ['orbit-field', 'backward-field', 'split-s-field', 'power-loop-field', 'wide-gate-field']) {
+        expect(scene.scene.getObjectByName(name)?.visible).toBe(false)
+      }
+      expect(scene.getReference('orbit-poi')?.object.visible).toBe(false)
+      const crane = scene.scene.getObjectByName('reverse-orbit-crane')!
+      expect(crane.userData).toEqual({ teachingReference: '倒刷鍋塔式起重機與高處機臂', collision: false })
+      scene.scene.updateMatrixWorld(true)
+      const mast = scene.scene.getObjectByName('reverse-orbit-crane-mast')!
+      const mastBounds = new THREE.Box3().setFromObject(mast)
+      expect(mastBounds.min.y).toBeCloseTo(config.ground.heightM)
+      expect(mastBounds.max.y).toBeCloseTo(config.ground.heightM + REVERSE_ORBIT_TARGET_HEIGHT_M)
+      const jib = scene.scene.getObjectByName('reverse-orbit-crane-jib')!
+      const counterJib = scene.scene.getObjectByName('reverse-orbit-crane-counter-jib')!
+      const jibBounds = new THREE.Box3().setFromObject(jib)
+      const counterBounds = new THREE.Box3().setFromObject(counterJib)
+      expect(jibBounds.max.x).toBeCloseTo(target.x + 24, 1)
+      expect(counterBounds.min.x).toBeCloseTo(target.x - 10, 1)
+      for (const name of ['cabin', 'lattice', 'head-mast', 'support-and-hook-cables', 'hook-block', 'hook']) {
+        expect(scene.scene.getObjectByName(`reverse-orbit-crane-${name}`)).toBeDefined()
+      }
+      for (let index = 0; index < 3; index += 1) expect(scene.scene.getObjectByName(`reverse-orbit-crane-counterweight-${index}`)).toBeDefined()
+      const underside = scene.scene.getObjectByName('reverse-orbit-crane-jib-underside') as THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>
+      expect(underside.material.transparent).toBe(false)
+      expect(underside.material.emissiveIntensity).toBeGreaterThan(0)
+      const route = scene.scene.getObjectByName('reverse-orbit-route-ring') as THREE.LineLoop<THREE.BufferGeometry>
+      const positions = route.geometry.getAttribute('position')
+      for (let index = 0; index < positions.count; index += 1) {
+        expect(Math.hypot(positions.getX(index), positions.getZ(index))).toBeCloseTo(REVERSE_ORBIT_TARGET_RADIUS_M, 5)
+        expect(positions.getY(index)).toBe(REVERSE_ORBIT_FLIGHT_HEIGHT_M - REVERSE_ORBIT_TARGET_HEIGHT_M)
+      }
+      const before = crane.matrixWorld.clone()
+      const drone = scene.drone.matrixWorld.clone()
+      const accent = scene.scene.getObjectByName('reverse-orbit-stage-guidance')!
+      const exit = scene.scene.getObjectByName('reverse-orbit-outward-exit-reference')!
+      const guide = scene.scene.getObjectByName('reverse-orbit-stage-reference') as THREE.LineLoop<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      for (const stage of [0, 1, 2, 3, 4, 5, 6, 7]) {
+        scene.setReverseOrbitStage(stage)
+        expect(accent.visible).toBe(true)
+        expect(exit.visible).toBe(stage >= 6)
+        expect(guide.material.color.getHex()).toBe(stage >= 7 ? 0xb8f36b : stage >= 3 ? 0xffc978 : 0x45d7f7)
+        expect(crane.matrixWorld.equals(before)).toBe(true)
+        expect(scene.drone.matrixWorld.equals(drone)).toBe(true)
+      }
+      for (const stage of [null, -1, 8, 1.5, Number.NaN]) {
+        scene.setReverseOrbitStage(stage)
+        expect(accent.visible).toBe(false)
+        expect(exit.visible).toBe(false)
+        expect(jib.visible).toBe(true)
+        expect(crane.visible).toBe(true)
+      }
+      expect(scene.sceneReferences.map(({ id, positionM }) => ({ id, positionM }))).toEqual(anchors)
+      scene.setLessonTarget(null)
+      expect(reference.object.visible).toBe(false)
+      expect(scene.getReference('orbit-poi')?.object.visible).toBe(true)
+      expect(JSON.stringify(config)).toBe(original)
+    } finally { scene.dispose() }
+  })
+
+  it('disposes shared crane steel, lattice, route and stage resources exactly once', () => {
+    const scene = createFlightScene()
+    const resources = new Set<THREE.BufferGeometry | THREE.Material>()
+    scene.getReference('reverse-orbit-zone')!.object.traverse((object) => {
+      const visual = object as THREE.Mesh<THREE.BufferGeometry, THREE.Material | THREE.Material[]>
+      if (visual.geometry) resources.add(visual.geometry)
+      for (const material of Array.isArray(visual.material) ? visual.material : visual.material ? [visual.material] : []) resources.add(material)
+    })
+    const disposals = [...resources].map((resource) => vi.spyOn(resource, 'dispose'))
+    scene.dispose()
+    for (const dispose of disposals) expect(dispose).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the real beginner FPV camera facing a visible crane jib throughout the three measured circles', () => {
+    const settings = createTuningPreset('beginner')
+    const scene = createFlightScene(settings.drone)
+    try {
+      scene.setLessonTarget('reverse-orbit')
+      scene.scene.updateMatrixWorld(true)
+      const jib = scene.scene.getObjectByName('reverse-orbit-crane-jib')!
+      const bounds = new THREE.Box3().setFromObject(jib)
+      const demo = createTeachingDemonstration(settings, 'reverse-orbit')
+      const rig = createCameraRig(settings.camera)
+      let observations = 0
+      for (const [index, sample] of demo.recording.samples.entries()) {
+        const phase = teachingReverseOrbitPhaseAt(demo, sample.timestampSeconds)
+        if (index % 20 !== 0 || phase === null || phase < 3 || phase >= 6) continue
+        const camera = updateCameraRig(rig, { ...createInitialDroneState(settings.drone), ...sample }, 'fpv')
+        camera.updateMatrixWorld(true)
+        const matrix = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+        expect(new THREE.Frustum().setFromProjectionMatrix(matrix).intersectsBox(bounds)).toBe(true)
+        observations += 1
+      }
+      expect(observations).toBeGreaterThan(20)
+    } finally { scene.dispose() }
   })
 
 })

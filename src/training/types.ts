@@ -31,6 +31,11 @@ export interface TrainingSample {
   readonly normalizedInput: NormalizedRcInput | null
   /** Runtime arm state. Missing legacy telemetry never starts or scores a session. */
   readonly armed?: boolean
+  /** Camera calibration at this observation; view-dependent lessons combine it with the real body pose. */
+  readonly fpvCamera?: {
+    readonly fpvMountAngleDegrees: number
+    readonly fpvFovDegrees: number
+  }
   /** Configured ground contact telemetry, independent of a lesson's spawn/reference height. */
   readonly groundContact?: {
     readonly heightM: number

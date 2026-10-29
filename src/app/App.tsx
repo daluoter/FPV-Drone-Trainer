@@ -112,6 +112,7 @@ export default function App() {
       state: sample.state,
       normalizedInput: sample.normalizedInput,
       armed: sample.armed,
+      fpvCamera: tuningSettings.camera,
       groundContact: sample.groundContact,
     })
     if (next === previous) return
@@ -132,7 +133,7 @@ export default function App() {
     }
     // The fixed-step hook still feeds every sample to the pure session without
     // creating a second loop; only the React publication is throttled.
-  }, [syncTrainingState])
+  }, [syncTrainingState, tuningSettings.camera])
   const onTrainingTelemetry = useCallback((telemetry: FlightRuntimeTelemetry) => {
     setInputSource(telemetry.source)
     setFlightBusy(telemetry.armed || telemetry.replay.active)

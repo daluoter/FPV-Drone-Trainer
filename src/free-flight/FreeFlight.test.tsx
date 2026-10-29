@@ -238,6 +238,127 @@ describe('interactive free camera', () => {
 })
 
 describe('Free Flight native navigation confirmation', () => {
+  it('shows observed upward view and crane visibility without carrying readings across lessons', () => {
+    const props = { poller: createBrowserGamepadPoller(), profile: null, settings: createDefaultTuningSettings() }
+    const base = createTrainingMachineState({ initialLessonId: 'reverse-orbit' })
+    const { rerender } = render(<FreeFlight {...props} trainingState={base} />)
+    const hud = () => screen.getByRole('group', { name: '倒刷鍋即時狀態' })
+    expect(hud()).toHaveTextContent('即時倒刷鍋數值')
+    expect(hud()).toHaveTextContent('仰看高處金色機臂')
+    expect(screen.getByTestId('reverse-orbit-laps')).toHaveTextContent('0 / 3 圈')
+    expect(screen.getByTestId('reverse-orbit-radius')).toHaveTextContent('—')
+    expect(screen.getByTestId('reverse-orbit-view-elevation')).toHaveTextContent('—')
+    expect(screen.getByTestId('reverse-orbit-target-error')).toHaveTextContent('—')
+    const observed: TrainingMachineState = { ...base, phase: 'ACTIVE', lastEvaluation: { status: 'continue', metrics: {
+      reverseOrbitPhase: 4, reverseOrbitCompletedLaps: 1, reverseOrbitProgressDegrees: 410,
+      reverseOrbitRadiusM: 12.4, reverseOrbitViewElevationDegrees: 75, reverseOrbitTargetViewErrorDegrees: 21,
+    } } }
+    rerender(<FreeFlight {...props} trainingState={observed} />)
+    expect(screen.getByTestId('reverse-orbit-laps')).toHaveTextContent('1 / 3 圈')
+    expect(screen.getByTestId('reverse-orbit-progress')).toHaveTextContent('410°')
+    expect(screen.getByTestId('reverse-orbit-radius')).toHaveTextContent('12.4 m')
+    expect(screen.getByTestId('reverse-orbit-view-elevation')).toHaveTextContent('75°')
+    expect(screen.getByTestId('reverse-orbit-target-error')).toHaveTextContent('21°')
+    const viewport = screen.getByRole('group', { name: 'Three.js Free Flight simulation viewport' })
+    expect(viewport.contains(screen.getByLabelText('目前練習提示'))).toBe(false)
+    expect(screen.getByLabelText('目前練習提示')).toHaveClass('is-below-viewport')
+    expect(within(viewport).getByRole('group', { name: '飛行位置' })).toBeInTheDocument()
+    for (const id of ['flight-altitude', 'flight-position-x', 'flight-position-y', 'flight-position-z']) {
+      expect(within(viewport).getByTestId(id)).toBeInTheDocument()
+    }
+    const recovering = { ...observed, recoveryInProgress: true, lastRecovery: { timestampSeconds: 8,
+      message: '中斷時離地 1.2 m', hint: '先重新升高並仰看機臂。', metrics: { interruptionAltitudeM: 1.2 } } }
+    rerender(<FreeFlight {...props} trainingState={recovering} />)
+    expect(screen.getByLabelText('目前練習提示')).toHaveTextContent('中斷時離地 1.2 m')
+    expect(screen.getByLabelText('目前練習提示')).toHaveTextContent('先重新升高並仰看機臂')
+    expect(viewport.contains(screen.getByLabelText('目前練習提示'))).toBe(false)
+    rerender(<FreeFlight {...props} trainingState={{ ...observed, lessonId: 'orbit' }} />)
+    expect(viewport.contains(screen.getByLabelText('目前練習提示'))).toBe(true)
+    rerender(<FreeFlight {...props} trainingState={createTrainingMachineState({ initialLessonId: 'orbit' })} />)
+    expect(screen.queryByRole('group', { name: '倒刷鍋即時狀態' })).not.toBeInTheDocument()
+    rerender(<FreeFlight {...props} trainingState={base} />)
+    expect(screen.getByTestId('reverse-orbit-radius')).toHaveTextContent('—')
+    expect(screen.getByTestId('reverse-orbit-view-elevation')).toHaveTextContent('—')
+    expect(screen.getByTestId('reverse-orbit-target-error')).toHaveTextContent('—')
+    expect(screen.getByTestId('reverse-orbit-laps')).toHaveTextContent('0 / 3 圈')
+  })
+
+  it('plays three physical upward-view crane orbits with independent seven-step progress and rewind', () => {
+    window.localStorage.clear()
+    render(<App />)
+    const canvas = screen.getByLabelText('Free Flight 3D scene')
+    fireEvent.change(screen.getByLabelText('選擇課程'), { target: { value: 'reverse-orbit' } })
+    fireEvent.change(screen.getByLabelText('控制方式'), { target: { value: 'keyboard' } })
+    const hud = () => screen.getByRole('group', { name: '倒刷鍋即時狀態' })
+    expect(hud()).toHaveTextContent('即時')
+    expect(frames.renderer!.scene.getObjectByName('reverse-orbit-field')?.visible).toBe(true)
+    expect(frames.renderer!.scene.getObjectByName('reverse-orbit-crane')).toBeDefined()
+    expect(frames.runtime!.simulation.getStaticObstacles()).toHaveLength(0)
+    const demoButtons = within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')
+    expect(demoButtons).toHaveLength(20)
+    expect(demoButtons.at(-2)).toHaveTextContent('L16 倒刷鍋示範')
+    expect(demoButtons.at(-1)).toHaveTextContent('L17 後退飛行示範')
+    const initialAltitude = screen.getByTestId('flight-altitude').textContent
+    const liveSteps = screen.getByRole('list', { name: '本課步驟' }).textContent
+    const stored = () => Object.fromEntries(Object.entries(window.localStorage).filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.')))
+    const before = stored()
+    fireEvent.click(screen.getByRole('button', { name: 'L16 倒刷鍋示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    expect(screen.getByRole('button', { name: '0.5×' })).toHaveAttribute('aria-pressed', 'true')
+    const progress = screen.getByRole('region', { name: '示範進度' })
+    expect(progress).toHaveTextContent('L16 倒刷鍋')
+    const chapters = within(progress).getAllByRole('button')
+    expect(chapters).toHaveLength(7)
+    for (const lap of [1, 2, 3]) {
+      fireEvent.click(chapters[lap + 3])
+      expect(progress).toHaveTextContent(`${lap + 3} / 7 個示範步驟完成`)
+      expect(screen.getByTestId('reverse-orbit-laps')).toHaveTextContent(`${lap} / 3 圈`)
+      expect(Number.parseFloat(screen.getByTestId('reverse-orbit-progress').textContent!)).toBeGreaterThanOrEqual(lap * 360)
+      expect(Number.parseFloat(screen.getByTestId('reverse-orbit-view-elevation').textContent!)).toBeGreaterThanOrEqual(35)
+      expect(Number.parseFloat(screen.getByTestId('reverse-orbit-target-error').textContent!)).toBeLessThanOrEqual(45)
+    }
+    const playback = frames.runtime!.getReplayPlayback()!
+    expect(playback.isPlaying()).toBe(false)
+    const held = hud().textContent
+    const pausedTime = playback.getState().currentTimeSeconds
+    const live = JSON.stringify(frames.runtime!.simulation.getState())
+    frame(400)
+    expect(hud().textContent).toBe(held)
+    expect(playback.getState().currentTimeSeconds).toBe(pausedTime)
+    expect(JSON.stringify(frames.runtime!.simulation.getState())).toBe(live)
+    fireEvent.change(screen.getByRole('slider'), { target: { value: playback.durationSeconds } })
+    expect(progress).toHaveTextContent('7 / 7 個示範步驟完成')
+    expect(screen.getByTestId('reverse-orbit-laps')).toHaveTextContent('3 / 3 圈')
+    expect(Number.parseFloat(screen.getByTestId('reverse-orbit-progress').textContent!)).toBeGreaterThanOrEqual(1080)
+    expect(Number.parseFloat(screen.getByTestId('flight-altitude').textContent!)).toBeGreaterThan(1.5)
+    fireEvent.click(chapters[4])
+    expect(screen.getByTestId('reverse-orbit-laps')).toHaveTextContent('1 / 3 圈')
+    expect(Number.parseFloat(screen.getByTestId('reverse-orbit-progress').textContent!)).toBeLessThan(720)
+    fireEvent.change(screen.getByRole('slider'), { target: { value: 0 } })
+    expect(screen.getByTestId('reverse-orbit-laps')).toHaveTextContent('0 / 3 圈')
+    expect(screen.getByTestId('reverse-orbit-progress')).toHaveTextContent('0°')
+    expect(progress).not.toHaveTextContent('7 / 7 個示範步驟完成')
+    expect(stored()).toEqual(before)
+    fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
+    expect(screen.getByRole('list', { name: '本課步驟' }).textContent).toBe(liveSteps)
+    expect(hud()).toHaveTextContent('即時')
+    expect(screen.getByTestId('reverse-orbit-target-error')).toHaveTextContent('—')
+    act(() => { expect(frames.runtime!.enterReplay(playback.recording)).toBe(true) })
+    frame(500)
+    expect(screen.queryByRole('group', { name: '倒刷鍋即時狀態' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '示範進度' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '結束回放' }))
+    fireEvent.click(screen.getByRole('button', { name: /^偏航$/ }))
+    expect(screen.queryByRole('group', { name: '倒刷鍋即時狀態' })).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '示範進度' })).toHaveTextContent('L00')
+    fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
+    expect(screen.getByLabelText('選擇課程')).toHaveValue('reverse-orbit')
+    expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
+    expect(screen.getByTestId('flight-altitude').textContent).toBe(initialAltitude)
+    expect(screen.getByRole('button', { name: /^Arm$/ })).toBeEnabled()
+    expect(stored()).toEqual(before)
+  }, 15_000)
+
   it('shows signed movement relative to the nose and clears unobserved backward-flight readings when changing lessons', () => {
     const props = { poller: createBrowserGamepadPoller(), profile: null, settings: createDefaultTuningSettings() }
     const base = createTrainingMachineState({ initialLessonId: 'backward-flight' })
@@ -278,7 +399,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(hud()).toHaveTextContent('即時')
     expect(frames.renderer!.scene.getObjectByName('backward-field')?.visible).toBe(true)
     expect(frames.runtime!.simulation.getStaticObstacles()).toHaveLength(0)
-    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(19)
+    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(20)
     const initialAltitude = screen.getByTestId('flight-altitude').textContent
     const liveSteps = screen.getByRole('list', { name: '本課步驟' }).textContent
     const stored = () => Object.fromEntries(Object.entries(window.localStorage).filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.')))
@@ -345,7 +466,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(screen.getByTestId('orbit-progress')).toHaveTextContent('0°')
     expect(screen.getByTestId('orbit-radius')).toHaveTextContent('—')
     expect(screen.getByTestId('orbit-heading')).toHaveTextContent('—')
-    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(19)
+    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(20)
     expect(frames.renderer!.scene.getObjectByName('orbit-field')?.visible).toBe(true)
     expect(frames.renderer!.scene.getObjectByName('orbit-reference-tower')).toBeDefined()
     expect(frames.renderer!.flightScene.getReference('orbit-poi')?.object.visible).toBe(false)

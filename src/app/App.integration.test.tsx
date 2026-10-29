@@ -310,20 +310,25 @@ describe('integrated training/runtime UI boundaries', () => {
     { lessonId: 'back-flip', code: 'L12', steps: 6, nextCode: 'L13' },
     { lessonId: 'power-loop', code: 'L13', steps: 8, nextCode: 'L14' },
     { lessonId: 'split-s', code: 'L14', steps: 8, nextCode: 'L15' },
+    { lessonId: 'reverse-orbit', code: 'L16', steps: 7, nextCode: 'L17' },
+    { lessonId: 'reverse-orbit', code: 'L16 一般鏡頭', steps: 7, nextCode: 'L17', presetId: 'standard' },
     { lessonId: 'backward-flight', code: 'L17', steps: 7, nextCode: null },
-  ] as const)('records an ordered $code result once and restores its current-rule progress after reload', ({ lessonId, steps, nextCode }) => {
+  ] as const)('records an ordered $code result once and restores its current-rule progress after reload', (definition) => {
+    const { lessonId, steps, nextCode } = definition
+    const presetId = 'presetId' in definition && definition.presetId ? definition.presetId : 'beginner'
     const { unmount } = render(<App />)
     const training = trainingSection()
     const canvas = screen.getByLabelText('Free Flight 3D scene')
     fireEvent.change(within(training).getByLabelText('選擇課程'), { target: { value: lessonId } })
     fireEvent.change(screen.getByLabelText('控制方式'), { target: { value: 'keyboard' } })
+    fireEvent.change(screen.getByLabelText('操控設定'), { target: { value: presetId } })
     fireEvent.click(within(training).getByRole('button', { name: '開始課程' }))
     const runtime = runtimeHarness.instances[0]!
     act(() => emitCountdown(runtime))
     fireEvent.click(screen.getByRole('button', { name: /^Arm$/ }))
     // Feed a physics-generated recording through the real App/session/store
     // boundary. The runtime/renderer are mocked here; this is UI evidence.
-    const settings = createTuningPreset('beginner')
+    const settings = createTuningPreset(presetId)
     const demo = createTeachingDemonstration(settings, lessonId)
     const initial = createInitialDroneState(settings.drone)
     act(() => {
@@ -356,6 +361,10 @@ describe('integrated training/runtime UI boundaries', () => {
     unmount()
     render(<App />)
     expect(within(trainingSection()).getByLabelText('選擇課程')).toHaveValue(lessonId)
+    if (presetId === 'standard') {
+      expect(within(trainingSection()).getByText(/本次條件已練 0 次/)).toBeInTheDocument()
+      fireEvent.change(screen.getByLabelText('操控設定'), { target: { value: presetId } })
+    }
     expect(within(trainingSection()).getByText(/本次條件已練 1 次/)).toBeInTheDocument()
     expect(persistedAttempts(lessonId)).toBe(1)
   })

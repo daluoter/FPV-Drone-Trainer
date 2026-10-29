@@ -16,6 +16,7 @@ import { POWER_LOOP_AREA_RADIUS_M, POWER_LOOP_TARGET_HEIGHT_M } from '../trainin
 import { SPLIT_S_AREA_RADIUS_M, SPLIT_S_MIN_HEIGHT_M, SPLIT_S_TARGET_HEIGHT_M } from '../training/splitS'
 import { createOrbitTarget, ORBIT_TARGET_HEIGHT_M, ORBIT_TARGET_RADIUS_M, ORBIT_MIN_RADIUS_M, ORBIT_MAX_RADIUS_M, ORBIT_MIN_ENTRY_HEIGHT_M, ORBIT_MAX_ENTRY_HEIGHT_M } from '../training/orbit'
 import { BACKWARD_FLIGHT_TARGET_HEIGHT_M } from '../training/backwardFlight'
+import { createReverseOrbitTarget, REVERSE_ORBIT_TARGET_HEIGHT_M, REVERSE_ORBIT_FLIGHT_HEIGHT_M, REVERSE_ORBIT_TARGET_RADIUS_M, REVERSE_ORBIT_MIN_RADIUS_M, REVERSE_ORBIT_MAX_RADIUS_M, REVERSE_ORBIT_MIN_ENTRY_HEIGHT_M, REVERSE_ORBIT_MAX_ENTRY_HEIGHT_M } from '../training/reverseOrbit'
 import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
 import type { Vector3 } from '../math/vector'
 import type { ReplayGhostState } from '../replay'
@@ -72,6 +73,8 @@ export interface FlightScene {
   setOrbitStage(stage: number | null): void
   /** Show nose-versus-travel guidance without changing actual velocity or heading. */
   setBackwardFlightStage(stage: number | null): void
+  /** Highlight the crane, three lap milestones and exit without steering flight. */
+  setReverseOrbitStage(stage: number | null): void
   /** Presentation-only bounded path trace; evaluators remain renderer-independent. */
   setTrainingPath(path: readonly Vector3[]): void
   setReplayPath(path: readonly Vector3[]): void
@@ -80,6 +83,109 @@ export interface FlightScene {
 
 function material(color: number, roughness = 0.72, metalness = 0.05): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({ color, roughness, metalness })
+}
+
+/** Original open-lattice crane, readable from underneath without collision geometry. */
+function createReverseOrbitCrane(): THREE.Group {
+  const crane = new THREE.Group()
+  crane.name = 'reverse-orbit-crane'
+  crane.userData = { teachingReference: '倒刷鍋塔式起重機與高處機臂', collision: false }
+  const steel = material(0xffb13b, 0.58, 0.2)
+  steel.emissive.set(0x8c4b0d)
+  steel.emissiveIntensity = 0.32
+  const darkSteel = material(0x73909a, 0.58, 0.28)
+  const bracingMaterial = new THREE.LineBasicMaterial({ color: 0xffc978 })
+  const braces: THREE.Vector3[] = []
+  const addBrace = (a: THREE.Vector3, b: THREE.Vector3): void => { braces.push(a, b) }
+  const beam = (name: string, from: THREE.Vector3, to: THREE.Vector3, radius = 0.13): THREE.Mesh => {
+    const offset = to.clone().sub(from)
+    const result = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, offset.length(), 6), steel)
+    result.name = name
+    result.position.copy(from).add(to).multiplyScalar(0.5)
+    result.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), offset.normalize())
+    return result
+  }
+  const mast = new THREE.Group()
+  mast.name = 'reverse-orbit-crane-mast'
+  const low = -REVERSE_ORBIT_TARGET_HEIGHT_M
+  const corners = [[-1.05, -1.05], [1.05, -1.05], [1.05, 1.05], [-1.05, 1.05]] as const
+  for (const [index, [x, z]] of corners.entries()) {
+    mast.add(beam(`reverse-orbit-crane-mast-leg-${index}`, new THREE.Vector3(x, low, z), new THREE.Vector3(x, 0, z), 0.18))
+  }
+  for (let bottom = low; bottom < -0.01; bottom += 5) {
+    const top = Math.min(0, bottom + 5)
+    for (let side = 0; side < 4; side += 1) {
+      const a = corners[side]
+      const b = corners[(side + 1) % 4]
+      addBrace(new THREE.Vector3(a[0], bottom, a[1]), new THREE.Vector3(b[0], bottom, b[1]))
+      addBrace(new THREE.Vector3(a[0], bottom, a[1]), new THREE.Vector3(b[0], top, b[1]))
+      addBrace(new THREE.Vector3(b[0], bottom, b[1]), new THREE.Vector3(a[0], top, a[1]))
+    }
+  }
+  const base = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.45, 4.8), material(0x4a6069))
+  base.name = 'reverse-orbit-crane-base'
+  base.position.y = low + 0.225
+  mast.add(base)
+  crane.add(mast)
+
+  const makeJib = (name: string, endX: number): THREE.Group => {
+    const jib = new THREE.Group()
+    jib.name = name
+    const rails = [[0, -1.2], [0, 1.2], [2.2, 0]] as const
+    for (const [index, [y, z]] of rails.entries()) {
+      jib.add(beam(`${name}-rail-${index}`, new THREE.Vector3(0, y, z), new THREE.Vector3(endX, y, z), 0.17))
+    }
+    const sections = Math.ceil(Math.abs(endX) / 3)
+    for (let index = 0; index < sections; index += 1) {
+      const start = endX * index / sections
+      const end = endX * (index + 1) / sections
+      addBrace(new THREE.Vector3(start, 0, -1.2), new THREE.Vector3(start, 0, 1.2))
+      addBrace(new THREE.Vector3(start, 0, -1.2), new THREE.Vector3(end, 0, 1.2))
+      addBrace(new THREE.Vector3(start, 0, 1.2), new THREE.Vector3(end, 0, -1.2))
+      for (const z of [-1.2, 1.2]) {
+        addBrace(new THREE.Vector3(start, 0, z), new THREE.Vector3(end, 2.2, 0))
+        addBrace(new THREE.Vector3(start, 2.2, 0), new THREE.Vector3(end, 0, z))
+      }
+    }
+    const underside = new THREE.Mesh(new THREE.BoxGeometry(Math.abs(endX), 0.12, 0.5), steel)
+    underside.name = `${name}-underside`
+    underside.position.set(endX / 2, -0.08, 0)
+    jib.add(underside)
+    return jib
+  }
+  crane.add(makeJib('reverse-orbit-crane-jib', 24), makeJib('reverse-orbit-crane-counter-jib', -10))
+  const turntable = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.8, 0.55, 16), darkSteel)
+  turntable.name = 'reverse-orbit-crane-turntable'
+  turntable.position.y = 0.35
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.8, 1.8), material(0x438da6, 0.38, 0.2))
+  cabin.name = 'reverse-orbit-crane-cabin'
+  cabin.position.set(2.3, 1.4, 0)
+  crane.add(turntable, cabin)
+  const headTop = new THREE.Vector3(-0.6, 7.5, 0)
+  crane.add(beam('reverse-orbit-crane-head-mast', new THREE.Vector3(-0.6, 1, 0), headTop, 0.15))
+  const cables = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([
+    headTop, new THREE.Vector3(24, 2.2, 0), headTop, new THREE.Vector3(-10, 2.2, 0),
+    new THREE.Vector3(18, 0, 0), new THREE.Vector3(18, -5, 0),
+  ]), new THREE.LineBasicMaterial({ color: 0xd1e3e7 }))
+  cables.name = 'reverse-orbit-crane-support-and-hook-cables'
+  crane.add(cables)
+  for (let index = 0; index < 3; index += 1) {
+    const weight = new THREE.Mesh(new THREE.BoxGeometry(1.25, 2, 2.6), darkSteel)
+    weight.name = `reverse-orbit-crane-counterweight-${index}`
+    weight.position.set(-8.5 + index * 1.4, -0.6, 0)
+    crane.add(weight)
+  }
+  const hook = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.1, 0.65), steel)
+  hook.name = 'reverse-orbit-crane-hook-block'
+  hook.position.set(18, -5.3, 0)
+  const hookBend = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.09, 6, 12, Math.PI * 1.5), darkSteel)
+  hookBend.name = 'reverse-orbit-crane-hook'
+  hookBend.position.set(18, -6.05, 0)
+  crane.add(hook, hookBend)
+  const lattice = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(braces), bracingMaterial)
+  lattice.name = 'reverse-orbit-crane-lattice'
+  crane.add(lattice)
+  return crane
 }
 
 function createQuadVisual(): THREE.Group {
@@ -240,22 +346,37 @@ function createReferenceObjects(spawnPositionM: Vector3, groundHeightM: number):
   return { objects: references, contract }
 }
 
-function disposeMaterial(materialValue: THREE.Material): void {
+function disposeMaterial(materialValue: THREE.Material, textures: Set<THREE.Texture>): void {
   const record = materialValue as THREE.Material & Record<string, unknown>
   for (const value of Object.values(record)) {
     if (value && typeof value === 'object' && 'isTexture' in value && typeof (value as THREE.Texture).dispose === 'function') {
-      ;(value as THREE.Texture).dispose()
+      const texture = value as THREE.Texture
+      if (!textures.has(texture)) {
+        textures.add(texture)
+        texture.dispose()
+      }
     }
   }
   materialValue.dispose()
 }
 
 function disposeObject(root: THREE.Object3D): void {
+  const geometries = new Set<THREE.BufferGeometry>()
+  const materials = new Set<THREE.Material>()
+  const textures = new Set<THREE.Texture>()
   root.traverse((object) => {
     const mesh = object as THREE.Mesh
-    if (mesh.geometry && typeof mesh.geometry.dispose === 'function') mesh.geometry.dispose()
-    const materials = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []
-    for (const materialValue of materials) disposeMaterial(materialValue)
+    if (mesh.geometry && typeof mesh.geometry.dispose === 'function' && !geometries.has(mesh.geometry)) {
+      geometries.add(mesh.geometry)
+      mesh.geometry.dispose()
+    }
+    const objectMaterials = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []
+    for (const materialValue of objectMaterials) {
+      if (!materials.has(materialValue)) {
+        materials.add(materialValue)
+        disposeMaterial(materialValue, textures)
+      }
+    }
   })
 }
 
@@ -1316,9 +1437,77 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     positionM: { x: field.launch.x, y: config.ground.heightM + backwardHeightM, z: field.launch.z - 25 },
     sizeM: { x: 28, y: 20, z: 64 } }
 
+  const reverseOrbitTarget = createReverseOrbitTarget(field.launch, config.ground.heightM)
+  const reverseOrbitField = new THREE.Group()
+  reverseOrbitField.name = 'reverse-orbit-field'
+  reverseOrbitField.position.set(reverseOrbitTarget.x, reverseOrbitTarget.y, reverseOrbitTarget.z)
+  reverseOrbitField.visible = false
+  reverseOrbitField.add(createReverseOrbitCrane())
+  const reverseFlightY = REVERSE_ORBIT_FLIGHT_HEIGHT_M - REVERSE_ORBIT_TARGET_HEIGHT_M
+  const reverseRoute = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 128 }, (_, index) => {
+    const angle = index / 128 * Math.PI * 2
+    return new THREE.Vector3(Math.sin(angle) * REVERSE_ORBIT_TARGET_RADIUS_M, reverseFlightY,
+      Math.cos(angle) * REVERSE_ORBIT_TARGET_RADIUS_M)
+  })), new THREE.LineDashedMaterial({ color: 0x8abac4, transparent: true, opacity: 0.32, dashSize: 0.7, gapSize: 0.6, depthWrite: false }))
+  reverseRoute.name = 'reverse-orbit-route-ring'
+  reverseRoute.computeLineDistances()
+  reverseOrbitField.add(reverseRoute)
+  for (const [name, radius] of [['inner', REVERSE_ORBIT_MIN_RADIUS_M], ['outer', REVERSE_ORBIT_MAX_RADIUS_M]] as const) {
+    const boundary = new THREE.Mesh(new THREE.RingGeometry(radius - 0.06, radius, 128),
+      new THREE.MeshBasicMaterial({ color: 0xffc978, transparent: true, opacity: 0.2, side: THREE.DoubleSide, depthWrite: false }))
+    boundary.name = `reverse-orbit-ground-boundary-${name}`
+    boundary.rotation.x = -Math.PI / 2
+    boundary.position.y = -REVERSE_ORBIT_TARGET_HEIGHT_M + 0.025
+    reverseOrbitField.add(boundary)
+  }
+  const reverseHeightGuide = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-REVERSE_ORBIT_TARGET_RADIUS_M - 4, -REVERSE_ORBIT_TARGET_HEIGHT_M, REVERSE_ORBIT_TARGET_RADIUS_M),
+    new THREE.Vector3(-REVERSE_ORBIT_TARGET_RADIUS_M - 4, REVERSE_ORBIT_MAX_ENTRY_HEIGHT_M - REVERSE_ORBIT_TARGET_HEIGHT_M, REVERSE_ORBIT_TARGET_RADIUS_M),
+    ...[REVERSE_ORBIT_MIN_ENTRY_HEIGHT_M, REVERSE_ORBIT_FLIGHT_HEIGHT_M, REVERSE_ORBIT_MAX_ENTRY_HEIGHT_M].flatMap((height) => [
+      new THREE.Vector3(-REVERSE_ORBIT_TARGET_RADIUS_M - 4.5, height - REVERSE_ORBIT_TARGET_HEIGHT_M, REVERSE_ORBIT_TARGET_RADIUS_M),
+      new THREE.Vector3(-REVERSE_ORBIT_TARGET_RADIUS_M - 3.5, height - REVERSE_ORBIT_TARGET_HEIGHT_M, REVERSE_ORBIT_TARGET_RADIUS_M),
+    ]),
+  ]), new THREE.LineBasicMaterial({ color: 0x8abac4, transparent: true, opacity: 0.45, depthWrite: false }))
+  reverseHeightGuide.name = 'reverse-orbit-height-guide'
+  reverseOrbitField.add(reverseHeightGuide)
+  const reverseEntry = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-3, reverseFlightY - 2, REVERSE_ORBIT_TARGET_RADIUS_M), new THREE.Vector3(3, reverseFlightY - 2, REVERSE_ORBIT_TARGET_RADIUS_M),
+    new THREE.Vector3(3, reverseFlightY + 2, REVERSE_ORBIT_TARGET_RADIUS_M), new THREE.Vector3(-3, reverseFlightY + 2, REVERSE_ORBIT_TARGET_RADIUS_M),
+  ]), new THREE.LineDashedMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.55, dashSize: 0.6, gapSize: 0.45, depthWrite: false }))
+  reverseEntry.name = 'reverse-orbit-entry-band'
+  reverseEntry.computeLineDistances()
+  reverseOrbitField.add(reverseEntry)
+  const reverseAccent = new THREE.Group()
+  reverseAccent.name = 'reverse-orbit-stage-guidance'
+  reverseAccent.position.set(0, -REVERSE_ORBIT_TARGET_HEIGHT_M + 0.1, field.launch.z - reverseOrbitTarget.z)
+  const reverseStageMaterial = new THREE.LineBasicMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.95, depthWrite: false })
+  const reverseStageReference = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 40 }, (_, index) => {
+    const angle = index / 40 * Math.PI * 2
+    return new THREE.Vector3(Math.sin(angle) * 2.6, 0, Math.cos(angle) * 2.6)
+  })), reverseStageMaterial)
+  reverseStageReference.name = 'reverse-orbit-stage-reference'
+  reverseAccent.add(reverseStageReference)
+  reverseOrbitField.add(reverseAccent)
+  const reverseExit = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([0, 1, 2, 3].flatMap((quadrant) => {
+    const angle = quadrant / 4 * Math.PI * 2
+    const radial = new THREE.Vector3(Math.sin(angle), 0, Math.cos(angle))
+    const tangent = new THREE.Vector3(Math.cos(angle), 0, -Math.sin(angle))
+    const tip = radial.clone().multiplyScalar(REVERSE_ORBIT_TARGET_RADIUS_M + 8)
+    const shoulder = radial.clone().multiplyScalar(REVERSE_ORBIT_TARGET_RADIUS_M + 6)
+    return [radial.clone().multiplyScalar(REVERSE_ORBIT_TARGET_RADIUS_M + 2), tip,
+      shoulder.clone().addScaledVector(tangent, -1.2), tip, shoulder.clone().addScaledVector(tangent, 1.2), tip]
+  }).map((point) => point.setY(reverseFlightY))), new THREE.LineBasicMaterial({ color: 0xb8f36b, transparent: true, opacity: 0.8, depthWrite: false }))
+  reverseExit.name = 'reverse-orbit-outward-exit-reference'
+  reverseExit.visible = false
+  reverseOrbitField.add(reverseExit)
+  scene.add(reverseOrbitField)
+  const reverseOrbitReference: FlightSceneReference = { id: 'reverse-orbit-zone', kind: 'zone', object: reverseOrbitField,
+    positionM: { ...reverseOrbitTarget }, sizeM: { x: REVERSE_ORBIT_MAX_RADIUS_M * 2,
+      y: REVERSE_ORBIT_TARGET_HEIGHT_M, z: REVERSE_ORBIT_MAX_RADIUS_M * 2 } }
+
   const landingSurface: FlightSceneReference = { id: 'landing-surface', kind: 'zone', object: landingTarget, positionM: { ...field.landing }, sizeM: { x: LANDING_ZONE_RADIUS_M * 2, y: 0, z: LANDING_ZONE_RADIUS_M * 2 } }
   const launchReference: FlightSceneReference = { id: 'training-launch', kind: 'pad', object: takeoffPad, positionM: { ...field.launch } }
-  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, recoveryReference, rollReference, flipReference, loopReference, splitReference, orbitReference, backwardReference]
+  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, recoveryReference, rollReference, flipReference, loopReference, splitReference, orbitReference, backwardReference, reverseOrbitReference]
   const referenceById = new Map(sceneReferences.map((reference) => [reference.id, reference]))
 
   const drone = createQuadVisual()
@@ -1404,7 +1593,8 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     splitField.visible = lessonId === 'split-s'
     orbitField.visible = lessonId === 'orbit'
     backwardField.visible = lessonId === 'backward-flight'
-    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'backward-flight'].includes(lessonId ?? '')
+    reverseOrbitField.visible = lessonId === 'reverse-orbit'
+    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'backward-flight', 'reverse-orbit'].includes(lessonId ?? '')
     for (const reference of referenceSet.contract) {
       reference.object.visible = !beginner
     }
@@ -1522,6 +1712,19 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     backwardNoseArrow.rotation.y = stage >= 3 ? Math.PI : 0
   }
 
+  const setReverseOrbitStage = (stage: number | null): void => {
+    if (stage === null || !Number.isInteger(stage) || stage < 0 || stage > 7) {
+      reverseAccent.visible = false
+      reverseExit.visible = false
+      return
+    }
+    reverseAccent.visible = true
+    reverseExit.visible = stage >= 6
+    reverseStageMaterial.color.set(stage >= 7 ? 0xb8f36b : stage >= 3 ? 0xffc978 : 0x45d7f7)
+    reverseAccent.position.set(0, stage === 0 ? -REVERSE_ORBIT_TARGET_HEIGHT_M + 0.1 : reverseFlightY,
+      stage <= 1 ? field.launch.z - reverseOrbitTarget.z : stage === 2 ? REVERSE_ORBIT_TARGET_RADIUS_M : 0)
+  }
+
   const setPath = (line: THREE.Line, path: readonly Vector3[], yOffset: number): void => {
     const maximumPoints = 1_200
     const stride = Math.max(1, Math.ceil(path.length / maximumPoints))
@@ -1574,6 +1777,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     setSplitSStage,
     setOrbitStage,
     setBackwardFlightStage,
+    setReverseOrbitStage,
     setTrainingPath,
     setReplayPath,
     dispose: () => disposeFlightScene(scene),

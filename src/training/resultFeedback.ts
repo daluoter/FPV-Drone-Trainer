@@ -1,3 +1,4 @@
+import { reverseOrbitResultFeedback } from './reverseOrbitFeedback'
 import { backwardFlightResultFeedback } from './backwardFlightFeedback'
 import {
   BASIC_RECOVERY_TARGET_HEIGHT_M as RECOVERY_TARGET_HEIGHT,
@@ -1027,6 +1028,8 @@ function phaseProgress(result: TrainingResult): { observedGap: string; nextPract
 /** Final-sample observations and checkpoint facts, never inferred causes or a claim about the whole flight. */
 export function summarizeTrainingResult(result: TrainingResult): TrainingResultFeedback {
   const scope = scopeNote(result)
+  const reverseOrbit = reverseOrbitResultFeedback(result, scope)
+  if (reverseOrbit) return reverseOrbit
   const backward = backwardFlightResultFeedback(result, scope)
   if (backward) return backward
   const orbit = orbitResultFeedback(result, scope)

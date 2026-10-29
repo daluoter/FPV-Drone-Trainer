@@ -61,6 +61,31 @@ function context(overrides: Partial<TrainingAttemptContext> = {}): TrainingAttem
 }
 
 describe('training progress persistence', () => {
+  it('adds L16 without rewriting accepted L15 or L17 records and keeps result conditions separate', () => {
+    const storage = new MemoryStorage()
+    const store = new TrainingProgressStore(storage)
+    const scope = context({ rulesVersion: 6, mode: 'practice' })
+    for (const lessonId of ['orbit', 'backward-flight']) store.recordResult(result({ lessonId,
+      sessionId: `${lessonId}:accepted`, attemptContext: scope }))
+    const before = store.loadCurrent(scope).progress.lessons
+    const empty = { recent: null, best: null, completed: false, attempts: 0 }
+    expect(before['reverse-orbit']).toEqual(empty)
+    expect(store.recordResult(result({ lessonId: 'reverse-orbit', sessionId: 'reverse-orbit:retry',
+      outcome: 'FAILED', score: 0, completedCheckpoints: 4, totalCheckpoints: 7,
+      metrics: { reverseOrbitPhase: 4, reverseOrbitCompletedLaps: 1 }, attemptContext: scope })).saved).toBe(true)
+    expect(store.recordResult(result({ lessonId: 'reverse-orbit', sessionId: 'reverse-orbit:passed',
+      completedCheckpoints: 7, totalCheckpoints: 7, metrics: { reverseOrbitPhase: 7,
+        reverseOrbitCompletedLaps: 3, reverseOrbitProgressDegrees: 1081 }, attemptContext: scope })).saved).toBe(true)
+    const loaded = new TrainingProgressStore(storage).loadCurrent(scope)
+    expect(loaded.errors).toEqual([])
+    expect(loaded.progress.lessons['reverse-orbit']).toMatchObject({ completed: true, attempts: 2,
+      best: { sessionId: 'reverse-orbit:passed', totalCheckpoints: 7 } })
+    for (const lessonId of ['orbit', 'backward-flight']) expect(loaded.progress.lessons[lessonId]).toEqual(before[lessonId])
+    for (const variant of [{ ...scope, mode: 'challenge' as const }, { ...scope, inputSource: 'keyboard' as const }]) {
+      expect(store.loadCurrent(variant).progress.lessons['reverse-orbit']).toEqual(empty)
+    }
+  })
+
   it('adds L17 independently while retaining accepted L15 and older raw records', () => {
     const storage = new MemoryStorage()
     const store = new TrainingProgressStore(storage)
@@ -213,7 +238,7 @@ describe('training progress persistence', () => {
     expect(loaded.progress.lessons['basic-recovery']).toMatchObject({ completed: true, attempts: 1, best: { sessionId: 'old-L10:passed', totalCheckpoints: 8 } })
 
     const active = LEARNING_LESSONS.map(({ id }) => ({ id, code: lessonLearningContent(id)?.code, progress: loaded.progress.lessons[id] }))
-    expect(active).toHaveLength(16)
+    expect(active).toHaveLength(17)
     expect(active.some(({ id }) => id === 'hover')).toBe(false)
     expect(active.some(({ id }) => id === 'full-flip')).toBe(false)
     expect(active.find(({ id }) => id === 'takeoff')).toMatchObject({ code: 'L01', progress: { completed: true, attempts: 2 } })

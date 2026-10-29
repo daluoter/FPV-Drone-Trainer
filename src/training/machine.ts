@@ -72,6 +72,7 @@ function copySample(sample: TrainingSample): TrainingSample {
     state: copyState(sample.state),
     normalizedInput: normalizedInput ? Object.freeze(normalizedInput) : null,
     ...(sample.armed === undefined ? {} : { armed: sample.armed }),
+    ...(sample.fpvCamera ? { fpvCamera: Object.freeze({ ...sample.fpvCamera }) } : {}),
     ...(sample.groundContact ? { groundContact: Object.freeze({ ...sample.groundContact }) } : {}),
   })
 }
@@ -151,6 +152,11 @@ function validSample(sample: TrainingSample): boolean {
   if (!validTimestamp(sample.timestampSeconds) || !isFiniteDroneState(sample.state)) return false
   if (sample.normalizedInput !== null && !isFiniteNormalizedRcInput(sample.normalizedInput)) return false
   if (sample.armed !== undefined && typeof sample.armed !== 'boolean') return false
+  if (sample.fpvCamera !== undefined && (
+    !Number.isFinite(sample.fpvCamera.fpvMountAngleDegrees)
+    || !Number.isFinite(sample.fpvCamera.fpvFovDegrees)
+    || sample.fpvCamera.fpvFovDegrees <= 0 || sample.fpvCamera.fpvFovDegrees >= 180
+  )) return false
   if (sample.groundContact !== undefined && (
     !Number.isFinite(sample.groundContact.heightM)
     || !Number.isFinite(sample.groundContact.supportOffsetM)

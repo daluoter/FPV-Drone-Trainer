@@ -1,5 +1,6 @@
 import { ORBIT_LEARNING_CONTENT } from './orbit'
 import { BACKWARD_FLIGHT_LEARNING_CONTENT } from './backwardFlight'
+import { REVERSE_ORBIT_LEARNING_CONTENT } from './reverseOrbit'
 import { LANDING_LEARNING_CONTENT } from './landing'
 import { STRAIGHT_LINE_LEARNING_CONTENT } from './straightLine'
 import { DIRECTION_CONTROL_LEARNING_CONTENT } from './directionControl'
@@ -79,6 +80,7 @@ const LEARNING_CONTENT: Readonly<Record<string, LessonLearningContent>> = {
   'split-s': SPLIT_S_LEARNING_CONTENT,
   orbit: ORBIT_LEARNING_CONTENT,
   'backward-flight': BACKWARD_FLIGHT_LEARNING_CONTENT,
+  'reverse-orbit': REVERSE_ORBIT_LEARNING_CONTENT,
 }
 
 export function lessonLearningContent(lessonId: string): LessonLearningContent | null {

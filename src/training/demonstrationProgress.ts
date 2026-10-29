@@ -7,6 +7,7 @@ import { lessonLearningContent } from './catalog'
 import type { TeachingDemonstration, TeachingDemonstrationKind } from './demonstrations'
 import { createTrainingFieldAnchors } from './field'
 import { createOrbitTarget } from './orbit'
+import { createReverseOrbitTarget } from './reverseOrbit'
 import { lessonById } from './lessons'
 import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample } from './types'
 
@@ -101,7 +102,7 @@ function axisProgress(demonstration: TeachingDemonstration): TeachingDemonstrati
 function observedSample(settings: TuningSettings, pose: ReplaySample, index: number, initial: ReturnType<typeof createInitialDroneState>): TrainingSample {
   const supportOffsetM = droneGroundSupport(settings.drone, pose.orientation).supportOffsetM
   return {
-    timestampSeconds: pose.timestampSeconds, armed: true, normalizedInput: pose.normalizedInput,
+    timestampSeconds: pose.timestampSeconds, armed: true, normalizedInput: pose.normalizedInput, fpvCamera: settings.camera,
     groundContact: { heightM: settings.drone.ground.heightM, supportOffsetM,
       touching: pose.positionM.y - supportOffsetM <= settings.drone.ground.heightM + GROUND_CONTACT_SLOP_M + 1e-5 },
     state: { ...initial, positionM: pose.positionM, orientation: pose.orientation, velocityMps: pose.velocityMps,
@@ -132,6 +133,7 @@ export function createDemonstrationProgress(
     { id: 'landing-surface', kind: 'ground', positionM: landing },
     { id: 'backward-zone', kind: 'zone', positionM: { x: launch.x, y: settings.drone.ground.heightM + 10, z: launch.z - 25 } },
     { id: 'orbit-zone', kind: 'zone', positionM: createOrbitTarget(launch, settings.drone.ground.heightM) },
+    { id: 'reverse-orbit-zone', kind: 'zone', positionM: createReverseOrbitTarget(launch, settings.drone.ground.heightM) },
   ]
   const firstTime = demonstration.recording.samples[0]?.timestampSeconds ?? 0
   const steps = lesson.checkpoints.map((checkpoint, index) => ({ id: checkpoint.id, title: checkpoint.title,
@@ -184,7 +186,7 @@ export function createDemonstrationProgress(
     // Complete-turn instruments follow each retained observation rather
     // than guessing progress from captions, elapsed time or the wrapped pose.
     const flip = demonstration.lessonId === 'full-flip' || demonstration.lessonId === 'front-flip' || demonstration.lessonId === 'back-flip'
-    if (changed || complete || demonstration.kind === 'full-roll' || flip || demonstration.kind === 'power-loop' || demonstration.kind === 'split-s' || demonstration.kind === 'orbit' || demonstration.kind === 'backward-flight') {
+    if (changed || complete || demonstration.kind === 'full-roll' || flip || demonstration.kind === 'power-loop' || demonstration.kind === 'split-s' || demonstration.kind === 'orbit' || demonstration.kind === 'reverse-orbit' || demonstration.kind === 'backward-flight') {
       const metrics: Readonly<Record<string, number>> | undefined = demonstration.kind === 'full-roll' ? {
         rollProgressDegrees: evaluation.metrics?.rollProgressDegrees ?? 0,
         rollSignedDegrees: evaluation.metrics?.rollSignedDegrees ?? 0,
@@ -215,6 +217,15 @@ export function createDemonstrationProgress(
         orbitRadiusM: evaluation.metrics?.orbitRadiusM ?? 0,
         orbitHeadingErrorDegrees: evaluation.metrics?.orbitHeadingErrorDegrees ?? 0,
         orbitDirection: evaluation.metrics?.orbitDirection ?? 0,
+      } : demonstration.kind === 'reverse-orbit' ? {
+        reverseOrbitPhase: evaluation.metrics?.reverseOrbitPhase ?? 0,
+        reverseOrbitProgressDegrees: evaluation.metrics?.reverseOrbitProgressDegrees ?? 0,
+        reverseOrbitCompletedLaps: evaluation.metrics?.reverseOrbitCompletedLaps ?? 0,
+        reverseOrbitRadiusM: evaluation.metrics?.reverseOrbitRadiusM ?? 0,
+        reverseOrbitViewElevationDegrees: evaluation.metrics?.reverseOrbitViewElevationDegrees ?? 0,
+        reverseOrbitTargetViewErrorDegrees: evaluation.metrics?.reverseOrbitTargetViewErrorDegrees ?? 0,
+        reverseOrbitExitDistanceM: evaluation.metrics?.reverseOrbitExitDistanceM ?? 0,
+        reverseOrbitDirection: evaluation.metrics?.reverseOrbitDirection ?? 0,
       } : demonstration.kind === 'backward-flight' ? {
         backwardPhase: evaluation.metrics?.backwardPhase ?? 0,
         backwardYawDegrees: evaluation.metrics?.backwardYawDegrees ?? 0,
@@ -234,7 +245,7 @@ export function createDemonstrationProgress(
       frames.push(frozenFrame(time, completed, false, '這段示範尚未完成全部課程步驟。', frames.at(-1)?.metrics))
       break
     }
-    if (complete && demonstration.kind !== 'orbit' && demonstration.kind !== 'backward-flight') break
+    if (complete && demonstration.kind !== 'orbit' && demonstration.kind !== 'reverse-orbit' && demonstration.kind !== 'backward-flight') break
     previous = sample
     previousFlight = sample
     previousEvaluation = evaluation

@@ -43,7 +43,7 @@ describe('Chinese-only axis demonstration names', () => {
 
 describe('separate front and back flip demonstrations', () => {
   it.each([
-    ['front-flip', 'L11 前翻'], ['back-flip', 'L12 後翻'], ['power-loop', 'L13 大迴旋'], ['split-s', 'L14 破S'], ['orbit', 'L15 正刷鍋'], ['backward-flight', 'L17 後退飛行'],
+    ['front-flip', 'L11 前翻'], ['back-flip', 'L12 後翻'], ['power-loop', 'L13 大迴旋'], ['split-s', 'L14 破S'], ['orbit', 'L15 正刷鍋'], ['reverse-orbit', 'L16 倒刷鍋'], ['backward-flight', 'L17 後退飛行'],
   ] as const)('binds %s to its own lesson and Chinese title', (kind, title) => {
     const demo = createTeachingDemonstration(createTuningPreset('beginner'), kind)
     expect(demo).toMatchObject({ kind, lessonId: kind, rulesVersion: 6 })

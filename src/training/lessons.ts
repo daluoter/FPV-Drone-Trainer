@@ -12,6 +12,7 @@ import { POWER_LOOP_LESSON } from './powerLoop'
 import { SPLIT_S_LESSON } from './splitS'
 import { ORBIT_LESSON } from './orbit'
 import { BACKWARD_FLIGHT_LESSON } from './backwardFlight'
+import { REVERSE_ORBIT_LESSON } from './reverseOrbit'
 import {
   hoverEvaluator,
 } from './evaluators'
@@ -141,6 +142,7 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
   BACK_FLIP_LESSON,
   POWER_LOOP_LESSON,
   BACKWARD_FLIGHT_LESSON,
+  REVERSE_ORBIT_LESSON,
 ]
 
 /** Legacy hover and combined-flip definitions remain available only for history. */

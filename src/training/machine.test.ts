@@ -87,9 +87,13 @@ describe('training state machine', () => {
     session.start(0)
     session.tick(0)
     const groundContact = { heightM: 0, supportOffsetM: 0.03, touching: false }
-    session.consumeSample({ ...indexedSample(1, 1), groundContact })
+    const fpvCamera = { fpvMountAngleDegrees: 10, fpvFovDegrees: 90 }
+    session.consumeSample({ ...indexedSample(1, 1), groundContact, fpvCamera })
     groundContact.heightM = 99
+    fpvCamera.fpvMountAngleDegrees = 40
     expect(session.getState().previousFlightSample?.groundContact?.heightM).toBe(0)
+    expect(session.getState().previousFlightSample?.fpvCamera).toEqual({ fpvMountAngleDegrees: 10, fpvFovDegrees: 90 })
+    expect(Object.isFrozen(session.getState().previousFlightSample?.fpvCamera)).toBe(true)
     const recovered = session.consumeSample(indexedSample(1.1, 2))
     expect(recovered.phase).toBe('ACTIVE')
     expect(recovered.previousSample).toBeNull()
@@ -227,6 +231,8 @@ describe('training state machine', () => {
     for (const invalid of [
       { ...base, state: { ...base.state, positionM: { x: Number.NaN, y: 3, z: 0 } } },
       { ...base, groundContact: { heightM: Number.NaN, supportOffsetM: 0.04, touching: true } },
+      { ...base, fpvCamera: { fpvMountAngleDegrees: Number.NaN, fpvFovDegrees: 90 } },
+      { ...base, fpvCamera: { fpvMountAngleDegrees: 10, fpvFovDegrees: 180 } },
     ]) {
       const evaluate = vi.fn(() => ({ status: 'continue' as const }))
       const lesson = { ...testLesson, evaluator: evaluate }

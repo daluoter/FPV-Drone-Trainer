@@ -105,7 +105,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if response is None or response.status != 200:
                 raise AssertionError("The production entry page did not return HTTP 200.")
             expect(page).to_have_title("FPV Drone Trainer")
-            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.28.2")
+            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.29.1")
             report["release"] = page.get_by_test_id("app-release").inner_text()
 
             asset_urls = page.locator("script[src], link[rel='stylesheet'][href]").evaluate_all(
@@ -271,13 +271,13 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(mode).to_have_value("practice")
             expect(lesson).to_have_value("takeoff")
             expect(lesson.locator("option:checked")).to_contain_text("L01")
-            expect(lesson.locator("option")).to_have_count(16)
+            expect(lesson.locator("option")).to_have_count(17)
             expect(lesson.locator("option[value='hover']")).to_have_count(0)
             expect(lesson.locator("option[value='full-flip']")).to_have_count(0)
             active_codes = lesson.locator("option").evaluate_all(
                 "options => options.map(option => option.textContent.trim().match(/^L\\d{2}/)?.[0])"
             )
-            if active_codes != ["L01", "L02", "L03", "L04", "L05", "L06", "L07", "L08", "L09", "L10", "L11", "L12", "L13", "L14", "L15", "L17"]:
+            if active_codes != ["L01", "L02", "L03", "L04", "L05", "L06", "L07", "L08", "L09", "L10", "L11", "L12", "L13", "L14", "L15", "L16", "L17"]:
                 raise AssertionError(f"Active course numbers do not match the merged curriculum: {active_codes}")
             report["active_course_codes"] = active_codes
             expect(training.get_by_role("heading", name="起飛與定點懸停", exact=True)).to_be_visible()
@@ -292,15 +292,16 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(lesson.locator("option[value='split-s']")).to_contain_text("L14")
             expect(lesson.locator("option[value='orbit']")).to_contain_text("L15")
             expect(lesson.locator("option[value='backward-flight']")).to_contain_text("L17")
-            expect(lesson.locator("option").filter(has_text=re.compile(r"^L16"))).to_have_count(0)
+            expect(lesson.locator("option[value='reverse-orbit']")).to_contain_text("L16")
             for option in lesson.locator("option").all_text_contents():
                 title = re.sub(r"^L\d{2}\s*[·：:]?\s*", "", option.strip())
                 if title != "破S" and re.search(r"[A-Za-z]", title):
                     raise AssertionError(f"A visible course title still contains English: {option}")
-            expect(flight.locator(".school-demo-toolbar").get_by_role("button")).to_have_count(19)
+            expect(flight.locator(".school-demo-toolbar").get_by_role("button")).to_have_count(20)
             expect(flight.get_by_role("button", name="L15 正刷鍋示範", exact=True)).to_be_visible()
+            expect(flight.get_by_role("button", name="L16 倒刷鍋示範", exact=True)).to_be_visible()
             expect(flight.get_by_role("button", name="L17 後退飛行示範", exact=True)).to_be_visible()
-            checks.append("Chinese course titles including 破S, sixteen active lessons with L16 reserved and nineteen distinct demonstrations")
+            checks.append("Chinese course titles including 破S, seventeen active lessons and twenty distinct demonstrations in course order")
             progress_before_waiting = training_progress(page)
             training.get_by_role("button", name="開始課程", exact=True).click()
             expect(phase).to_have_text("倒數準備")
@@ -1688,6 +1689,204 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             checks.append("L15 orbit progress, radius and target-heading instruments fit desktop, short desktop and mobile with the altitude/XYZ and playback banner")
             checks.append("L15 orbit selection and unchanged live checkpoints persist across reload and separate L00 roll playback")
 
+            lesson.select_option("reverse-orbit")
+            expect(training.get_by_role("heading", name="倒刷鍋", exact=True)).to_be_visible()
+            reverse_orbit_hud = flight.get_by_role("group", name="倒刷鍋即時狀態", exact=True)
+            reverse_orbit_fields = {
+                "completed_laps": flight.get_by_test_id("reverse-orbit-laps"),
+                "progress_degrees": flight.get_by_test_id("reverse-orbit-progress"),
+                "radius_m": flight.get_by_test_id("reverse-orbit-radius"),
+                "view_elevation_degrees": flight.get_by_test_id("reverse-orbit-view-elevation"),
+                "target_error_degrees": flight.get_by_test_id("reverse-orbit-target-error"),
+            }
+
+            def reverse_orbit_motion() -> dict:
+                values = {}
+                for key, field in reverse_orbit_fields.items():
+                    expect(field).to_be_visible()
+                    match = re.match(r"^[+-]?\d+(?:\.\d+)?", field.inner_text())
+                    if not match:
+                        raise AssertionError(f"L16 measured reverse_orbit readout is not numeric: {key}.")
+                    values[key] = float(match.group())
+                return values
+
+            original_reverse_orbit_canvas = canvas.element_handle()
+            before_reverse_orbit_demo = training_progress(page)
+            prior_reverse_orbit_steps = training.get_by_role("list", name="本課步驟", exact=True).get_by_role("listitem").all_text_contents()
+            if len(prior_reverse_orbit_steps) != 7:
+                raise AssertionError("L16 does not expose seven ground-to-three-circle checkpoints.")
+            expect(reverse_orbit_hud).to_contain_text("即時")
+            flight.get_by_role("button", name="L16 倒刷鍋示範", exact=True).click()
+            expect(flight.get_by_role("button", name="0.5×", exact=True)).to_have_attribute("aria-pressed", "true")
+            expect(arm).to_be_disabled()
+            expect(lesson).to_be_disabled()
+            flight.get_by_role("button", name="Pause", exact=True).click()
+            expect(reverse_orbit_hud).to_contain_text("回放")
+            timeline.press("Home")
+            demonstration_snapshot("L16", 7)
+            expect(altitude).to_have_text("0.0 m")
+            home_reverse_orbit = reverse_orbit_motion()
+            if abs(home_reverse_orbit["progress_degrees"]) > .05 or home_reverse_orbit["completed_laps"] != 0 or abs(home_reverse_orbit["radius_m"] - 30) > .15:
+                raise AssertionError(f"L16 does not begin at the actual ground launch relative to its target: {home_reverse_orbit}")
+            if screenshot:
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l16-demonstration-ground.png"))
+            timeline.press("End")
+            demonstration_snapshot("L16", 7, complete=True)
+            end_reverse_orbit = reverse_orbit_motion()
+            if end_reverse_orbit["progress_degrees"] < 1080 or end_reverse_orbit["completed_laps"] != 3 or end_reverse_orbit["radius_m"] < 13:
+                raise AssertionError(f"L16 completion does not show three full circles followed by an outward departure: {end_reverse_orbit}")
+            if float(altitude.inner_text().split()[0]) < 1.5:
+                raise AssertionError("L16 ends on the ground instead of recovering in flight.")
+            held_reverse_orbit_position = position_hud.inner_text()
+            paused_reverse_orbit_time = float(timeline.input_value())
+            page.wait_for_timeout(200)
+            if reverse_orbit_motion() != end_reverse_orbit or position_hud.inner_text() != held_reverse_orbit_position or abs(float(timeline.input_value()) - paused_reverse_orbit_time) > .02:
+                raise AssertionError("L16 paused ghost, movie clock or recorded reverse_orbit measurements kept advancing.")
+            if screenshot:
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l16-demonstration-end.png"))
+                flight.get_by_role("button", name="Chase", exact=True).click()
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l16-demonstration-chase.png"))
+                demo_progress.get_by_role("list", name="示範步驟", exact=True).get_by_role("button").nth(5).click()
+                flight.get_by_role("button", name="Free / debug", exact=True).click()
+                flight.get_by_role("button", name="定位飛機", exact=True).click()
+                canvas.scroll_into_view_if_needed()
+                reverse_orbit_bounds = canvas.bounding_box()
+                page.mouse.move(reverse_orbit_bounds["x"] + reverse_orbit_bounds["width"] * .7,
+                    reverse_orbit_bounds["y"] + reverse_orbit_bounds["height"] * .7)
+                page.mouse.wheel(0, 1700)
+                for _ in range(22):
+                    flight.get_by_role("button", name="升高鏡頭 1 m", exact=True).click()
+                for _ in range(10):
+                    flight.get_by_role("button", name="前移鏡頭 1 m", exact=True).click()
+                for _ in range(2):
+                    flight.get_by_role("button", name="左移鏡頭 1 m", exact=True).click()
+                page.wait_for_timeout(150)
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l16-reference-reverse-orbit-free.png"))
+                flight.get_by_role("button", name="FPV", exact=True).click()
+            reverse_orbit_chapters = demo_progress.get_by_role("list", name="示範步驟", exact=True).get_by_role("button")
+            expect(reverse_orbit_chapters).to_have_count(7)
+            recorded_laps = {}
+            for completed_laps in range(1, 4):
+                # The next chapter begins after the preceding full-circle proof.
+                reverse_orbit_chapters.nth(completed_laps + 3).click()
+                expect(flight.get_by_role("button", name="Play", exact=True)).to_be_enabled()
+                snapshot = demonstration_snapshot("L16", 7)
+                if snapshot["completed"] != completed_laps + 3:
+                    raise AssertionError(f"L16 lap {completed_laps} chapter has the wrong observed checkpoint count: {snapshot}")
+                lap = reverse_orbit_motion()
+                if lap["completed_laps"] != completed_laps or not (360 * completed_laps - .05 <= lap["progress_degrees"] < 360 * (completed_laps + 1)):
+                    raise AssertionError(f"L16 lap {completed_laps} chapter does not show {completed_laps} complete 360-degree circles: {lap}")
+                if not (4 <= lap["radius_m"] <= 35) or lap["view_elevation_degrees"] < 35 or lap["target_error_degrees"] > 45:
+                    raise AssertionError(f"L16 lap {completed_laps} is not an actual upward-looking crane orbit: {lap}")
+                recorded_laps[completed_laps] = {"time_seconds": float(timeline.input_value()), **lap}
+                if screenshot:
+                    flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / f"l16-demonstration-lap-{completed_laps}.png"))
+            # The third full circle still needs a separate actual outward departure.
+            expect(demo_progress).to_contain_text("6 / 7 個示範步驟完成")
+            reverse_orbit_chapters.nth(5).click()
+            expect(demo_progress).to_contain_text("5 / 7 個示範步驟完成")
+            two_laps = reverse_orbit_motion()
+            two_lap_time = float(timeline.input_value())
+            page.wait_for_timeout(200)
+            if abs(float(timeline.input_value()) - two_lap_time) > .02 or reverse_orbit_motion() != two_laps:
+                raise AssertionError("L16 two-circle chapter did not pause its own clock and measured path.")
+            reverse_orbit_chapters.nth(4).click()
+            expect(demo_progress).to_contain_text("4 / 7 個示範步驟完成")
+            if reverse_orbit_motion() != {key: recorded_laps[1][key] for key in reverse_orbit_fields} or abs(float(timeline.input_value()) - recorded_laps[1]["time_seconds"]) > .02:
+                raise AssertionError("L16 backward chapter seek kept future lap counts or measured dimensions.")
+            lap_one_position = {
+                "x_m": float(flight.get_by_test_id("flight-position-right").inner_text().split()[0]),
+                "z_m": float(flight.get_by_test_id("flight-position-z").inner_text().split()[0]),
+            }
+            middle_time = (recorded_laps[1]["time_seconds"] + recorded_laps[2]["time_seconds"]) / 2
+            timeline.evaluate("""(element, value) => {
+                Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(element, value);
+                element.dispatchEvent(new Event('input', { bubbles: true }));
+                element.dispatchEvent(new Event('change', { bubbles: true }));
+            }""", str(middle_time))
+            middle_motion = reverse_orbit_motion()
+            middle_position = {
+                "x_m": float(flight.get_by_test_id("flight-position-right").inner_text().split()[0]),
+                "z_m": float(flight.get_by_test_id("flight-position-z").inner_text().split()[0]),
+            }
+            if (not (360 <= middle_motion["progress_degrees"] < 720)
+                    or middle_motion["view_elevation_degrees"] < 35
+                    or middle_motion["target_error_degrees"] > 45
+                    or math.hypot(middle_position["x_m"] - lap_one_position["x_m"], middle_position["z_m"] - lap_one_position["z_m"]) < 8):
+                raise AssertionError(f"L16 does not actually travel to the opposite side of the crane while looking up: {middle_motion}, {middle_position}")
+            if screenshot:
+                flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l16-demonstration-opposite-side-fpv.png"))
+            reverse_orbit_chapters.nth(4).click()
+            report["reverse_orbit_course"] = {"lesson_id": "reverse-orbit", "course_code": "L16", "home": home_reverse_orbit,
+                "completed_lap_chapters": recorded_laps,
+                "opposite_side": {"time_seconds": middle_time, **middle_position, **middle_motion},
+                "end": {"time_seconds": paused_reverse_orbit_time, **end_reverse_orbit}}
+            report["reverse_orbit_hud_layouts"] = {}
+            for width, height in ((1280, 720), (1280, 600), (375, 720)):
+                page.set_viewport_size({"width": width, "height": height})
+                position_hud.scroll_into_view_if_needed()
+                viewport_bounds = flight.locator(".free-flight-viewport").bounding_box()
+                reverse_orbit_bounds = reverse_orbit_hud.bounding_box()
+                if not viewport_bounds or not reverse_orbit_bounds:
+                    raise AssertionError(f"L16 instruments have no layout bounds at {width}x{height}.")
+                if (reverse_orbit_bounds['x'] < viewport_bounds['x']
+                        or reverse_orbit_bounds['x'] + reverse_orbit_bounds['width'] > viewport_bounds['x'] + viewport_bounds['width']
+                        or reverse_orbit_bounds['y'] < viewport_bounds['y']
+                        or reverse_orbit_bounds['y'] + reverse_orbit_bounds['height'] > viewport_bounds['y'] + viewport_bounds['height']):
+                    raise AssertionError(f"L16 instruments overflow the viewport at {width}x{height}.")
+                for other, label in ((position_hud.bounding_box(), "position HUD"), (flight.locator(".flight-safe-overlay").bounding_box(), "playback banner")):
+                    if not other:
+                        raise AssertionError(f"L16 {label} has no bounds at {width}x{height}.")
+                    overlap_x = min(reverse_orbit_bounds['x'] + reverse_orbit_bounds['width'], other['x'] + other['width']) - max(reverse_orbit_bounds['x'], other['x'])
+                    overlap_y = min(reverse_orbit_bounds['y'] + reverse_orbit_bounds['height'], other['y'] + other['height']) - max(reverse_orbit_bounds['y'], other['y'])
+                    if overlap_x > 0 and overlap_y > 0:
+                        raise AssertionError(f"L16 instruments overlap {label} at {width}x{height}.")
+                # The high crane anchor projects near the top of the upward
+                # FPV view. Both instrument panels must leave that region clear.
+                position_bounds = position_hud.bounding_box()
+                if not position_bounds or min(reverse_orbit_bounds["y"], position_bounds["y"]) < viewport_bounds["y"] + 125:
+                    raise AssertionError(f"L16 instrument dock obscures the overhead crane reference at {width}x{height}.")
+                if page.evaluate("document.documentElement.scrollWidth > innerWidth + 1"):
+                    raise AssertionError(f"L16 controls or demonstration toolbar overflow the page at {width}x{height}.")
+                report["reverse_orbit_hud_layouts"][f"{width}x{height}"] = {"reverse_orbit_hud": reverse_orbit_bounds, "viewport": viewport_bounds}
+                if screenshot and width == 375:
+                    flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / "l16-hud-375.png"))
+            page.set_viewport_size({"width": 1280, "height": 720})
+            timeline.press("Home")
+            demonstration_snapshot("L16", 7)
+            expect(altitude).to_have_text("0.0 m")
+            if reverse_orbit_motion() != home_reverse_orbit:
+                raise AssertionError("L16 Home seek does not restore its own ground-start measurements.")
+            timeline.press("End")
+            demonstration_snapshot("L16", 7, complete=True)
+            flight.get_by_role("button", name="結束示範", exact=True).click()
+            expect(arm).to_be_enabled()
+            expect(disarm).to_be_disabled()
+            expect(reverse_orbit_hud).to_contain_text("即時")
+            expect(demo_progress).to_have_count(0)
+            expect(training.get_by_role("list", name="本課步驟", exact=True).get_by_role("listitem")).to_have_text(prior_reverse_orbit_steps)
+            if not original_reverse_orbit_canvas or not original_reverse_orbit_canvas.evaluate("element => element === document.querySelector('#free-flight canvas')"):
+                raise AssertionError("L16 demonstration replaced the shared live flight canvas.")
+            if training_progress(page) != before_reverse_orbit_demo:
+                raise AssertionError("L16 demonstration wrote a live attempt or saved result.")
+            flight.get_by_role("button", name="橫滾", exact=True).click()
+            flight.get_by_role("button", name="Pause", exact=True).click()
+            timeline.press("End")
+            demonstration_snapshot("L00", 5, complete=True)
+            expect(reverse_orbit_hud).to_have_count(0)
+            flight.get_by_role("button", name="結束示範", exact=True).click()
+            expect(reverse_orbit_hud).to_be_visible()
+            expect(lesson).to_have_value("reverse-orbit")
+            if training_progress(page) != before_reverse_orbit_demo:
+                raise AssertionError("L00 roll illustration changed the selected L16 result.")
+            page.reload(wait_until="networkidle")
+            expect(lesson).to_have_value("reverse-orbit")
+            source.select_option("keyboard")
+            expect(training.locator(".school-progress")).to_contain_text("已練 0 次")
+            checks.append("L16 physical upward-looking crane orbit, three measured full 360-degree laps, seven independent chapters and a separate actual departure; pause and rewind without live-result writes")
+            checks.append("L16 lower instrument dock preserves the overhead crane view on desktop, short desktop and mobile with altitude/XYZ and playback banner")
+            checks.append("L16 crane orbit selection and unchanged live checkpoints persist across reload and separate L00 roll playback")
+
             lesson.select_option("backward-flight")
             expect(training.get_by_role("heading", name="後退飛行", exact=True)).to_be_visible()
             backward_hud = flight.get_by_role("group", name="後退飛行即時狀態", exact=True)
@@ -1866,7 +2065,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 has=page.get_by_text("Position m", exact=True)
             ).locator("code")
             report["ground_start_positions"] = {}
-            for lesson_id in ("landing", "straight-line", "direction-control", "coordinated-turn", "square-route", "figure-eight", "wide-gate", "basic-recovery", "full-roll", "front-flip", "back-flip", "power-loop", "split-s", "orbit", "backward-flight"):
+            for lesson_id in ("landing", "straight-line", "direction-control", "coordinated-turn", "square-route", "figure-eight", "wide-gate", "basic-recovery", "full-roll", "front-flip", "back-flip", "power-loop", "split-s", "orbit", "reverse-orbit", "backward-flight"):
                 lesson.select_option(lesson_id)
                 training.get_by_role("button", name="開始課程", exact=True).click()
                 coords = [float(value.strip()) for value in position.inner_text().split(",")]
@@ -1894,7 +2093,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 expect(source).to_be_enabled()
             hud.uncheck()
             lesson.select_option("basic-recovery")
-            checks.append("L02/L03/L04/L05/L06/L07/L08/L09/L10/L11/L12/L13/L14/L15/L17 actual ground start, safe low-throttle arm and visible stage guidance")
+            checks.append("L02/L03/L04/L05/L06/L07/L08/L09/L10/L11/L12/L13/L14/L15/L16/L17 actual ground start, safe low-throttle arm and visible stage guidance")
 
             fullscreen = flight.locator(".school-fullscreen")
             fullscreen.click()

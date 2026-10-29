@@ -1,3 +1,4 @@
+import { reverseOrbitObjective, reverseOrbitRouteGuide, reverseOrbitTrainingHint } from './reverseOrbitFeedback'
 import { backwardFlightObjective, backwardFlightRouteGuide, backwardFlightTrainingHint } from './backwardFlightFeedback'
 import type { TrainingEvaluation } from './types'
 import { orbitObjective, orbitRouteGuide, orbitTrainingHint } from './orbitFeedback'
@@ -197,6 +198,16 @@ const METRICS: Readonly<Record<string, MetricDefinition>> = {
   backwardDistanceM: { label: '有效後退距離', unit: 'm', digits: 2 },
   backwardHoldSeconds: { label: '有效後退時間', unit: 's', digits: 2 },
   backwardRecoveryDwellSeconds: { label: '恢復控制確認', unit: 's', digits: 2 },
+  reverseOrbitCompletedLaps: { label: '已完成仰視環繞圈數', unit: '/ 3 圈', digits: 0 },
+  reverseOrbitProgressDegrees: { label: '累積仰視環繞角度', unit: '°', digits: 1 },
+  reverseOrbitRadiusM: { label: '起重機環繞半徑', unit: 'm', digits: 2 },
+  reverseOrbitViewElevationDegrees: { label: '實際鏡頭仰角', unit: '°', digits: 1 },
+  reverseOrbitTargetViewErrorDegrees: { label: '機臂偏離視線', unit: '°', digits: 1 },
+  reverseOrbitViewLimitDegrees: { label: '當前視角上限', unit: '°', digits: 1 },
+  reverseOrbitTangentialSpeedMps: { label: '環繞側向速度', unit: 'm/s', digits: 2 },
+  reverseOrbitExitDistanceM: { label: '完成三圈後向外飛離', unit: 'm', digits: 2 },
+  reverseOrbitRadialSpeedMps: { label: '往起重機外速度（外＋）', unit: 'm/s', digits: 2 },
+  reverseOrbitRecoveryDwellSeconds: { label: '恢復控制確認', unit: 's', digits: 2 },
   orbitRadiusM: { label: '繞行半徑', unit: 'm', digits: 2 },
   orbitProgressDegrees: { label: '累積盤旋角度', unit: '°', digits: 1 },
   orbitCompletedLaps: { label: '已完成盤旋圈數', unit: `/ ${ORBIT_REQUIRED_LAPS} 圈`, digits: 0 },
@@ -226,6 +237,11 @@ const LESSON_METRICS: Readonly<Record<string, readonly string[]>> = {
 }
 
 function metricPriorities(metrics: Readonly<Record<string, number>>, lessonId: string | null): readonly string[] {
+  if (lessonId === 'reverse-orbit') {
+    if (metrics.reverseOrbitPhase <= 1) return ['altitudeM', 'groundTouching', 'reverseOrbitRadiusM']
+    if (metrics.reverseOrbitCompleted > 0.5) return ['reverseOrbitCompletedLaps', 'reverseOrbitExitDistanceM', 'reverseOrbitRadialSpeedMps']
+    return ['reverseOrbitCompletedLaps', 'reverseOrbitViewElevationDegrees', 'reverseOrbitTargetViewErrorDegrees']
+  }
   if (lessonId === 'backward-flight') {
     if (metrics.backwardPhase <= 1) return ['altitudeM', 'groundTouching', 'horizontalSpeedMps']
     if (!(metrics.backwardEpisodeValid > 0.5) || metrics.backwardPhase === 2) return ['horizontalSpeedMps', 'backwardVelocityHeadingDegrees', 'altitudeM']
@@ -366,8 +382,8 @@ export function formatTrainingMetrics(
     const displayed = definition.transform?.(value) ?? value
     return [{
       key,
-      label: (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'power-loop' || lessonId === 'split-s' || lessonId === 'orbit' || lessonId === 'backward-flight' || isFullFlipLesson(lessonId)) && key === 'verticalSpeedMps' ? '升降速度（上＋／下−）'
-        : (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'power-loop' || lessonId === 'split-s' || lessonId === 'orbit' || lessonId === 'backward-flight' || isFullFlipLesson(lessonId)) && key === 'altitudeM' ? '離地高度'
+      label: (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'power-loop' || lessonId === 'split-s' || lessonId === 'orbit' || lessonId === 'backward-flight' || lessonId === 'reverse-orbit' || isFullFlipLesson(lessonId)) && key === 'verticalSpeedMps' ? '升降速度（上＋／下−）'
+        : (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'power-loop' || lessonId === 'split-s' || lessonId === 'orbit' || lessonId === 'backward-flight' || lessonId === 'reverse-orbit' || isFullFlipLesson(lessonId)) && key === 'altitudeM' ? '離地高度'
         : isFullFlipLesson(lessonId) && key === 'preparationDwellSeconds' ? '翻轉準備確認'
         : isFullFlipLesson(lessonId) && key === 'recoveryDwellSeconds' ? '正飛恢復確認'
         : lessonId === 'full-roll' && key === 'preparationDwellSeconds' ? '橫滾準備確認'
@@ -1141,6 +1157,7 @@ export function trainingObjective(
 ): TrainingObjective | null {
   const metrics = evaluation?.metrics ?? {}
   if (lessonId === 'backward-flight') return backwardFlightObjective(metrics)
+  if (lessonId === 'reverse-orbit') return reverseOrbitObjective(metrics)
   if (lessonId === 'orbit') return orbitObjective(metrics)
   if (lessonId === 'split-s') return splitSObjective(metrics)
   if (lessonId === 'power-loop') return powerLoopObjective(metrics)
@@ -1193,6 +1210,7 @@ export function trainingObjective(
 /** Short route instructions remain visible before a lesson starts. */
 export function trainingRouteGuide(lessonId: string | null): string | null {
   if (lessonId === 'backward-flight') return backwardFlightRouteGuide()
+  if (lessonId === 'reverse-orbit') return reverseOrbitRouteGuide()
   if (lessonId === 'orbit') return orbitRouteGuide()
   if (lessonId === 'split-s') return `地面自行起飛至至少 ${SPLIT_ENTRY_HEIGHT} m（建議約 ${SPLIT_TARGET_HEIGHT} m）→ 建立至少 ${SPLIT_ENTRY_SPEED} m/s 前速 → 向左或右橫滾半圈至倒置 → 後拉俯仰走下降半迴圈 → 反向飛往來路 → 拉平改出 → 空中恢復 ${SPLIT_HOLD} 秒。需先實際橫滾倒置，再下降至少 ${SPLIT_HEIGHT_LOSS} m 並往回移動至少 ${SPLIT_REVERSE} m；只偏航轉頭、原地前後翻或接地停住不能代替。練習區半徑 ${SPLIT_AREA_RADIUS} m，改出保留至少 ${SPLIT_MIN_HEIGHT} m，不要求回原點、穿窄門或降落。一般動作中斷後可重新進場，舊標記不代替新一段。引導練習不限時，挑戰 ${SPLIT_TIME_LIMIT} 秒。`
   if (lessonId === 'power-loop') return `地面自行起飛至至少 ${LOOP_ENTRY_HEIGHT} m（建議約 ${LOOP_TARGET_HEIGHT} m）→ 建立至少 ${LOOP_ENTRY_SPEED} m/s 前速 → 拉升 → 越頂倒置 → 下降 → 向前拉平改出 → 空中恢復 ${LOOP_HOLD} 秒。需真正飛出有高度與前後位移的垂直迴圈：拉升至少 ${LOOP_HEIGHT_GAIN} m、前後跨度至少 ${LOOP_SPAN} m、越頂後退至少 ${LOOP_REVERSE} m，且從頂點下降。原地後翻、純上下升降或反向拼湊不能代替。淡色迴圈是參考，不要求完美圓形、回原點、穿障礙或降落。練習區半徑 ${LOOP_AREA_RADIUS} m，改出保留至少 ${LOOP_MIN_HEIGHT} m；中斷後重新進場完成新一圈。引導練習不限時，挑戰 ${LOOP_TIME_LIMIT} 秒。`
@@ -1219,6 +1237,7 @@ export function trainingHint(
 ): string {
   const hint = evaluation?.hint?.trim()
   const message = evaluation?.message?.trim()
+  if (lessonId === 'reverse-orbit' && evaluation) return reverseOrbitTrainingHint(evaluation)
   if (lessonId === 'backward-flight' && evaluation) return backwardFlightTrainingHint(evaluation)
   if (lessonId === 'orbit' && evaluation && (Number.isFinite(evaluation.metrics?.orbitPhase) || /^正刷鍋/u.test(message ?? ''))) return orbitTrainingHint(evaluation)
   if (lessonId === 'split-s' && evaluation?.status === 'failure') {
