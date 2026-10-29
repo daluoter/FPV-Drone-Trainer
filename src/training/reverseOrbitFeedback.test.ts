@@ -21,7 +21,7 @@ const proof = { reverseOrbitPhase: 7, reverseOrbitEpisodeValid: 1, reverseOrbitC
 describe('L16 crane upward-orbit feedback', () => {
   it('teaches actual upward sightline, three full circles and a real airborne departure', () => {
     const guide = trainingRouteGuide('reverse-orbit')!
-    expect(guide).toMatch(/地面自行起飛.*10 m.*塔式起重機.*45 m.*3 個完整 360°.*1080°/)
+    expect(guide).toMatch(/地面自行起飛.*22\.5 m.*塔式起重機.*45 m.*3 個完整 360°.*1080°/)
     expect(guide).toContain('鏡頭仰視至少 35°')
     expect(guide).toContain('實際鏡頭安裝角')
     expect(guide).toContain('仰視不等於機腹朝天')

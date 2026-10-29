@@ -5,7 +5,7 @@ import type { LessonLearningContent } from './catalog'
 import type { LessonDefinition, LessonEvaluatorContract, TrainingEvaluation, TrainingEvaluationContext, TrainingSample } from './types'
 
 export const REVERSE_ORBIT_TARGET_HEIGHT_M = 45
-export const REVERSE_ORBIT_FLIGHT_HEIGHT_M = 10
+export const REVERSE_ORBIT_FLIGHT_HEIGHT_M = REVERSE_ORBIT_TARGET_HEIGHT_M / 2
 export const REVERSE_ORBIT_TARGET_RADIUS_M = 10
 export const REVERSE_ORBIT_MIN_RADIUS_M = 4
 export const REVERSE_ORBIT_MAX_RADIUS_M = 30
@@ -90,7 +90,7 @@ function terminal(message: string, metrics: Readonly<Record<string, number>> = {
 }
 function hint(phase: number, metrics: Readonly<Record<string, number>>): string {
   if (phase === 0) return '在起飛區實際接地、低油門明確解鎖後開始。'
-  if (phase === 1) return '自行起飛至約 10 m，再朝前方參考塔接近；至少 4 m 才能準備繞行。'
+  if (phase === 1) return `自行起飛至約 ${REVERSE_ORBIT_FLIGHT_HEIGHT_M} m（起重機塔高的一半），再朝前方參考塔接近；至少 4 m 才能準備繞行。`
   if (metrics.reverseOrbitEpisodeValid < 0.5) return `${metrics.reverseOrbitInterrupted > 0.5 ? '本次連續繞行已中斷並清空角度；先前步驟保留，但需要重新連續完成三圈。' : ''}到起重機旁約 10 m，抬高視線仰看高處機臂，再建立真正繞行。推力仍要有向上分量，不用把機腹翻朝天。`
   if (metrics.reverseOrbitCompleted < 0.5) return `持續仰視高處機臂並沿同一方向真正環繞，目前 ${metrics.reverseOrbitCompletedLaps}／3 圈、累積約 ${Math.floor(metrics.reverseOrbitProgressDegrees)}°。配合姿態與油門維持高度及半徑；原地轉機頭不能代替繞行。`
   if (phase < 7) return '三個完整圈已完成；朝塔外平穩離開至少 3 m，保持向外速度至少 0.5 m/s，修平姿態並減緩升降，確認 0.2 秒。原地停住不算離開。'
@@ -283,7 +283,7 @@ export const REVERSE_ORBIT_LESSON: LessonDefinition = {
   setup: { requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: ['training-launch', 'landing-surface', 'reverse-orbit-zone'], spawnOrientation: { x: 0, y: 0, z: 0, w: 1 } },
   checkpoints: [
     { id: 'reverse-orbit-ground', title: '地面開始', description: '在起飛區實際接地，明確解鎖。' },
-    { id: 'reverse-orbit-liftoff', title: '自行起飛至練習高度', description: '至少 4 m，建議約 10 m，再接近前方起重機。' },
+    { id: 'reverse-orbit-liftoff', title: '自行起飛至練習高度', description: `至少 4 m，建議升至約 ${REVERSE_ORBIT_FLIGHT_HEIGHT_M} m（起重機塔高的一半），再接近前方起重機。` },
     { id: 'reverse-orbit-entry', title: '仰視機臂並建立環繞', description: '距起重機約 10 m，抬高視線，將高處機臂保留在 FPV 視野，建立真正側向環繞。' },
     { id: 'reverse-orbit-lap-1', title: '仰視完成第一圈', description: '同方向實際繞行完整 360°，持續仰看高處機臂。' },
     { id: 'reverse-orbit-lap-2', title: '連續完成第二圈', description: '同一段仰視環繞累積至少 720°，保持實際移動。' },
@@ -293,12 +293,12 @@ export const REVERSE_ORBIT_LESSON: LessonDefinition = {
   success: { title: '倒刷鍋完成', description: '已觀察到持續仰視高處機臂的連續三圈與實際向外改出。', criteria: ['地面自行起飛', '仰視高處參照物真正環繞三圈', '實際向外飛離並恢復控制'] },
   failure: { title: '倒刷鍋尚未完成', description: '一般偏離可在空中重新準備；墜毀、上鎖或無效資料需要重試。', criteria: ['原地偏航不算環繞', '平視正刷鍋不能代替仰視環繞', '不能把中斷前後圈數拼成三圈'] },
   scoring: { maxScore: 100, minimumPassingScore: 70, minimumActiveSeconds: 0, metricLabels: ['reverseOrbitCompletedLaps', 'reverseOrbitProgressDegrees', 'reverseOrbitViewElevationDegrees', 'reverseOrbitTargetViewErrorDegrees', 'reverseOrbitRecoveryDwellSeconds'] },
-  hints: ['先自行起飛至約 10 m，仰視約 45 m 高的起重機機臂，在約 10 m 半徑真正環繞三圈；向外飛離後修平，不要求完美圓形、精準停點或降落。'],
+  hints: [`先自行起飛至約 ${REVERSE_ORBIT_FLIGHT_HEIGHT_M} m（起重機塔高的一半），仰視約 ${REVERSE_ORBIT_TARGET_HEIGHT_M} m 高的起重機機臂，在約 ${REVERSE_ORBIT_TARGET_RADIUS_M} m 半徑真正環繞三圈；向外飛離後修平，不要求完美圓形、精準停點或降落。`],
   evaluator: reverseOrbitEvaluator,
 }
 export const REVERSE_ORBIT_LEARNING_CONTENT: LessonLearningContent = {
   code: 'L16', title: '倒刷鍋', level: '花飛進階', prerequisiteIds: ['orbit'],
   objectives: ['分辨仰視與機體倒置，觀察高處起重機機臂。', '配合姿態與油門連續環繞三圈，再恢復控制。'],
-  steps: ['從地面自行起飛至約 10 m，找到前方起重機；至少 4 m 才開始環繞。', '到起重機旁約 10 m，建立左右任一方向的實際環繞。初版示範逐步讓機頭朝外並抬高，鏡頭仰看機臂；可先用 Chase 觀察機體與推力方向。', '保持高處機臂在實際 FPV 視野內，配合偏航追看參照物，並以油門支撐高度；推力朝圓心且保留向上分量，不需要翻成機腹朝天。', '每圈完整 360°，同方向連續完成三圈、累積至少 1080°；不用貼線或維持完美半徑。', '完成三圈後實際朝外飛離至少 3 m，向外速度至少 0.5 m/s，修平姿態並減緩升降，確認 0.2 秒。'],
+  steps: [`從地面自行起飛至約 ${REVERSE_ORBIT_FLIGHT_HEIGHT_M} m（起重機塔高的一半），找到前方起重機；至少 4 m 才開始環繞。`, '到起重機旁約 10 m，建立左右任一方向的實際環繞。初版示範逐步讓機頭朝外並抬高，鏡頭仰看機臂；可先用 Chase 觀察機體與推力方向。', '保持高處機臂在實際 FPV 視野內，配合偏航追看參照物，並以油門支撐高度；推力朝圓心且保留向上分量，不需要翻成機腹朝天。', '每圈完整 360°，同方向連續完成三圈、累積至少 1080°；不用貼線或維持完美半徑。', '完成三圈後實際朝外飛離至少 3 m，向外速度至少 0.5 m/s，修平姿態並減緩升降，確認 0.2 秒。'],
   commonMistakes: ['原地仰頭偏航，沒有真正繞起重機移動。', '只看天空，讓高處機臂離開視野。', '把仰視誤當成機腹朝天，讓推力朝下。', '左右反覆刷小段弧線，把局部動作當完整三圈。', '只顧方向，忽略半徑、高度與油門。'],
 }

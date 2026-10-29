@@ -11,7 +11,9 @@ import { createReverseOrbitTarget, REVERSE_ORBIT_LESSON, REVERSE_ORBIT_REQUIRED_
 import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample } from './types'
 
 const STEP_SECONDS = 1 / 240
-const ANGULAR_SPEED_RAD_PER_SECOND = 1.3
+// At half tower height, a steeper inward thrust vector keeps the jib visible
+// through the beginner preset's 10-degree FPV mount without changing its camera.
+const ANGULAR_SPEED_RAD_PER_SECOND = 1.45
 const RAMP_SECONDS = 3
 const DEPARTURE_DELAY_SECONDS = 1.5
 const DEPARTURE_SPEED_MPS = 3
@@ -19,7 +21,7 @@ const MAXIMUM_DURATION_SECONDS = 120
 const CAPACITY = 8_000
 const CAPTIONS = [
   '從地面自行起飛；倒刷鍋示範使用實際搖桿與同一套物理，觀看不計真人成績。',
-  '第 2 步：自行起飛至約 10 m，辨認高處塔式起重機及長機臂。',
+  `第 2 步：自行起飛至約 ${REVERSE_ORBIT_FLIGHT_HEIGHT_M} m（起重機塔高的一半），辨認高處塔式起重機及長機臂。`,
   '第 3 步：接近起重機旁約 10 m，逐漸建立側移、抬頭仰視機臂；推力仍斜向上並朝向圓心。',
   '第 4 步：已建立仰視環繞；持續看著高處機臂繞行，開始第 1 個完整圈。',
   '第 1 圈完成；持續仰視機臂，沿同一方向繼續第 2 圈。',

@@ -105,7 +105,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if response is None or response.status != 200:
                 raise AssertionError("The production entry page did not return HTTP 200.")
             expect(page).to_have_title("FPV Drone Trainer")
-            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.29.1")
+            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.29.2")
             report["release"] = page.get_by_test_id("app-release").inner_text()
 
             asset_urls = page.locator("script[src], link[rel='stylesheet'][href]").evaluate_all(
@@ -1735,8 +1735,8 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             end_reverse_orbit = reverse_orbit_motion()
             if end_reverse_orbit["progress_degrees"] < 1080 or end_reverse_orbit["completed_laps"] != 3 or end_reverse_orbit["radius_m"] < 13:
                 raise AssertionError(f"L16 completion does not show three full circles followed by an outward departure: {end_reverse_orbit}")
-            if float(altitude.inner_text().split()[0]) < 1.5:
-                raise AssertionError("L16 ends on the ground instead of recovering in flight.")
+            if not math.isclose(float(altitude.inner_text().split()[0]), 22.5, abs_tol=.75):
+                raise AssertionError("L16 does not recover near half the 45 m crane height (22.5 m).")
             held_reverse_orbit_position = position_hud.inner_text()
             paused_reverse_orbit_time = float(timeline.input_value())
             page.wait_for_timeout(200)
@@ -1754,7 +1754,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 page.mouse.move(reverse_orbit_bounds["x"] + reverse_orbit_bounds["width"] * .7,
                     reverse_orbit_bounds["y"] + reverse_orbit_bounds["height"] * .7)
                 page.mouse.wheel(0, 1700)
-                for _ in range(22):
+                for _ in range(9):
                     flight.get_by_role("button", name="升高鏡頭 1 m", exact=True).click()
                 for _ in range(10):
                     flight.get_by_role("button", name="前移鏡頭 1 m", exact=True).click()
@@ -1778,7 +1778,10 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                     raise AssertionError(f"L16 lap {completed_laps} chapter does not show {completed_laps} complete 360-degree circles: {lap}")
                 if not (4 <= lap["radius_m"] <= 35) or lap["view_elevation_degrees"] < 35 or lap["target_error_degrees"] > 45:
                     raise AssertionError(f"L16 lap {completed_laps} is not an actual upward-looking crane orbit: {lap}")
-                recorded_laps[completed_laps] = {"time_seconds": float(timeline.input_value()), **lap}
+                lap_altitude_m = float(altitude.inner_text().split()[0])
+                if not math.isclose(lap_altitude_m, 22.5, abs_tol=.75):
+                    raise AssertionError(f"L16 lap {completed_laps} is not near half the crane height: {lap_altitude_m} m.")
+                recorded_laps[completed_laps] = {"time_seconds": float(timeline.input_value()), "altitude_m": lap_altitude_m, **lap}
                 if screenshot:
                     flight.locator(".free-flight-viewport").screenshot(path=str(artifact_dir / f"l16-demonstration-lap-{completed_laps}.png"))
             # The third full circle still needs a separate actual outward departure.

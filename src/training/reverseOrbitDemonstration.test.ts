@@ -50,6 +50,7 @@ describe('actual upward-looking three-circle teaching recording', () => {
     const demo = createTeachingDemonstration(settings, 'reverse-orbit')
     const { launch } = createTrainingFieldAnchors(settings.drone)
     const target = createReverseOrbitTarget(launch, settings.drone.ground.heightM)
+    const halfCraneHeightM = (target.y - settings.drone.ground.heightM) / 2
     expect(demo).toMatchObject({ lessonId: 'reverse-orbit', rulesVersion: 6, physicsVersion: 1, source: 'simulated' })
     expect(demo.title).toContain('L16 倒刷鍋')
     expect(demo.recording.samples[0].positionM).toEqual(launch)
@@ -76,6 +77,8 @@ describe('actual upward-looking three-circle teaching recording', () => {
       expect(Object.values(pose.normalizedInput!).every(Number.isFinite)).toBe(true)
       expect(pose.controllerOutput.motorCommands.every((value) => value >= 0 && value <= 1)).toBe(true)
       if (pose.timestampSeconds > startAt + 1 && pose.timestampSeconds < exitAt) {
+        expect(pose.positionM.y - settings.drone.ground.heightM).toBeGreaterThan(halfCraneHeightM - 0.5)
+        expect(pose.positionM.y - settings.drone.ground.heightM).toBeLessThan(halfCraneHeightM + 0.5)
         const camera = calculateFpvCameraTransform(pose, settings.camera)
         const view = rotateVectorByQuaternion(camera.orientation, { x: 0, y: 0, z: -1 })
         const toTarget = { x: target.x - camera.position.x, y: target.y - camera.position.y, z: target.z - camera.position.z }
@@ -106,12 +109,13 @@ describe('actual upward-looking three-circle teaching recording', () => {
       const observed = observations.find(({ metrics }) => metrics?.reverseOrbitCompletedLaps === lap)!
       expect(observed.metrics?.reverseOrbitProgressDegrees).toBeGreaterThanOrEqual(lap * 360)
       expect(observed.metrics?.reverseOrbitProgressDegrees).toBeLessThan(lap * 360 + 3)
+      expect(observed.metrics?.reverseOrbitTargetViewErrorDegrees).toBeLessThan(settings.camera.fpvFovDegrees / 2 - 3)
       expect(observed.status).toBe('continue')
     }
     const end = demo.recording.samples.at(-1)!
     expect(Math.hypot(end.positionM.x - target.x, end.positionM.z - target.z)).toBeGreaterThan(17)
     expect(evaluation?.metrics?.reverseOrbitExitDistanceM).toBeGreaterThanOrEqual(3)
-    expect(end.positionM.y - settings.drone.ground.heightM).toBeCloseTo(10, 0)
+    expect(end.positionM.y - settings.drone.ground.heightM).toBeCloseTo(halfCraneHeightM, 0)
     expect(rotateVectorByQuaternion(end.orientation, { x: 0, y: 1, z: 0 }).y).toBeGreaterThan(Math.cos(5 * Math.PI / 180))
     expect(JSON.stringify(settings)).toBe(before)
   })
