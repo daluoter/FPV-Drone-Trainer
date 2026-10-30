@@ -209,8 +209,8 @@ export function createTeachingDemonstration(
       schemaVersion: 1, kind, lessonId: kind,
       rulesVersion: trainingRulesVersionForLesson(kind), physicsVersion: 1,
       presetId: identifyTuningPreset(settings), settingsFingerprint: fingerprintTrainingSettings(settings),
-      title: courseDemonstrationTitle(kind, '地面起飛、上拋收油、頂部進框與側面改出'),
-      description: '模擬示範，以實際搖桿、同一套物理與實體門框完成重力門；從頂部向下進框，再從指定側面飛出並恢復控制。真人練習全程自行操控，觀看不計通關。',
+      title: courseDemonstrationTitle(kind, '側向上拋、頂口下降與低層折返'),
+      description: '模擬示範，以實際搖桿、同一套物理與實體門框完成側向上拋；由水平頂口落入、下降至低層，再向來向折返，從同側出口飛出並恢復控制。真人練習全程自行操控，觀看不計通關。',
       source: 'simulated', recording, cues,
     })
   }

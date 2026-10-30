@@ -38,9 +38,9 @@ vi.mock('../rendering', () => {
     { id: 'orbit-poi', kind: 'poi', positionM: { x: 4, y: 2.5, z: 4 }, sizeM: { x: 0.36, y: 4, z: 0.36 } },
     { id: 'training-launch', kind: 'pad', positionM: { x: 0, y: 0.046, z: 0 } },
     { id: 'landing-surface', kind: 'zone', positionM: { x: 0, y: 0, z: -8 }, sizeM: { x: 3, y: 0, z: 3 } },
-    { id: 'gravity-gate-frame', kind: 'gate', positionM: { x: 0, y: 17, z: -40 }, sizeM: { x: 14, y: 14, z: 14 } },
-    { id: 'gravity-gate-top-entry', kind: 'marker', positionM: { x: 0, y: 24, z: -40 } },
-    { id: 'gravity-gate-side-exit', kind: 'marker', positionM: { x: 0, y: 17, z: -47 } },
+    { id: 'gravity-gate-frame', kind: 'gate', positionM: { x: 0, y: 9, z: -28 }, sizeM: { x: 8, y: 10, z: 8 } },
+    { id: 'gravity-gate-top-entry', kind: 'marker', positionM: { x: 0, y: 14, z: -28 } },
+    { id: 'gravity-gate-side-exit', kind: 'marker', positionM: { x: 4, y: 6.43, z: -28 } },
   ]
 
   class MockFlightRenderer {
@@ -353,6 +353,14 @@ describe('integrated training/runtime UI boundaries', () => {
     expect(within(training).getByText('引導目標完成！')).toBeInTheDocument()
     expect(within(training).getByText(`${steps} / ${steps} 個步驟完成`)).toBeInTheDocument()
     expect(persistedAttempts(lessonId)).toBe(1)
+    if (lessonId === 'gravity-gate') {
+      const savedRules = Object.entries(window.localStorage)
+        .filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.context.v1.'))
+        .map(([, raw]) => JSON.parse(raw) as { context?: { rulesVersion?: number }; progress?: { lessons?: Record<string, { attempts?: number }> } })
+        .filter((saved) => (saved.progress?.lessons?.['gravity-gate']?.attempts ?? 0) > 0)
+        .map((saved) => saved.context?.rulesVersion)
+      expect(savedRules).toEqual([7])
+    }
     expect(persistedAttempts('landing')).toBe(0)
     if (lessonId === 'power-loop' || lessonId === 'split-s') {
       expect(persistedAttempts('front-flip')).toBe(0)

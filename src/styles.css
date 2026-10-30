@@ -1854,6 +1854,8 @@ h1 em {
 .flight-gravity-gate-hud { width: 310px; }
 .flight-gravity-gate-hud > div { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px 12px; }
 .flight-gravity-gate-hud > small { display: block; color: #ffd182; font-size: 11px; }
+.flight-gravity-gate-hud .flight-gravity-gate-return { margin-top: 3px; color: #afc6c5; font-size: 10px; }
+.flight-gravity-gate-return b { display: inline; font-size: 11px; }
 /* Keep overhead teaching references clear above the instrument dock. */
 :is(.has-reverse-orbit-hud, .has-gravity-gate-hud) .flight-instruments { top: auto; bottom: 12px; align-items: flex-end; }
 :is(.has-reverse-orbit-hud, .has-gravity-gate-hud) .flight-position-hud > small,
@@ -1863,6 +1865,7 @@ h1 em {
 :is(.has-reverse-orbit-hud, .has-gravity-gate-hud) .flight-safe-overlay { top: 40%; }
 .school-viewport-hint.is-below-viewport { position: static; max-height: none; overflow: visible; }
 @media (max-width: 620px) {
+  .school-flight .free-flight-viewport.has-gravity-gate-hud { min-height: 350px; height: clamp(350px, 45vh, 480px); }
   .has-reverse-orbit-hud .flight-safe-overlay { top: 90px; }
   .has-gravity-gate-hud .flight-safe-overlay { top: 64px; }
 }

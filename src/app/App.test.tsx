@@ -59,6 +59,31 @@ describe('beginner flight school', () => {
       best: { sessionId: 'split-s:airborne-prototype', totalCheckpoints: 5 } })
   })
 
+  it('retains the old L19 straight-through result without completing the revised lower return route', () => {
+    const scope = { rulesVersion: 6, physicsVersion: 1, presetId: 'beginner',
+      settingsFingerprint: fingerprintTrainingSettings(createTuningPreset('beginner')),
+      inputSource: 'controller', mode: 'practice', assistance: 'none' } as const
+    const store = new TrainingProgressStore(window.localStorage)
+    expect(store.recordResult({ lessonId: 'gravity-gate', sessionId: 'gravity-gate:straight-through', outcome: 'SUCCESS',
+      score: 100, elapsedSeconds: 15, sampleCount: 926, completedCheckpoints: 8, totalCheckpoints: 8,
+      startedAtSeconds: 0, completedAtSeconds: 15, metrics: { gravityGatePhase: 8, gravityGateEntered: 1, gravityGateExited: 1 },
+      message: 'Historical straight-through route', hint: null, attemptContext: scope }).saved).toBe(true)
+    const key = trainingAttemptContextKey(scope)
+    const raw = window.localStorage.getItem(key)
+    saveLearningPreferences({ ...DEFAULT_LEARNING_PREFERENCES, lastLessonId: 'gravity-gate', introCompleted: true })
+    render(<App />)
+    expect(screen.getByLabelText('選擇課程')).toHaveValue('gravity-gate')
+    expect(screen.getByRole('heading', { name: '重力門' })).toBeInTheDocument()
+    const steps = screen.getByRole('list', { name: '本課步驟' })
+    expect(within(steps).getAllByRole('listitem')).toHaveLength(8)
+    expect(steps.querySelectorAll('.is-complete')).toHaveLength(0)
+    expect(screen.getByText(/本次條件已練 0 次/)).toBeInTheDocument()
+    expect(window.localStorage.getItem(key)).toBe(raw)
+    expect(store.load(scope).progress.lessons['gravity-gate']).toMatchObject({ completed: true, attempts: 1,
+      best: { sessionId: 'gravity-gate:straight-through', totalCheckpoints: 8 } })
+    expect(store.loadCurrent({ ...scope, rulesVersion: 7 }).progress.lessons['gravity-gate']).toMatchObject({ completed: false, attempts: 0 })
+  })
+
   it('keeps the same canvas while changing workspace and opens calibration on request', () => {
     render(<App />)
     const canvas = screen.getByLabelText('Free Flight 3D scene')

@@ -243,22 +243,34 @@ describe('Free Flight native navigation confirmation', () => {
     const base = createTrainingMachineState({ initialLessonId: 'gravity-gate' })
     const { rerender } = render(<FreeFlight {...props} trainingState={base} />)
     expect(screen.getByRole('group', { name: '重力門即時狀態' })).toHaveTextContent('即時重力門數值')
-    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ○ → 側面出 ○')
-    for (const id of ['gravity-gate-top-offset', 'gravity-gate-entry-x', 'gravity-gate-entry-z', 'gravity-gate-side-distance']) {
+    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ○ · 低層 ○ · 折返 ○ · 同側出 ○')
+    for (const id of ['gravity-gate-top-offset', 'gravity-gate-entry-x', 'gravity-gate-entry-z', 'gravity-gate-side-distance', 'gravity-gate-return-speed', 'gravity-gate-return-distance']) {
       expect(screen.getByTestId(id)).toHaveTextContent('—')
     }
     const observed: TrainingMachineState = { ...base, phase: 'ACTIVE', lastEvaluation: { status: 'continue', metrics: {
       gravityGatePhase: 6, gravityGateEntered: 1, gravityGateExited: 0,
+      gravityGateLowerReached: 0, gravityGateReturned: 0, gravityGateReturnSpeedMps: -2,
+      gravityGateReturnDistanceM: 0,
       gravityGateTopHeightDifferenceM: -2.5, gravityGateEntryHorizontalErrorM: 1.2,
       gravityGateEntryForwardErrorM: -1.7, gravityGateExitDistanceM: 5.3,
     } } }
     rerender(<FreeFlight {...props} trainingState={observed} />)
     expect(screen.getByTestId('gravity-gate-phase')).toHaveTextContent('6 / 8 步')
-    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ✓ → 側面出 ○')
+    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ✓ · 低層 ○ · 折返 ○ · 同側出 ○')
     expect(screen.getByTestId('gravity-gate-top-offset')).toHaveTextContent('-2.5 m')
     expect(screen.getByTestId('gravity-gate-entry-x')).toHaveTextContent('1.2 m')
     expect(screen.getByTestId('gravity-gate-entry-z')).toHaveTextContent('-1.7 m')
     expect(screen.getByTestId('gravity-gate-side-distance')).toHaveTextContent('5.3 m')
+    expect(screen.getByTestId('gravity-gate-return-speed')).toHaveTextContent('-2.0 m/s')
+    expect(screen.getByTestId('gravity-gate-return-distance')).toHaveTextContent('0.0 m')
+    const returning: TrainingMachineState = { ...observed, lastEvaluation: { status: 'continue', metrics: {
+      ...observed.lastEvaluation!.metrics, gravityGateLowerReached: 1, gravityGateReturned: 1,
+      gravityGateReturnSpeedMps: 1.2, gravityGateReturnDistanceM: 0.4,
+    } } }
+    rerender(<FreeFlight {...props} trainingState={returning} />)
+    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ✓ · 低層 ✓ · 折返 ✓ · 同側出 ○')
+    expect(screen.getByTestId('gravity-gate-return-speed')).toHaveTextContent('1.2 m/s')
+    expect(screen.getByTestId('gravity-gate-return-distance')).toHaveTextContent('0.4 m')
     const recovering = { ...observed, recoveryInProgress: true, lastRecovery: { timestampSeconds: 12,
       message: '頂入口錯過：當時右偏 8.2 m', hint: '拉開距離，重新帶速上拋。', metrics: { interruptionGravityGateEntryHorizontalErrorM: 8.2 } } }
     rerender(<FreeFlight {...props} trainingState={recovering} />)
@@ -275,7 +287,9 @@ describe('Free Flight native navigation confirmation', () => {
     expect(screen.queryByRole('group', { name: '重力門即時狀態' })).not.toBeInTheDocument()
     rerender(<FreeFlight {...props} trainingState={base} />)
     expect(screen.getByTestId('gravity-gate-top-offset')).toHaveTextContent('—')
-    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ○ → 側面出 ○')
+    expect(screen.getByTestId('gravity-gate-return-speed')).toHaveTextContent('—')
+    expect(screen.getByTestId('gravity-gate-return-distance')).toHaveTextContent('—')
+    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ○ · 低層 ○ · 折返 ○ · 同側出 ○')
   })
 
   it('plays eight measured gravity-gate steps and rewinds passage proof without updating live flight or saved results', () => {
@@ -289,7 +303,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(hud()).toHaveTextContent('即時')
     expect(frameVisible()).toBe(true)
     const physicalFrame = frames.runtime!.simulation.getStaticObstacles()
-    expect(physicalFrame).toHaveLength(12)
+    expect(physicalFrame).toHaveLength(16)
     const liveSteps = screen.getByRole('list', { name: '本課步驟' }).textContent
     const stored = () => Object.fromEntries(Object.entries(window.localStorage).filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.')))
     const before = stored()
@@ -302,7 +316,8 @@ describe('Free Flight native navigation confirmation', () => {
     const chapters = within(progress).getAllByRole('button')
     expect(chapters).toHaveLength(8)
     fireEvent.click(chapters[6])
-    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ✓ → 側面出 ○')
+    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ✓ · 低層 ○ · 折返 ○ · 同側出 ○')
+    expect(Number.parseFloat(screen.getByTestId('gravity-gate-return-speed').textContent!)).toBeLessThan(0)
     const playback = frames.runtime!.getReplayPlayback()!
     const pausedTime = playback.getState().currentTimeSeconds
     const held = hud().textContent
@@ -314,12 +329,16 @@ describe('Free Flight native navigation confirmation', () => {
     fireEvent.change(screen.getByRole('slider'), { target: { value: playback.durationSeconds } })
     expect(progress).toHaveTextContent('8 / 8 個示範步驟完成')
     expect(screen.getByTestId('gravity-gate-phase')).toHaveTextContent('8 / 8 步')
-    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ✓ → 側面出 ✓')
+    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ✓ · 低層 ✓ · 折返 ✓ · 同側出 ✓')
     expect(Number.parseFloat(screen.getByTestId('gravity-gate-side-distance').textContent!)).toBeLessThan(0)
+    expect(Number.parseFloat(screen.getByTestId('gravity-gate-return-distance').textContent!)).toBeGreaterThanOrEqual(0.3)
+    fireEvent.click(chapters[7])
+    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ✓ · 低層 ✓ · 折返 ✓ · 同側出 ✓')
+    expect(Number.parseFloat(screen.getByTestId('gravity-gate-return-speed').textContent!)).toBeGreaterThanOrEqual(0.5)
     fireEvent.click(chapters[6])
-    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ✓ → 側面出 ○')
+    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ✓ · 低層 ○ · 折返 ○ · 同側出 ○')
     fireEvent.change(screen.getByRole('slider'), { target: { value: 0 } })
-    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ○ → 側面出 ○')
+    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ○ · 低層 ○ · 折返 ○ · 同側出 ○')
     expect(progress).not.toHaveTextContent('8 / 8 個示範步驟完成')
     fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
     expect(screen.getByRole('list', { name: '本課步驟' }).textContent).toBe(liveSteps)
@@ -1025,9 +1044,9 @@ describe('Free Flight native navigation confirmation', () => {
   })
 
   it.each([
-    { lessonId: 'wide-gate', code: 'L08', fieldName: 'wide-gate-field', demoLabel: 'L08 穿門示範' },
-    { lessonId: 'gravity-gate', code: 'L19', fieldName: 'gravity-gate-field', demoLabel: 'L19 重力門示範' },
-  ])('keeps visible $code frames aligned with live colliders through Reset, Arm, replay and course changes', ({ lessonId, fieldName, demoLabel }) => {
+    { lessonId: 'wide-gate', code: 'L08', fieldName: 'wide-gate-field', colliderCount: 12, demoLabel: 'L08 穿門示範' },
+    { lessonId: 'gravity-gate', code: 'L19', fieldName: 'gravity-gate-field', colliderCount: 16, demoLabel: 'L19 重力門示範' },
+  ])('keeps visible $code frames aligned with live colliders through Reset, Arm, replay and course changes', ({ lessonId, fieldName, demoLabel, colliderCount }) => {
     const settings = createDefaultTuningSettings()
     const props = { poller: createBrowserGamepadPoller(), profile: null, settings }
     const selected = createTrainingMachineState({ initialLessonId: lessonId })
@@ -1035,21 +1054,21 @@ describe('Free Flight native navigation confirmation', () => {
     const canvas = screen.getByLabelText('Free Flight 3D scene')
     const colliders = () => frames.runtime!.simulation.getStaticObstacles()
     const field = () => frames.renderer!.flightScene.scene.getObjectByName(fieldName)!
-    expect(colliders()).toHaveLength(12)
+    expect(colliders()).toHaveLength(colliderCount)
     expect(field().visible).toBe(true)
     fireEvent.click(screen.getByRole('button', { name: /^Reset$/ }))
     expect(colliders()).toHaveLength(0)
     fireEvent.change(screen.getByLabelText('控制方式'), { target: { value: 'keyboard' } })
     fireEvent.click(screen.getByRole('button', { name: /^Arm$/ }))
     expect(frames.runtime!.getTelemetry().armed).toBe(true)
-    expect(colliders()).toHaveLength(12)
+    expect(colliders()).toHaveLength(colliderCount)
     // Next-lesson navigation can update selection and request disarm together.
     rerender(<FreeFlight {...props} trainingDisarmKey={1} trainingState={createTrainingMachineState({ initialLessonId: 'figure-eight' })} />)
     expect(frames.runtime!.getTelemetry().armed).toBe(false)
     expect(colliders()).toHaveLength(0)
     expect(field().visible).toBe(false)
     rerender(<FreeFlight {...props} trainingDisarmKey={1} trainingState={selected} />)
-    expect(colliders()).toHaveLength(12)
+    expect(colliders()).toHaveLength(colliderCount)
     const before = frames.runtime!.getTelemetry().state
     const savedEnvironment = colliders()
     fireEvent.click(screen.getByRole('button', { name: demoLabel }))
@@ -1060,13 +1079,13 @@ describe('Free Flight native navigation confirmation', () => {
     expect(selected.checkpoints).toEqual({})
     expect(selected.result).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
-    expect(colliders()).toHaveLength(12)
+    expect(colliders()).toHaveLength(colliderCount)
     expect(field().visible).toBe(true)
     rerender(<FreeFlight {...props} trainingState={createTrainingMachineState({ initialLessonId: 'figure-eight' })} />)
     expect(colliders()).toHaveLength(0)
     expect(field().visible).toBe(false)
     rerender(<FreeFlight {...props} trainingState={selected} />)
-    expect(colliders()).toHaveLength(12)
+    expect(colliders()).toHaveLength(colliderCount)
     rerender(<FreeFlight {...props} trainingState={null} />)
     expect(colliders()).toHaveLength(0)
     expect(field().visible).toBe(false)

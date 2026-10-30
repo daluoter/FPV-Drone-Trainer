@@ -6,7 +6,7 @@ import { GROUND_CONTACT_SLOP_M } from '../simulation/dynamics'
 import { findSweptObstacleHit } from '../simulation/obstacles'
 import type { TuningSettings } from '../tuning/config'
 import { createTuningPreset } from '../tuning/presets'
-import { createGravityGate, gravityGateExitCrossing, gravityGateTopCrossing } from '../world/gravityGate'
+import { createGravityGate, gravityGateExitCrossing, gravityGateLowerCrossing, gravityGateTopCrossing } from '../world/gravityGate'
 import { createDemonstrationProgress, demonstrationProgressAt } from './demonstrationProgress'
 import { createTeachingDemonstration, teachingGravityGatePhaseAt } from './demonstrations'
 import { createTrainingFieldAnchors } from './field'
@@ -44,7 +44,7 @@ function evaluateRecording(settings: TuningSettings, demo: ReturnType<typeof cre
 }
 
 describe('actual gravity-gate teaching recording', () => {
-  it.each(['beginner', 'standard', 'raised-field'] as const)('throws upward, cuts throttle, drops through the top and escapes the side with %s settings', (preset) => {
+  it.each(['beginner', 'standard', 'raised-field'] as const)('approaches from the side, drops through the top, then reverses through the same lower side with %s settings', (preset) => {
     const base = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
     const settings = preset === 'raised-field' ? { ...base, drone: { ...base.drone,
       ground: { ...base.drone.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 35, z: -3 } } } : base
@@ -52,7 +52,7 @@ describe('actual gravity-gate teaching recording', () => {
     const demo = createTeachingDemonstration(settings, 'gravity-gate')
     const { launch } = createTrainingFieldAnchors(settings.drone)
     const gate = createGravityGate(launch, settings.drone.ground.heightM)
-    expect(demo).toMatchObject({ lessonId: 'gravity-gate', rulesVersion: 6, physicsVersion: 1, source: 'simulated' })
+    expect(demo).toMatchObject({ lessonId: 'gravity-gate', rulesVersion: 7, physicsVersion: 1, source: 'simulated' })
     expect(demo.title).toContain('L19 重力門')
     expect(demo.recording.samples[0].positionM).toEqual(launch)
     expect(demo.recording).toMatchObject({ capacity: 5_000, decimation: 4, droppedSamples: 0 })
@@ -64,7 +64,9 @@ describe('actual gravity-gate teaching recording', () => {
     expect(demo.cues.every((cue) => times.has(cue.timeSeconds) && cue.targetReferenceId === gate.id)).toBe(true)
     expect(demo.cues.at(-1)).toMatchObject({ timeSeconds: demo.recording.durationSeconds, gravityGatePhase: 8 })
     let topAt: number | null = null
+    let lowerAt: number | null = null
     let exitAt: number | null = null
+    let returnAt: number | null = null
     let sawCutWhileRising = false
     let maxAltitude = 0
     let peakRiseSpeed = 0
@@ -89,21 +91,45 @@ describe('actual gravity-gate teaching recording', () => {
       )).toBeLessThan(0.006)
       expect(findSweptObstacleHit(previous.positionM, pose.positionM, 0.3, gate.colliders)).toBeNull()
       const top = gravityGateTopCrossing(previous.positionM, pose.positionM, gate, 0.3)
-      if (top?.insideOpening) topAt ??= pose.timestampSeconds
+      if (top?.insideOpening) {
+        topAt ??= pose.timestampSeconds
+        expect(pose.velocityMps.x).toBeLessThan(-0.5)
+        expect(Math.abs(top.positionM.z - gate.centerM.z)).toBeLessThan(1)
+      }
+      const lower = gravityGateLowerCrossing(previous.positionM, pose.positionM, gate, 0.3)
+      if (lower?.insideOpening && topAt !== null) {
+        lowerAt ??= pose.timestampSeconds
+        expect(pose.velocityMps.x).toBeLessThan(0.25)
+      }
+      // Brake while descending; begin the visible reversal only in the lower
+      // level. An early yaw without actual movement cannot stand in for this.
+      if (topAt !== null && lowerAt === null) expect(pose.velocityMps.x).toBeLessThan(0.25)
+      if (lowerAt !== null && pose.velocityMps.x >= 0.5) returnAt ??= pose.timestampSeconds
       const exit = gravityGateExitCrossing(previous.positionM, pose.positionM, gate, 0.3)
-      if (exit?.insideOpening && topAt !== null) exitAt ??= pose.timestampSeconds
+      if (exit?.insideOpening && topAt !== null) {
+        exitAt ??= pose.timestampSeconds
+        expect(pose.velocityMps.x).toBeGreaterThan(0.5)
+        expect(exit.positionM.y).toBeGreaterThan(gate.lowerExitMinY + 0.3)
+        expect(exit.positionM.y).toBeLessThan(gate.lowerExitMaxY - 0.3)
+      }
     }
     expect(sawCutWhileRising).toBe(true)
     expect(peakRiseSpeed).toBeGreaterThan(8)
-    expect(maxAltitude).toBeGreaterThan(26)
+    expect(maxAltitude).toBeGreaterThan(16)
+    expect(maxAltitude).toBeLessThan(19)
     expect(topAt).not.toBeNull()
+    expect(lowerAt).not.toBeNull()
+    expect(returnAt).not.toBeNull()
     expect(exitAt).not.toBeNull()
-    expect(exitAt!).toBeGreaterThan(topAt!)
+    expect(lowerAt!).toBeGreaterThan(topAt!)
+    expect(returnAt!).toBeGreaterThan(lowerAt!)
+    expect(exitAt!).toBeGreaterThan(returnAt!)
     const { evaluation, checkpoints } = evaluateRecording(settings, demo)
     expect(evaluation?.status).toBe('success')
     expect(GRAVITY_GATE_PHASE_IDS.every((id) => checkpoints[id]?.completed)).toBe(true)
     const end = demo.recording.samples.at(-1)!
-    expect(end.positionM.z).toBeLessThan(gate.exitZ)
+    expect(end.positionM.x).toBeGreaterThan(gate.exitX)
+    expect(rotateVectorByQuaternion(end.orientation, { x: 0, y: 0, z: -1 }).x).toBeGreaterThan(0.9)
     expect(rotateVectorByQuaternion(end.orientation, { x: 0, y: 1, z: 0 }).y).toBeGreaterThan(Math.cos(45 * Math.PI / 180))
     expect(Math.abs(end.velocityMps.y)).toBeLessThan(6)
     expect(JSON.stringify(settings)).toBe(before)
@@ -138,6 +164,14 @@ describe('actual gravity-gate teaching recording', () => {
     expect(beforeEntry.complete).toBe(false)
     expect(beforeEntry.completedSteps).toBeLessThan(6)
     expect(demonstrationProgressAt(timeline, 0).completedSteps).toBeLessThan(2)
+    const enteredFrame = timeline.frames.find((frame) => frame.metrics?.gravityGateEntered === 1 && frame.metrics?.gravityGateLowerReached === 0)!
+    const lowerFrame = timeline.frames.find((frame) => frame.metrics?.gravityGateLowerReached === 1 && frame.metrics?.gravityGateReturned === 0)!
+    const returnedFrame = timeline.frames.find((frame) => frame.metrics?.gravityGateReturned === 1 && frame.metrics?.gravityGateExited === 0)!
+    expect(lowerFrame.timeSeconds).toBeGreaterThan(enteredFrame.timeSeconds)
+    expect(returnedFrame.timeSeconds).toBeGreaterThan(lowerFrame.timeSeconds)
+    expect(demonstrationProgressAt(timeline, returnedFrame.timeSeconds).metrics).toMatchObject({ gravityGateLowerReached: 1, gravityGateReturned: 1, gravityGateExited: 0 })
+    expect(demonstrationProgressAt(timeline, enteredFrame.timeSeconds).metrics).toMatchObject({ gravityGateEntered: 1, gravityGateLowerReached: 0, gravityGateReturned: 0, gravityGateExited: 0 })
+    expect(demonstrationProgressAt(timeline, 0).metrics).toMatchObject({ gravityGateEntered: 0, gravityGateLowerReached: 0, gravityGateReturned: 0, gravityGateExited: 0 })
     const truncated = { ...demo, recording: { ...demo.recording,
       samples: demo.recording.samples.filter((pose) => pose.timestampSeconds <= entry.startedAtSeconds!),
       durationSeconds: entry.startedAtSeconds! } }

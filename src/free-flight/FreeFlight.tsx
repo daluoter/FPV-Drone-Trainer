@@ -758,13 +758,14 @@ export default function FreeFlight({
               </div>}
               {showGravityGateHud && <div className="flight-recovery-hud flight-gravity-gate-hud" role="group" aria-label="重力門即時狀態">
                 <strong>{telemetry?.replay.active ? '回放重力門數值' : '即時重力門數值'} · <span data-testid="gravity-gate-phase">{format(gravityGateMetrics?.gravityGatePhase ?? 0, 0)} / 8 步</span></strong>
-                <small data-testid="gravity-gate-status">頂部入 {gravityGateMetrics?.gravityGateEntered === 1 ? '✓' : '○'} → 側面出 {gravityGateMetrics?.gravityGateExited === 1 ? '✓' : '○'}</small>
+                <small data-testid="gravity-gate-status">頂部入 {gravityGateMetrics?.gravityGateEntered === 1 ? '✓' : '○'} · 低層 {gravityGateMetrics?.gravityGateLowerReached === 1 ? '✓' : '○'} · 折返 {gravityGateMetrics?.gravityGateReturned === 1 ? '✓' : '○'} · 同側出 {gravityGateMetrics?.gravityGateExited === 1 ? '✓' : '○'}</small>
                 <div>
                   <span>高於頂入口（＋）<b data-testid="gravity-gate-top-offset">{format(gravityGateMetrics?.gravityGateTopHeightDifferenceM, 1)} m</b></span>
-                  <span>距側面出口<b data-testid="gravity-gate-side-distance">{format(gravityGateMetrics?.gravityGateExitDistanceM, 1)} m</b></span>
+                  <span>距低層回程出口<b data-testid="gravity-gate-side-distance">{format(gravityGateMetrics?.gravityGateExitDistanceM, 1)} m</b></span>
                   <span>入口左右偏差（右＋）<b data-testid="gravity-gate-entry-x">{format(gravityGateMetrics?.gravityGateEntryHorizontalErrorM, 1)} m</b></span>
                   <span>入口前後偏差（後＋）<b data-testid="gravity-gate-entry-z">{format(gravityGateMetrics?.gravityGateEntryForwardErrorM, 1)} m</b></span>
                 </div>
+                <small className="flight-gravity-gate-return">回向速度（＋X） <b data-testid="gravity-gate-return-speed">{format(gravityGateMetrics?.gravityGateReturnSpeedMps, 1)} m/s</b> · 回程 <b data-testid="gravity-gate-return-distance">{format(gravityGateMetrics?.gravityGateReturnDistanceM, 1)} m</b></small>
               </div>}
               {showBackwardHud && <div className="flight-recovery-hud flight-backward-hud" role="group" aria-label="後退飛行即時狀態">
                 <strong>{telemetry?.replay.active ? '回放後退飛行數值' : '即時後退飛行數值'}</strong>

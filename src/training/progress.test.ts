@@ -61,6 +61,75 @@ function context(overrides: Partial<TrainingAttemptContext> = {}): TrainingAttem
 }
 
 describe('training progress persistence', () => {
+  it('keeps rule-6 L19 records historical while rule-7 gravity-gate progress starts separately', () => {
+    const storage = new MemoryStorage()
+    const store = new TrainingProgressStore(storage)
+    const baseline = context({ rulesVersion: 4, mode: 'practice' })
+    const routes = { ...baseline, rulesVersion: 5 } as const
+    const previous = { ...baseline, rulesVersion: 6 } as const
+    const revised = { ...baseline, rulesVersion: 7 } as const
+    expect(store.recordResult(result({ lessonId: 'takeoff', sessionId: 'takeoff:accepted', attemptContext: baseline })).saved).toBe(true)
+    expect(store.recordResult(result({ lessonId: 'wide-gate', sessionId: 'wide-gate:accepted', attemptContext: routes })).saved).toBe(true)
+    for (const lessonId of ['full-roll', 'reverse-orbit', 'backward-flight', 'gravity-gate']) {
+      expect(store.recordResult(result({ lessonId, sessionId: `${lessonId}:rule-6`, attemptContext: previous,
+        completedCheckpoints: 8, totalCheckpoints: 8, metrics: { gravityGatePhase: 8, gravityGateExited: 1 } })).saved).toBe(true)
+    }
+    const previousKey = trainingAttemptContextKey(previous)
+    const revisedKey = trainingAttemptContextKey(revised)
+    const originalScopes = [baseline, routes, previous].map((scope) => ({ key: trainingAttemptContextKey(scope),
+      raw: storage.getItem(trainingAttemptContextKey(scope)) }))
+    const historical = store.load(previous).progress.lessons['gravity-gate']
+    const empty = { recent: null, best: null, completed: false, attempts: 0 }
+    const current = new TrainingProgressStore(storage).loadCurrent(revised)
+    expect(current.errors).toEqual([])
+    expect(current.progress.lessons['gravity-gate']).toEqual(empty)
+    expect(storage.getItem(revisedKey)).toBeNull()
+    for (const lessonId of ['takeoff', 'wide-gate', 'full-roll', 'reverse-orbit', 'backward-flight']) {
+      expect(current.progress.lessons[lessonId]).toMatchObject({ completed: true, attempts: 1,
+        best: { sessionId: lessonId === 'takeoff' || lessonId === 'wide-gate' ? `${lessonId}:accepted` : `${lessonId}:rule-6` } })
+    }
+    for (const { key, raw } of originalScopes) expect(storage.getItem(key)).toBe(raw)
+
+    expect(store.recordResult(result({ lessonId: 'gravity-gate', sessionId: 'gravity-gate:rule-7-retry',
+      attemptContext: revised, outcome: 'FAILED', score: 0, completedCheckpoints: 4, totalCheckpoints: 8 })).saved).toBe(true)
+    expect(store.loadCurrent(revised).progress.lessons['gravity-gate']).toMatchObject({ completed: false, attempts: 1, best: null })
+    expect(store.recordResult(result({ lessonId: 'gravity-gate', sessionId: 'gravity-gate:rule-7-passed',
+      attemptContext: revised, completedCheckpoints: 8, totalCheckpoints: 8 })).saved).toBe(true)
+    const reloaded = new TrainingProgressStore(storage).loadCurrent(revised)
+    expect(reloaded.errors).toEqual([])
+    expect(reloaded.progress.lessons['gravity-gate']).toMatchObject({ completed: true, attempts: 2,
+      best: { sessionId: 'gravity-gate:rule-7-passed' } })
+    expect(JSON.parse(storage.getItem(revisedKey)!).context).toEqual(revised)
+    expect(new TrainingProgressStore(storage).load(previous).progress.lessons['gravity-gate']).toEqual(historical)
+    expect(storage.getItem(previousKey)).toBe(originalScopes[2].raw)
+    for (const { key, raw } of originalScopes) expect(storage.getItem(key)).toBe(raw)
+    for (const lessonId of ['takeoff', 'wide-gate', 'full-roll', 'reverse-orbit', 'backward-flight']) {
+      expect(reloaded.progress.lessons[lessonId]).toEqual(current.progress.lessons[lessonId])
+    }
+  })
+
+  it('preserves a malformed rule-7 scope without hiding approved lessons or borrowing old L19 completion', () => {
+    const storage = new MemoryStorage()
+    const store = new TrainingProgressStore(storage)
+    const previous = context({ rulesVersion: 6, mode: 'practice' })
+    const revised = { ...previous, rulesVersion: 7 } as const
+    for (const lessonId of ['backward-flight', 'gravity-gate']) {
+      expect(store.recordResult(result({ lessonId, attemptContext: previous })).saved).toBe(true)
+    }
+    const previousKey = trainingAttemptContextKey(previous)
+    const previousRaw = storage.getItem(previousKey)
+    const revisedKey = trainingAttemptContextKey(revised)
+    storage.setItem(revisedKey, '{recoverable-rule-7-history')
+    const loaded = new TrainingProgressStore(storage).loadCurrent(revised)
+    expect(loaded.loaded).toBe(true)
+    expect(loaded.errors.join(' ')).toMatch(/Rules 7:.*malformed/)
+    expect(loaded.progress.lessons['backward-flight']).toMatchObject({ completed: true, attempts: 1 })
+    expect(loaded.progress.lessons['gravity-gate']).toMatchObject({ completed: false, attempts: 0, best: null })
+    expect(store.recordResult(result({ lessonId: 'gravity-gate', attemptContext: revised })).saved).toBe(false)
+    expect(storage.getItem(revisedKey)).toBe('{recoverable-rule-7-history')
+    expect(storage.getItem(previousKey)).toBe(previousRaw)
+  })
+
   it('adds L16 without rewriting accepted L15 or L17 records and keeps result conditions separate', () => {
     const storage = new MemoryStorage()
     const store = new TrainingProgressStore(storage)
@@ -481,7 +550,7 @@ describe('training progress persistence', () => {
     storage.setItem(key, JSON.stringify({ schemaVersion: 1, context: context({ inputSource: 'keyboard' }), progress: createDefaultTrainingProgress() }))
     expect(store.load(source).loaded).toBe(false)
     expect(store.load(source).errors.join(' ')).toMatch(/context.*incompatible/i)
-    const invalid = { ...source, rulesVersion: 7 } as unknown as TrainingAttemptContext
+    const invalid = { ...source, rulesVersion: 8 } as unknown as TrainingAttemptContext
     expect(store.recordResult(result({ attemptContext: invalid })).saved).toBe(false)
     expect(store.loadCurrent(invalid).errors.join(' ')).toMatch(/context.*invalid/i)
     expect(storage.getItem(TRAINING_PROGRESS_STORAGE_KEY)).toBeNull()
@@ -585,6 +654,7 @@ describe('training progress persistence', () => {
     store.recordResult(result({ lessonId: 'direction-control', attemptContext: baseline }))
     store.recordResult(result({ lessonId: 'coordinated-turn', attemptContext: { ...baseline, rulesVersion: 5 } }))
     store.recordResult(result({ lessonId: 'basic-recovery', attemptContext: { ...baseline, rulesVersion: 6 } }))
+    store.recordResult(result({ lessonId: 'gravity-gate', attemptContext: { ...baseline, rulesVersion: 7 } }))
     for (const variation of [
       { mode: 'challenge' as const },
       { presetId: 'standard' as const },
@@ -595,17 +665,18 @@ describe('training progress persistence', () => {
       expect(loaded.progress.lessons['direction-control']?.completed).toBe(false)
       expect(loaded.progress.lessons['coordinated-turn']?.completed).toBe(false)
       expect(loaded.progress.lessons['basic-recovery']?.completed).toBe(false)
+      expect(loaded.progress.lessons['gravity-gate']?.completed).toBe(false)
       expect(loaded.errors).toEqual([])
     }
   })
 
   it.each([null, '{broken-json'])('retains a healthy current scope when the other scope is missing or corrupt (%s)', (damaged) => {
-    for (const healthyVersion of [4, 5, 6] as const) {
+    for (const healthyVersion of [4, 5, 6, 7] as const) {
       const storage = new MemoryStorage()
       const store = new TrainingProgressStore(storage)
       const healthy = context({ rulesVersion: healthyVersion })
       const other = context({ rulesVersion: healthyVersion === 4 ? 5 : 4 })
-      const healthyLessonId = healthyVersion === 4 ? 'direction-control' : healthyVersion === 5 ? 'coordinated-turn' : 'basic-recovery'
+      const healthyLessonId = { 4: 'direction-control', 5: 'coordinated-turn', 6: 'basic-recovery', 7: 'gravity-gate' }[healthyVersion]
       const missingLessonId = healthyVersion === 4 ? 'coordinated-turn' : 'direction-control'
       expect(store.recordResult(result({ lessonId: healthyLessonId, attemptContext: healthy })).saved).toBe(true)
       const otherKey = trainingAttemptContextKey(other)

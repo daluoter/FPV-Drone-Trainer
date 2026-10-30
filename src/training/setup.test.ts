@@ -61,7 +61,7 @@ describe('reference-relative training setup', () => {
     expect(prepared.setup.spawnPositionM).toEqual(references[0].positionM)
     expect(prepared.setup.spawnOrientation).toEqual({ x: 0, y: 0, z: 0, w: 1 })
     expect(prepared.setup.staticObstacles).toEqual(createGravityGate(references[0].positionM, 5).colliders)
-    expect(prepared.setup.staticObstacles).toHaveLength(12)
+    expect(prepared.setup.staticObstacles).toHaveLength(16)
     expect(JSON.stringify(request)).toBe(before)
     expect(prepareTrainingSetup(request, references.slice(0, 1))).toBe(request)
     expect(prepareTrainingSetup(request, references.slice(1))).toBe(request)

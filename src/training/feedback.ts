@@ -120,8 +120,11 @@ const METRICS: Readonly<Record<string, MetricDefinition>> = {
   gravityGateTopHeightDifferenceM: { label: '高於頂入口（高＋）', unit: 'm', digits: 2 },
   gravityGateEntryHorizontalErrorM: { label: '入口左右偏差（右＋）', unit: 'm', digits: 2 },
   gravityGateEntryForwardErrorM: { label: '入口前後偏差（後＋）', unit: 'm', digits: 2 },
-  gravityGateExitDistanceM: { label: '距指定側出口', unit: 'm', digits: 2 },
-  gravityGateForwardSpeedMps: { label: '朝門框前進速度', unit: 'm/s', digits: 2 },
+  gravityGateExitDistanceM: { label: '距低層返出口', unit: 'm', digits: 2 },
+  gravityGateForwardSpeedMps: { label: '側邊進場速度', unit: 'm/s', digits: 2 },
+  gravityGateLowerHeightDifferenceM: { label: '高於低層出口上緣', unit: 'm', digits: 2 },
+  gravityGateReturnSpeedMps: { label: '回程速度（朝來向＋）', unit: 'm/s', digits: 2 },
+  gravityGateReturnDistanceM: { label: '低層反向位移', unit: 'm', digits: 2 },
   gravityGateHeightGainM: { label: '本段上拋升高', unit: 'm', digits: 2 },
   gravityGateAttitudeChangeDegrees: { label: '本段實際調姿', unit: '°', digits: 1 },
   gravityGateRecoveryDwellSeconds: { label: '恢復控制確認', unit: 's', digits: 2 },
@@ -249,7 +252,8 @@ function metricPriorities(metrics: Readonly<Record<string, number>>, lessonId: s
   if (lessonId === 'gravity-gate') {
     if (metrics.gravityGatePhase <= 1) return ['altitudeM', 'groundTouching', 'gravityGateForwardSpeedMps']
     if (metrics.gravityGateExited > 0.5) return ['tiltDegrees', 'verticalSpeedMps', 'gravityGateRecoveryDwellSeconds']
-    if (metrics.gravityGateEntered > 0.5) return ['gravityGateExitDistanceM', 'altitudeM', 'verticalSpeedMps']
+    if (metrics.gravityGateLowerReached > 0.5) return ['gravityGateReturnSpeedMps', 'gravityGateReturnDistanceM', 'gravityGateExitDistanceM']
+    if (metrics.gravityGateEntered > 0.5) return ['gravityGateLowerHeightDifferenceM', 'altitudeM', 'verticalSpeedMps']
     return ['gravityGateTopHeightDifferenceM', 'gravityGateEntryHorizontalErrorM', 'gravityGateEntryForwardErrorM']
   }
   if (lessonId === 'reverse-orbit') {

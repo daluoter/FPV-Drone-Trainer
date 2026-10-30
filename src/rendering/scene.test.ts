@@ -7,7 +7,8 @@ import { createCoordinatedTurnTargets, COORDINATED_TURN_TARGET_RADIUS_M } from '
 import { createSquareRouteTargets, SQUARE_ROUTE_TARGET_RADIUS_M } from '../training/squareRoute'
 import { createFigureEightTargets, FIGURE_EIGHT_TARGET_RADIUS_M } from '../training/figureEight'
 import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
-import { createGravityGate } from '../world/gravityGate'
+import { createGravityGate, gravityGateExitCrossing, gravityGateLowerCrossing, gravityGateTopCrossing } from '../world/gravityGate'
+import { findSweptObstacleHit } from '../simulation/obstacles'
 import { SPLIT_S_MIN_HEIGHT_M, SPLIT_S_TARGET_HEIGHT_M } from '../training/splitS'
 import { POWER_LOOP_TARGET_HEIGHT_M } from '../training/powerLoop'
 import { createOrbitTarget, ORBIT_TARGET_HEIGHT_M, ORBIT_TARGET_RADIUS_M, ORBIT_MAX_RADIUS_M } from '../training/orbit'
@@ -1587,7 +1588,7 @@ describe('flight scene reference contract', () => {
     } finally { scene.dispose() }
   })
 
-  it('renders the shared gravity frame exactly with an open top and marked far-side exit on raised ground', () => {
+  it('renders the smaller two-level gravity frame exactly with a horizontal top and low return exit on raised ground', () => {
     const defaults = createDefaultDroneConfig()
     const config = { ...defaults, ground: { ...defaults.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 35, z: -3 } }
     const original = JSON.stringify(config)
@@ -1600,10 +1601,14 @@ describe('flight scene reference contract', () => {
         'reverse-orbit-zone', 'gravity-gate-frame', 'gravity-gate-top-entry', 'gravity-gate-side-exit',
       ])
       expect(reference.kind).toBe('gate')
-      expect(reference.positionM).toEqual({ x: 6, y: 22, z: -43 })
-      expect(reference.sizeM).toEqual({ x: 14, y: 14, z: 14 })
-      expect(scene.getReference('gravity-gate-top-entry')!.positionM).toEqual({ x: 6, y: 29, z: -43 })
-      expect(scene.getReference('gravity-gate-side-exit')!.positionM).toEqual({ x: 6, y: 22, z: -50 })
+      expect(reference.positionM).toEqual({ x: 6, y: 14, z: -31 })
+      expect(reference.sizeM).toEqual({ x: 8, y: 10, z: 8 })
+      expect(scene.getReference('gravity-gate-top-entry')!.positionM).toEqual({ x: 6, y: 19, z: -31 })
+      expect(scene.getReference('gravity-gate-side-exit')!.positionM).toEqual(gate.sideExitCenterM)
+      expect(gate.sideExitCenterM.x).toBe(10)
+      expect(gate.sideExitCenterM.y).toBeCloseTo(11.43)
+      expect(scene.getReference('gravity-gate-side-exit')!.sizeM).toEqual({ x: 0,
+        y: gate.lowerExitMaxY - gate.lowerExitMinY, z: 8 })
       expect(reference.object.visible).toBe(false)
       scene.setLessonTarget('gravity-gate')
       expect(reference.object.visible).toBe(true)
@@ -1613,6 +1618,8 @@ describe('flight scene reference contract', () => {
       expect(scene.getReference('orbit-poi')?.object.visible).toBe(false)
       scene.scene.updateMatrixWorld(true)
       const frame = scene.scene.getObjectByName('gravity-gate-physical-frame')!
+      expect(frame.children).toHaveLength(16)
+      expect(frame.children.filter(({ name }) => name.includes('-middle-'))).toHaveLength(4)
       expect(frame.children).toHaveLength(gate.colliders.length)
       for (const collider of gate.colliders) {
         const beam = scene.scene.getObjectByName(collider.id) as THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>
@@ -1628,8 +1635,11 @@ describe('flight scene reference contract', () => {
       }
       const topGuide = scene.getReference('gravity-gate-top-entry')!.object
       const sideGuide = scene.getReference('gravity-gate-side-exit')!.object
-      expect(topGuide.getWorldPosition(new THREE.Vector3()).toArray()).toEqual([6, 29, -43])
-      expect(sideGuide.getWorldPosition(new THREE.Vector3()).toArray()).toEqual([6, 22, -50])
+      expect(topGuide.getWorldPosition(new THREE.Vector3()).toArray()).toEqual([6, 19, -31])
+      const sidePosition = sideGuide.getWorldPosition(new THREE.Vector3())
+      expect(sidePosition.x).toBe(gate.exitX)
+      expect(sidePosition.y).toBeCloseTo(gate.sideExitCenterM.y)
+      expect(sidePosition.z).toBe(gate.centerM.z)
       const topOpening = scene.scene.getObjectByName('gravity-gate-top-opening-guide') as THREE.LineLoop
       const sideOpening = scene.scene.getObjectByName('gravity-gate-side-opening-guide') as THREE.LineLoop
       expect(topOpening.isLineLoop).toBe(true)
@@ -1637,12 +1647,67 @@ describe('flight scene reference contract', () => {
       expect(frame.children.every((child) => (child as THREE.Mesh).isMesh)).toBe(true)
       expect(scene.scene.getObjectByName('gravity-gate-downward-entry-arrow')).toBeDefined()
       expect(scene.scene.getObjectByName('gravity-gate-outward-exit-arrow')).toBeDefined()
+      expect(scene.scene.getObjectByName('gravity-gate-side-approach-arrow')).toBeDefined()
+      expect(scene.scene.getObjectByName('gravity-gate-descend-to-lower-arrow')).toBeDefined()
       expect(scene.scene.getObjectByName('gravity-gate-height-guide')).toBeDefined()
       expect(scene.scene.getObjectByName('gravity-gate-illustrative-route')).toBeDefined()
       expect(JSON.stringify(config)).toBe(original)
       scene.setLessonTarget(null)
       expect(reference.object.visible).toBe(false)
       expect(scene.getReference('orbit-poi')?.object.visible).toBe(true)
+    } finally { scene.dispose() }
+  })
+
+  it('illustrates a side approach, downward top entry, lower descent and opposite return without a path through beams', () => {
+    const scene = createFlightScene()
+    try {
+      scene.setLessonTarget('gravity-gate')
+      scene.scene.updateMatrixWorld(true)
+      const launch = scene.getReference('training-launch')!.positionM
+      const gate = createGravityGate(launch, 0)
+      const approach = scene.scene.getObjectByName('gravity-gate-side-approach')!
+      expect(approach.getWorldPosition(new THREE.Vector3()).toArray()).toEqual([
+        gate.approachPointM.x, gate.approachPointM.y, gate.approachPointM.z,
+      ])
+      for (const [name, direction] of [['gravity-gate-side-approach-arrow', [-1, 0, 0]],
+        ['gravity-gate-outward-exit-arrow', [1, 0, 0]], ['gravity-gate-descend-to-lower-arrow', [0, -1, 0]]] as const) {
+        const arrow = scene.scene.getObjectByName(name)!
+        const measured = new THREE.Vector3(0, 1, 0).applyQuaternion(arrow.quaternion)
+        for (const [axis, index] of [['x', 0], ['y', 1], ['z', 2]] as const) expect(measured[axis]).toBeCloseTo(direction[index], 10)
+      }
+      const exit = scene.scene.getObjectByName('gravity-gate-side-opening-guide') as THREE.LineLoop<THREE.BufferGeometry>
+      const exitPoints = exit.geometry.getAttribute('position')
+      for (let index = 0; index < exitPoints.count; index += 1) {
+        const point = exit.localToWorld(new THREE.Vector3().fromBufferAttribute(exitPoints, index))
+        expect(point.x).toBeCloseTo(gate.exitX + 0.05)
+        expect(point.y).toBeGreaterThan(gate.lowerExitMinY)
+        expect(point.y).toBeLessThan(gate.lowerExitMaxY)
+        expect(point.z).toBeGreaterThan(gate.minZ)
+        expect(point.z).toBeLessThan(gate.maxZ)
+      }
+      const route = scene.scene.getObjectByName('gravity-gate-illustrative-route') as THREE.Line<THREE.BufferGeometry>
+      const points = route.geometry.getAttribute('position')
+      let enteredAt = -1
+      let lowerAt = -1
+      let exitAt = -1
+      for (let index = 1; index < points.count; index += 1) {
+        const before = route.localToWorld(new THREE.Vector3().fromBufferAttribute(points, index - 1))
+        const current = route.localToWorld(new THREE.Vector3().fromBufferAttribute(points, index))
+        expect(findSweptObstacleHit(before, current, 0.3, gate.colliders), `route segment ${index}`).toBeNull()
+        if (gravityGateTopCrossing(before, current, gate, 0.3)?.insideOpening) {
+          expect(current.x).toBeLessThan(before.x)
+          enteredAt = index
+        }
+        if (gravityGateLowerCrossing(before, current, gate, 0.3)?.insideOpening) lowerAt = index
+        if (gravityGateExitCrossing(before, current, gate, 0.3)?.insideOpening) {
+          expect(current.x).toBeGreaterThan(before.x)
+          exitAt = index
+        }
+      }
+      expect(enteredAt).toBeGreaterThan(0)
+      expect(lowerAt).toBeGreaterThan(enteredAt)
+      expect(exitAt).toBeGreaterThan(lowerAt)
+      expect(scene.scene.getObjectByName('gravity-gate-height-guide')!.userData.levelHeightsM).toEqual([4, 9, 14])
     } finally { scene.dispose() }
   })
 
