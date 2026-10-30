@@ -73,6 +73,7 @@ export class FlightRenderer {
   private orbitStage: number | null = 0
   private backwardFlightStage: number | null = 0
   private reverseOrbitStage: number | null = 0
+  private gravityGateStage: number | null = 0
   public get flightScene(): FlightScene { return this.currentFlightScene }
   public readonly cameraRig: FlightCameraRig
   public readonly renderer: THREE.WebGLRenderer
@@ -264,6 +265,13 @@ export class FlightRenderer {
     this.flightScene.setReverseOrbitStage(stage)
   }
 
+  /** Mark the open top and side without moving physical geometry or live flight. */
+  public setGravityGateStage(stage: number | null): void {
+    if (this.disposed) return
+    this.gravityGateStage = stage
+    this.flightScene.setGravityGateStage(stage)
+  }
+
   /** Rebuild anchors only after the owner has explicitly reset and disarmed. */
   public reconfigureScene(config: DroneConfig): void {
     if (this.disposed) return
@@ -283,6 +291,7 @@ export class FlightRenderer {
     this.currentFlightScene.setOrbitStage(this.orbitStage)
     this.currentFlightScene.setBackwardFlightStage(this.backwardFlightStage)
     this.currentFlightScene.setReverseOrbitStage(this.reverseOrbitStage)
+    this.currentFlightScene.setGravityGateStage(this.gravityGateStage)
     previous.dispose()
   }
 

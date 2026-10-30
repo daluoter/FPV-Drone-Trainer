@@ -17,13 +17,15 @@ import {
 import Mode2StickOverlay from '../training/StickOverlay'
 import { trainingHint, trainingObjective, wideGateCollisionCause } from '../training/feedback'
 import { createResultReplaySnapshot, type ResultReplayMarker, type ResultReplaySnapshot } from '../training/resultReplay'
-import { createTeachingDemonstration, teachingCueAt, teachingTargetAt, teachingRecoveryPhaseAt, teachingFullRollPhaseAt, teachingFullFlipPhaseAt, teachingPowerLoopPhaseAt, teachingSplitSPhaseAt, teachingOrbitPhaseAt, teachingReverseOrbitPhaseAt, teachingBackwardFlightPhaseAt, type TeachingDemonstration, type TeachingDemonstrationKind } from '../training/demonstrations'
+import { createTeachingDemonstration, teachingCueAt, teachingTargetAt, teachingRecoveryPhaseAt, teachingFullRollPhaseAt, teachingFullFlipPhaseAt, teachingPowerLoopPhaseAt, teachingSplitSPhaseAt, teachingOrbitPhaseAt, teachingReverseOrbitPhaseAt, teachingBackwardFlightPhaseAt, teachingGravityGatePhaseAt, type TeachingDemonstration, type TeachingDemonstrationKind } from '../training/demonstrations'
 import { DIRECTION_CONTROL_TARGET_IDS } from '../training/directionControl'
 import { COORDINATED_TURN_TARGET_IDS } from '../training/coordinatedTurn'
 import { SQUARE_ROUTE_TARGET_IDS } from '../training/squareRoute'
 import { FIGURE_EIGHT_TARGET_IDS } from '../training/figureEight'
 import { createTrainingFieldAnchors } from '../training/field'
 import { createWideGates, WIDE_GATE_IDS } from '../world/wideGates'
+import { createGravityGate } from '../world/gravityGate'
+import { gravityGateCollisionCause } from '../training/gravityGateFeedback'
 import { measureBasicRecoveryMotion } from '../training/basicRecovery'
 import { measureFullFlipMotion } from '../training/fullFlip'
 import { lessonLearningContent } from '../training/catalog'
@@ -157,6 +159,13 @@ export default function FreeFlight({
     const { launch } = createTrainingFieldAnchors(settings.drone)
     return createWideGates(launch, settings.drone.ground.heightM).flatMap((gate) => gate.colliders)
   }, [settings.drone])
+  const gravityGateObstacles = useMemo(() => {
+    const { launch } = createTrainingFieldAnchors(settings.drone)
+    return createGravityGate(launch, settings.drone.ground.heightM).colliders
+  }, [settings.drone])
+  const selectedObstacles = useMemo(() => trainingState?.lessonId === 'wide-gate' ? wideGateObstacles
+    : trainingState?.lessonId === 'gravity-gate' ? gravityGateObstacles : [],
+  [trainingState?.lessonId, wideGateObstacles, gravityGateObstacles])
   const shouldConfirmExit = Boolean(telemetry?.armed || trainingSettingsLocked)
   const demonstrationTimeline = useMemo(() => demonstration && demonstrationSettings
     ? createDemonstrationProgress(demonstration, demonstrationSettings) : null, [demonstration, demonstrationSettings])
@@ -312,8 +321,8 @@ export default function FreeFlight({
   useEffect(() => {
     const runtime = runtimeRef.current
     if (!runtime || runtime.getTelemetry().armed || runtime.getTelemetry().replay.active) return
-    runtime.setStaticObstacles?.(trainingState?.lessonId === 'wide-gate' ? wideGateObstacles : [])
-  }, [trainingState?.lessonId, wideGateObstacles, rendererRetryKey, telemetry?.armed, telemetry?.replay.active])
+    runtime.setStaticObstacles?.(selectedObstacles)
+  }, [selectedObstacles, rendererRetryKey, telemetry?.armed, telemetry?.replay.active])
 
   useEffect(() => {
     const runtime = runtimeRef.current
@@ -398,7 +407,11 @@ export default function FreeFlight({
       ? demonstration ? teachingBackwardFlightPhaseAt(demonstration, telemetry.replay.currentTimeSeconds) : null
       : trainingState?.lastEvaluation?.metrics?.backwardPhase ?? 0
     rendererRef.current?.setBackwardFlightStage?.(backwardPhase)
-  }, [trainingState?.lessonId, trainingState?.lastEvaluation?.metrics?.directionTargetIndex, trainingState?.lastEvaluation?.metrics?.turnTargetIndex, trainingState?.lastEvaluation?.metrics?.squareTargetIndex, trainingState?.lastEvaluation?.metrics?.eightTargetIndex, trainingState?.lastEvaluation?.metrics?.gateTargetIndex, trainingState?.lastEvaluation?.metrics?.recoveryPhase, trainingState?.lastEvaluation?.metrics?.rollPhase, trainingState?.lastEvaluation?.metrics?.flipPhase, trainingState?.lastEvaluation?.metrics?.loopPhase, trainingState?.lastEvaluation?.metrics?.splitPhase, trainingState?.lastEvaluation?.metrics?.orbitPhase, trainingState?.lastEvaluation?.metrics?.reverseOrbitPhase, trainingState?.lastEvaluation?.metrics?.backwardPhase, rendererRetryKey, telemetry?.replay.active, telemetry?.replay.currentTimeSeconds, demonstration])
+    const gravityGatePhase = lessonId !== 'gravity-gate' ? null : telemetry?.replay.active
+      ? demonstration ? teachingGravityGatePhaseAt(demonstration, telemetry.replay.currentTimeSeconds) : null
+      : trainingState?.lastEvaluation?.metrics?.gravityGatePhase ?? 0
+    rendererRef.current?.setGravityGateStage?.(gravityGatePhase)
+  }, [trainingState?.lessonId, trainingState?.lastEvaluation?.metrics?.directionTargetIndex, trainingState?.lastEvaluation?.metrics?.turnTargetIndex, trainingState?.lastEvaluation?.metrics?.squareTargetIndex, trainingState?.lastEvaluation?.metrics?.eightTargetIndex, trainingState?.lastEvaluation?.metrics?.gateTargetIndex, trainingState?.lastEvaluation?.metrics?.recoveryPhase, trainingState?.lastEvaluation?.metrics?.rollPhase, trainingState?.lastEvaluation?.metrics?.flipPhase, trainingState?.lastEvaluation?.metrics?.loopPhase, trainingState?.lastEvaluation?.metrics?.splitPhase, trainingState?.lastEvaluation?.metrics?.orbitPhase, trainingState?.lastEvaluation?.metrics?.reverseOrbitPhase, trainingState?.lastEvaluation?.metrics?.backwardPhase, trainingState?.lastEvaluation?.metrics?.gravityGatePhase, rendererRetryKey, telemetry?.replay.active, telemetry?.replay.currentTimeSeconds, demonstration])
 
   useEffect(() => {
     rendererRef.current?.setTrainingPath(trainingPath.map((sample) => sample.state.positionM))
@@ -438,7 +451,7 @@ export default function FreeFlight({
     if (trainingArmBlocked) return
     const runtime = runtimeRef.current
     if (!runtime || renderingState !== 'ready') return
-    runtime.setStaticObstacles?.(trainingState?.lessonId === 'wide-gate' ? wideGateObstacles : [])
+    runtime.setStaticObstacles?.(selectedObstacles)
     runtime.arm()
     if (runtime.getTelemetry().armed) lastFlightConfigRef.current = copyTuningSettings(appliedSettingsRef.current).drone
     setTelemetry(runtime.getTelemetry())
@@ -559,7 +572,7 @@ export default function FreeFlight({
       setDemonstrationSettings(recordedSettings)
       setDemonstration(demo)
       setDemoError(null)
-      runtime.setReplaySpeed(kind === 'basic-recovery' || kind === 'full-roll' || kind === 'full-flip' || kind === 'front-flip' || kind === 'back-flip' || kind === 'power-loop' || kind === 'split-s' || kind === 'orbit' || kind === 'reverse-orbit' || kind === 'backward-flight' ? 0.5 : 1)
+      runtime.setReplaySpeed(kind === 'basic-recovery' || kind === 'full-roll' || kind === 'full-flip' || kind === 'front-flip' || kind === 'back-flip' || kind === 'power-loop' || kind === 'split-s' || kind === 'orbit' || kind === 'reverse-orbit' || kind === 'backward-flight' || kind === 'gravity-gate' ? 0.5 : 1)
       runtime.playReplay()
       setTelemetry(runtime.getTelemetry())
     } catch {
@@ -591,7 +604,10 @@ export default function FreeFlight({
     positionConfig ? telemetry?.replay.active ? replayGhost : telemetry?.state ?? null : null,
     positionConfig ?? settings.drone,
   )
-  const collisionCause = telemetry?.state.warnings.map(wideGateCollisionCause).find(Boolean)
+  const collisionCause = telemetry?.state.warnings.map((warning) => {
+    const gravityPart = gravityGateCollisionCause(warning)
+    return wideGateCollisionCause(warning) ?? (gravityPart ? `碰到重力門的${gravityPart}` : null)
+  }).find(Boolean)
   const showRecoveryHud = telemetry?.replay.active && demonstration
     ? demonstration.lessonId === 'basic-recovery'
     : trainingState?.lessonId === 'basic-recovery'
@@ -612,7 +628,10 @@ export default function FreeFlight({
   const backwardSpeed = backwardMetrics?.backwardSpeedMps
   const backwardMotionDirection = backwardSpeed === undefined || !Number.isFinite(backwardSpeed) ? '等待實際飛行資料'
     : backwardSpeed > 0.25 ? '往機尾移動（後退）' : backwardSpeed < -0.25 ? '往機頭移動（前進）' : '前後移動很慢'
-  const showMotionHud = showRecoveryHud || showRollHud || showFlipHud || showLoopHud || showSplitHud || showOrbitHud || showReverseOrbitHud || showBackwardHud
+  const showGravityGateHud = (telemetry?.replay.active ? demonstration?.lessonId : trainingState?.lessonId) === 'gravity-gate'
+  const gravityGateMetrics = telemetry?.replay.active ? demonstrationProgress?.metrics : trainingState?.lastEvaluation?.metrics
+  const dockInstruments = showReverseOrbitHud || showGravityGateHud
+  const showMotionHud = showRecoveryHud || showRollHud || showFlipHud || showLoopHud || showSplitHud || showOrbitHud || showReverseOrbitHud || showBackwardHud || showGravityGateHud
   const rollMotion = showRollHud && recoveryMotionState ? measureBasicRecoveryMotion(recoveryMotionState) : null
   const rollProgress = telemetry?.replay.active ? demonstrationProgress?.metrics?.rollProgressDegrees : trainingState?.lastEvaluation?.metrics?.rollProgressDegrees
   const rollRate = showRollHud && recoveryMotionState ? -recoveryMotionState.angularVelocityBodyRadPerSec.z * 180 / Math.PI : undefined
@@ -626,9 +645,9 @@ export default function FreeFlight({
   const processed = telemetry?.processedInput
   const state = telemetry?.state
   const pid = telemetry?.pid
-  const trainingHintPanel = trainingState?.phase === 'ACTIVE' && <div tabIndex={0} aria-label="目前練習提示" className={`school-viewport-hint${recovery ? ' is-recovering' : ''}${showReverseOrbitHud ? ' is-below-viewport' : ''}`}>{recovery
+  const trainingHintPanel = trainingState?.phase === 'ACTIVE' && <div tabIndex={0} aria-label="目前練習提示" className={`school-viewport-hint${recovery ? ' is-recovering' : ''}${dockInstruments ? ' is-below-viewport' : ''}`}>{recovery
               ? <><strong>重練原因（當時數值）：{recovery.message}</strong><span>{recovery.hint}</span></>
-              : currentObjective && trainingState.lastEvaluation?.recovery !== 'restart' ? <><strong>{currentObjective.title}</strong><span>{trainingState.lessonId === 'direction-control' || trainingState.lessonId === 'coordinated-turn' || trainingState.lessonId === 'square-route' || trainingState.lessonId === 'figure-eight' || trainingState.lessonId === 'wide-gate' || trainingState.lessonId === 'basic-recovery' || trainingState.lessonId === 'full-roll' || isFlipLesson(trainingState.lessonId) || trainingState.lessonId === 'power-loop' || trainingState.lessonId === 'split-s' || trainingState.lessonId === 'orbit' || trainingState.lessonId === 'reverse-orbit' || trainingState.lessonId === 'backward-flight' || !trainingState.lastEvaluation?.hint ? currentObjective.detail : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</span></> : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>
+              : currentObjective && trainingState.lastEvaluation?.recovery !== 'restart' ? <><strong>{currentObjective.title}</strong><span>{trainingState.lessonId === 'direction-control' || trainingState.lessonId === 'coordinated-turn' || trainingState.lessonId === 'square-route' || trainingState.lessonId === 'figure-eight' || trainingState.lessonId === 'wide-gate' || trainingState.lessonId === 'basic-recovery' || trainingState.lessonId === 'full-roll' || isFlipLesson(trainingState.lessonId) || trainingState.lessonId === 'power-loop' || trainingState.lessonId === 'split-s' || trainingState.lessonId === 'orbit' || trainingState.lessonId === 'reverse-orbit' || trainingState.lessonId === 'backward-flight' || trainingState.lessonId === 'gravity-gate' || !trainingState.lastEvaluation?.hint ? currentObjective.detail : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</span></> : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>
 
   return (
     <section ref={workspaceRef} className={`free-flight-section school-flight ${lessonPanel ? 'has-lessons' : ''}`} id="free-flight" aria-labelledby="free-flight-title">
@@ -646,7 +665,7 @@ export default function FreeFlight({
 
       <div className="school-demo-bar school-demo-toolbar" aria-label="四軸與課程示範">
         <strong>L00 看懂四軸</strong>
-        {([['roll', '橫滾'], ['pitch', '俯仰'], ['yaw', '偏航'], ['takeoff', '起飛與懸停示範'], ['straight-line', '直線示範'], ['landing', '降落示範'], ['direction-control', '方向示範'], ['coordinated-turn', '轉彎示範'], ['square-route', '方形示範'], ['figure-eight', '八字示範'], ['wide-gate', '穿門示範'], ['basic-recovery', '恢復示範'], ['full-roll', '橫滾示範'], ['front-flip', '前翻示範'], ['back-flip', '後翻示範'], ['power-loop', '大迴旋示範'], ['split-s', '破S示範'], ['orbit', '正刷鍋示範'], ['reverse-orbit', '倒刷鍋示範'], ['backward-flight', '後退飛行示範']] as const).map(([kind, label]) => {
+        {([['roll', '橫滾'], ['pitch', '俯仰'], ['yaw', '偏航'], ['takeoff', '起飛與懸停示範'], ['straight-line', '直線示範'], ['landing', '降落示範'], ['direction-control', '方向示範'], ['coordinated-turn', '轉彎示範'], ['square-route', '方形示範'], ['figure-eight', '八字示範'], ['wide-gate', '穿門示範'], ['basic-recovery', '恢復示範'], ['full-roll', '橫滾示範'], ['front-flip', '前翻示範'], ['back-flip', '後翻示範'], ['power-loop', '大迴旋示範'], ['split-s', '破S示範'], ['orbit', '正刷鍋示範'], ['reverse-orbit', '倒刷鍋示範'], ['backward-flight', '後退飛行示範'], ['gravity-gate', '重力門示範']] as const).map(([kind, label]) => {
           const course = lessonLearningContent(kind)
           return <button className="lab-button lab-button-small" type="button" key={kind} disabled={trainingSettingsLocked || Boolean(telemetry?.armed) || renderingState !== 'ready'} onClick={() => startDemonstration(kind)}>{course ? `${course.code} ${label}` : label}</button>
         })}
@@ -662,7 +681,7 @@ export default function FreeFlight({
             <button className="lab-button lab-button-primary" type="button" onClick={exitReplay}>{demonstration ? '結束示範' : '結束回放'}</button>
             <span>結束後回到練習，仍需自行解鎖。</span>
           </div>}
-          <div className={`free-flight-viewport${showMotionHud ? ' has-recovery-hud' : ''}${showOrbitHud ? ' has-orbit-hud' : ''}${showReverseOrbitHud ? ' has-reverse-orbit-hud' : ''}${showBackwardHud ? ' has-backward-hud' : ''}`} role="group" aria-label="Three.js Free Flight simulation viewport">
+          <div className={`free-flight-viewport${showMotionHud ? ' has-recovery-hud' : ''}${showOrbitHud ? ' has-orbit-hud' : ''}${showReverseOrbitHud ? ' has-reverse-orbit-hud' : ''}${showBackwardHud ? ' has-backward-hud' : ''}${showGravityGateHud ? ' has-gravity-gate-hud' : ''}`} role="group" aria-label="Three.js Free Flight simulation viewport">
             <canvas key={rendererRetryKey} ref={canvasRef} className={`flight-canvas${cameraMode === 'free' ? ' is-free-camera' : ''}`} aria-label="Free Flight 3D scene"
               tabIndex={cameraMode === 'free' ? 0 : -1} aria-describedby={cameraMode === 'free' ? 'free-camera-help' : undefined} />
             <div className="flight-viewport-overlay" aria-hidden="true">
@@ -737,6 +756,16 @@ export default function FreeFlight({
                 <small>機臂視線偏差 <b data-testid="reverse-orbit-target-error">{format(reverseOrbitMetrics?.reverseOrbitTargetViewErrorDegrees, 0)}°</b></small>
                 <small>仰看高處金色機臂 · 原地轉頭不算一圈</small>
               </div>}
+              {showGravityGateHud && <div className="flight-recovery-hud flight-gravity-gate-hud" role="group" aria-label="重力門即時狀態">
+                <strong>{telemetry?.replay.active ? '回放重力門數值' : '即時重力門數值'} · <span data-testid="gravity-gate-phase">{format(gravityGateMetrics?.gravityGatePhase ?? 0, 0)} / 8 步</span></strong>
+                <small data-testid="gravity-gate-status">頂部入 {gravityGateMetrics?.gravityGateEntered === 1 ? '✓' : '○'} → 側面出 {gravityGateMetrics?.gravityGateExited === 1 ? '✓' : '○'}</small>
+                <div>
+                  <span>高於頂入口（＋）<b data-testid="gravity-gate-top-offset">{format(gravityGateMetrics?.gravityGateTopHeightDifferenceM, 1)} m</b></span>
+                  <span>距側面出口<b data-testid="gravity-gate-side-distance">{format(gravityGateMetrics?.gravityGateExitDistanceM, 1)} m</b></span>
+                  <span>入口左右偏差（右＋）<b data-testid="gravity-gate-entry-x">{format(gravityGateMetrics?.gravityGateEntryHorizontalErrorM, 1)} m</b></span>
+                  <span>入口前後偏差（後＋）<b data-testid="gravity-gate-entry-z">{format(gravityGateMetrics?.gravityGateEntryForwardErrorM, 1)} m</b></span>
+                </div>
+              </div>}
               {showBackwardHud && <div className="flight-recovery-hud flight-backward-hud" role="group" aria-label="後退飛行即時狀態">
                 <strong>{telemetry?.replay.active ? '回放後退飛行數值' : '即時後退飛行數值'}</strong>
                 <div>
@@ -769,9 +798,9 @@ export default function FreeFlight({
               ? demonstrationProgress.complete ? `示範完成 ${demonstrationProgress.completedSteps}／${demonstrationProgress.totalSteps} 步 · 觀看不計成績`
                 : `示範第 ${(demonstrationProgress.currentStepIndex ?? 0) + 1}／${demonstrationProgress.totalSteps} 步：${demonstrationProgress.currentStepTitle}`
               : demonstration ? demonstration.title : '飛行回放'} · 真人飛行已停止</div>}
-            {!showReverseOrbitHud && trainingHintPanel}
+            {!dockInstruments && trainingHintPanel}
           </div>
-          {showReverseOrbitHud && trainingHintPanel}
+          {dockInstruments && trainingHintPanel}
           <div className="flight-controls" aria-label="Flight controls">
             <div className="flight-control-group">
               <label htmlFor="flight-input-source">控制方式</label>

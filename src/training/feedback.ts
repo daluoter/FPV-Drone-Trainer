@@ -1,3 +1,4 @@
+import { gravityGateObjective, gravityGateRouteGuide, gravityGateTrainingHint } from './gravityGateFeedback'
 import { reverseOrbitObjective, reverseOrbitRouteGuide, reverseOrbitTrainingHint } from './reverseOrbitFeedback'
 import { backwardFlightObjective, backwardFlightRouteGuide, backwardFlightTrainingHint } from './backwardFlightFeedback'
 import type { TrainingEvaluation } from './types'
@@ -116,6 +117,14 @@ interface MetricDefinition {
 }
 
 const METRICS: Readonly<Record<string, MetricDefinition>> = {
+  gravityGateTopHeightDifferenceM: { label: '高於頂入口（高＋）', unit: 'm', digits: 2 },
+  gravityGateEntryHorizontalErrorM: { label: '入口左右偏差（右＋）', unit: 'm', digits: 2 },
+  gravityGateEntryForwardErrorM: { label: '入口前後偏差（後＋）', unit: 'm', digits: 2 },
+  gravityGateExitDistanceM: { label: '距指定側出口', unit: 'm', digits: 2 },
+  gravityGateForwardSpeedMps: { label: '朝門框前進速度', unit: 'm/s', digits: 2 },
+  gravityGateHeightGainM: { label: '本段上拋升高', unit: 'm', digits: 2 },
+  gravityGateAttitudeChangeDegrees: { label: '本段實際調姿', unit: '°', digits: 1 },
+  gravityGateRecoveryDwellSeconds: { label: '恢復控制確認', unit: 's', digits: 2 },
   launchHeightM: { label: '離起飛地面', unit: 'm', digits: 2 },
   launchDistanceM: { label: '距離起飛點', unit: 'm', digits: 2 },
   altitudeM: { label: '起飛點上方', unit: 'm', digits: 2 },
@@ -237,6 +246,12 @@ const LESSON_METRICS: Readonly<Record<string, readonly string[]>> = {
 }
 
 function metricPriorities(metrics: Readonly<Record<string, number>>, lessonId: string | null): readonly string[] {
+  if (lessonId === 'gravity-gate') {
+    if (metrics.gravityGatePhase <= 1) return ['altitudeM', 'groundTouching', 'gravityGateForwardSpeedMps']
+    if (metrics.gravityGateExited > 0.5) return ['tiltDegrees', 'verticalSpeedMps', 'gravityGateRecoveryDwellSeconds']
+    if (metrics.gravityGateEntered > 0.5) return ['gravityGateExitDistanceM', 'altitudeM', 'verticalSpeedMps']
+    return ['gravityGateTopHeightDifferenceM', 'gravityGateEntryHorizontalErrorM', 'gravityGateEntryForwardErrorM']
+  }
   if (lessonId === 'reverse-orbit') {
     if (metrics.reverseOrbitPhase <= 1) return ['altitudeM', 'groundTouching', 'reverseOrbitRadiusM']
     if (metrics.reverseOrbitCompleted > 0.5) return ['reverseOrbitCompletedLaps', 'reverseOrbitExitDistanceM', 'reverseOrbitRadialSpeedMps']
@@ -382,8 +397,8 @@ export function formatTrainingMetrics(
     const displayed = definition.transform?.(value) ?? value
     return [{
       key,
-      label: (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'power-loop' || lessonId === 'split-s' || lessonId === 'orbit' || lessonId === 'backward-flight' || lessonId === 'reverse-orbit' || isFullFlipLesson(lessonId)) && key === 'verticalSpeedMps' ? '升降速度（上＋／下−）'
-        : (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'power-loop' || lessonId === 'split-s' || lessonId === 'orbit' || lessonId === 'backward-flight' || lessonId === 'reverse-orbit' || isFullFlipLesson(lessonId)) && key === 'altitudeM' ? '離地高度'
+      label: (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'power-loop' || lessonId === 'split-s' || lessonId === 'orbit' || lessonId === 'backward-flight' || lessonId === 'reverse-orbit' || lessonId === 'gravity-gate' || isFullFlipLesson(lessonId)) && key === 'verticalSpeedMps' ? '升降速度（上＋／下−）'
+        : (lessonId === 'basic-recovery' || lessonId === 'full-roll' || lessonId === 'power-loop' || lessonId === 'split-s' || lessonId === 'orbit' || lessonId === 'backward-flight' || lessonId === 'reverse-orbit' || lessonId === 'gravity-gate' || isFullFlipLesson(lessonId)) && key === 'altitudeM' ? '離地高度'
         : isFullFlipLesson(lessonId) && key === 'preparationDwellSeconds' ? '翻轉準備確認'
         : isFullFlipLesson(lessonId) && key === 'recoveryDwellSeconds' ? '正飛恢復確認'
         : lessonId === 'full-roll' && key === 'preparationDwellSeconds' ? '橫滾準備確認'
@@ -1156,6 +1171,7 @@ export function trainingObjective(
   evaluation: Pick<TrainingEvaluation, 'metrics'> | null | undefined,
 ): TrainingObjective | null {
   const metrics = evaluation?.metrics ?? {}
+  if (lessonId === 'gravity-gate') return gravityGateObjective(metrics)
   if (lessonId === 'backward-flight') return backwardFlightObjective(metrics)
   if (lessonId === 'reverse-orbit') return reverseOrbitObjective(metrics)
   if (lessonId === 'orbit') return orbitObjective(metrics)
@@ -1209,6 +1225,7 @@ export function trainingObjective(
 
 /** Short route instructions remain visible before a lesson starts. */
 export function trainingRouteGuide(lessonId: string | null): string | null {
+  if (lessonId === 'gravity-gate') return gravityGateRouteGuide()
   if (lessonId === 'backward-flight') return backwardFlightRouteGuide()
   if (lessonId === 'reverse-orbit') return reverseOrbitRouteGuide()
   if (lessonId === 'orbit') return orbitRouteGuide()
@@ -1237,6 +1254,7 @@ export function trainingHint(
 ): string {
   const hint = evaluation?.hint?.trim()
   const message = evaluation?.message?.trim()
+  if (lessonId === 'gravity-gate' && evaluation) return gravityGateTrainingHint(evaluation)
   if (lessonId === 'reverse-orbit' && evaluation) return reverseOrbitTrainingHint(evaluation)
   if (lessonId === 'backward-flight' && evaluation) return backwardFlightTrainingHint(evaluation)
   if (lessonId === 'orbit' && evaluation && (Number.isFinite(evaluation.metrics?.orbitPhase) || /^正刷鍋/u.test(message ?? ''))) return orbitTrainingHint(evaluation)

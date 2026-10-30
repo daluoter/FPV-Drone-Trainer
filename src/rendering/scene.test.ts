@@ -7,6 +7,7 @@ import { createCoordinatedTurnTargets, COORDINATED_TURN_TARGET_RADIUS_M } from '
 import { createSquareRouteTargets, SQUARE_ROUTE_TARGET_RADIUS_M } from '../training/squareRoute'
 import { createFigureEightTargets, FIGURE_EIGHT_TARGET_RADIUS_M } from '../training/figureEight'
 import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
+import { createGravityGate } from '../world/gravityGate'
 import { SPLIT_S_MIN_HEIGHT_M, SPLIT_S_TARGET_HEIGHT_M } from '../training/splitS'
 import { POWER_LOOP_TARGET_HEIGHT_M } from '../training/powerLoop'
 import { createOrbitTarget, ORBIT_TARGET_HEIGHT_M, ORBIT_TARGET_RADIUS_M, ORBIT_MAX_RADIUS_M } from '../training/orbit'
@@ -218,6 +219,9 @@ describe('flight scene reference contract', () => {
         'orbit-zone',
         'backward-zone',
         'reverse-orbit-zone',
+        'gravity-gate-frame',
+        'gravity-gate-top-entry',
+        'gravity-gate-side-exit',
       ])
       expect(scene.getReference('hover-zone')?.kind).toBe('zone')
       expect(scene.getReference('hover-zone')?.positionM).toEqual({ x: 0, y: 3, z: 0 })
@@ -876,7 +880,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('roll-zone')!
-      expect(scene.sceneReferences.at(-7)?.id).toBe('roll-zone')
+      expect(scene.sceneReferences.at(-10)?.id).toBe('roll-zone')
       expect(reference.kind).toBe('zone')
       expect(reference.positionM).toEqual({ x: 6, y: 15, z: -3 })
       expect(reference.object.position.toArray()).toEqual([6, 15, -3])
@@ -972,7 +976,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('flip-zone')!
-      expect(scene.sceneReferences.at(-6)?.id).toBe('flip-zone')
+      expect(scene.sceneReferences.at(-9)?.id).toBe('flip-zone')
       expect(reference.kind).toBe('zone')
       expect(reference.positionM).toEqual({ x: 6, y: 15, z: -3 })
       expect(reference.object.position.toArray()).toEqual([6, 15, -3])
@@ -1074,7 +1078,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('loop-zone')!
-      expect(scene.sceneReferences.at(-5)?.id).toBe('loop-zone')
+      expect(scene.sceneReferences.at(-8)?.id).toBe('loop-zone')
       expect(reference.positionM).toEqual({ x: 6, y: 5 + POWER_LOOP_TARGET_HEIGHT_M, z: -3 })
       expect(reference.object.position.toArray()).toEqual([6, 5 + POWER_LOOP_TARGET_HEIGHT_M, -3])
       expect(reference.sizeM).toEqual({ x: 240, y: 16, z: 240 })
@@ -1168,7 +1172,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('split-zone')!
-      expect(scene.sceneReferences.at(-4)?.id).toBe('split-zone')
+      expect(scene.sceneReferences.at(-7)?.id).toBe('split-zone')
       expect(reference.positionM).toEqual({ x: 6, y: 5 + SPLIT_S_TARGET_HEIGHT_M, z: -3 })
       expect(reference.object.position.toArray()).toEqual([6, 5 + SPLIT_S_TARGET_HEIGHT_M, -3])
       expect(reference.sizeM).toEqual({ x: 300, y: SPLIT_S_TARGET_HEIGHT_M - SPLIT_S_MIN_HEIGHT_M, z: 300 })
@@ -1307,7 +1311,7 @@ describe('flight scene reference contract', () => {
       const field = scene.getReference('orbit-zone')!
       const launch = scene.getReference('training-launch')!.positionM
       const target = createOrbitTarget(launch, config.ground.heightM)
-      expect(scene.sceneReferences.at(-3)?.id).toBe('orbit-zone')
+      expect(scene.sceneReferences.at(-6)?.id).toBe('orbit-zone')
       expect(field.positionM).toEqual(target)
       expect(field.object.position.toArray()).toEqual([target.x, target.y, target.z])
       expect(field.sizeM?.x).toBe(ORBIT_MAX_RADIUS_M * 2)
@@ -1389,7 +1393,7 @@ describe('flight scene reference contract', () => {
     const scene = createFlightScene(config)
     try {
       const reference = scene.getReference('backward-zone')!
-      expect(scene.sceneReferences.at(-2)?.id).toBe('backward-zone')
+      expect(scene.sceneReferences.at(-5)?.id).toBe('backward-zone')
       expect(reference.positionM).toEqual({ x: 6, y: 15, z: -28 })
       expect(reference.sizeM).toEqual({ x: 28, y: 20, z: 64 })
       expect(reference.object.position.toArray()).toEqual([6, 15, -28])
@@ -1477,7 +1481,7 @@ describe('flight scene reference contract', () => {
       const reference = scene.getReference('reverse-orbit-zone')!
       const launch = scene.getReference('training-launch')!.positionM
       const target = createReverseOrbitTarget(launch, config.ground.heightM)
-      expect(scene.sceneReferences.at(-1)?.id).toBe('reverse-orbit-zone')
+      expect(scene.sceneReferences.at(-4)?.id).toBe('reverse-orbit-zone')
       expect(reference.positionM).toEqual({ x: 6, y: 50, z: -33 })
       expect(reference.positionM).toEqual(target)
       expect(reference.object.position.toArray()).toEqual([target.x, target.y, target.z])
@@ -1581,6 +1585,121 @@ describe('flight scene reference contract', () => {
       }
       expect(observations).toBeGreaterThan(20)
     } finally { scene.dispose() }
+  })
+
+  it('renders the shared gravity frame exactly with an open top and marked far-side exit on raised ground', () => {
+    const defaults = createDefaultDroneConfig()
+    const config = { ...defaults, ground: { ...defaults.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 35, z: -3 } }
+    const original = JSON.stringify(config)
+    const scene = createFlightScene(config)
+    try {
+      const launch = scene.getReference('training-launch')!.positionM
+      const gate = createGravityGate(launch, config.ground.heightM)
+      const reference = scene.getReference('gravity-gate-frame')!
+      expect(scene.sceneReferences.slice(-4).map(({ id }) => id)).toEqual([
+        'reverse-orbit-zone', 'gravity-gate-frame', 'gravity-gate-top-entry', 'gravity-gate-side-exit',
+      ])
+      expect(reference.kind).toBe('gate')
+      expect(reference.positionM).toEqual({ x: 6, y: 22, z: -43 })
+      expect(reference.sizeM).toEqual({ x: 14, y: 14, z: 14 })
+      expect(scene.getReference('gravity-gate-top-entry')!.positionM).toEqual({ x: 6, y: 29, z: -43 })
+      expect(scene.getReference('gravity-gate-side-exit')!.positionM).toEqual({ x: 6, y: 22, z: -50 })
+      expect(reference.object.visible).toBe(false)
+      scene.setLessonTarget('gravity-gate')
+      expect(reference.object.visible).toBe(true)
+      for (const name of ['reverse-orbit-field', 'backward-field', 'orbit-field', 'split-s-field', 'wide-gate-field']) {
+        expect(scene.scene.getObjectByName(name)?.visible).toBe(false)
+      }
+      expect(scene.getReference('orbit-poi')?.object.visible).toBe(false)
+      scene.scene.updateMatrixWorld(true)
+      const frame = scene.scene.getObjectByName('gravity-gate-physical-frame')!
+      expect(frame.children).toHaveLength(gate.colliders.length)
+      for (const collider of gate.colliders) {
+        const beam = scene.scene.getObjectByName(collider.id) as THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>
+        const position = beam.getWorldPosition(new THREE.Vector3())
+        expect(position.x).toBeCloseTo(collider.centerM.x, 10)
+        expect(position.y).toBeCloseTo(collider.centerM.y, 10)
+        expect(position.z).toBeCloseTo(collider.centerM.z, 10)
+        expect(beam.geometry.parameters.width).toBe(collider.halfExtentsM.x * 2)
+        expect(beam.geometry.parameters.height).toBe(collider.halfExtentsM.y * 2)
+        expect(beam.geometry.parameters.depth).toBe(collider.halfExtentsM.z * 2)
+        expect(beam.material.transparent).toBe(false)
+        expect(beam.userData.physicalColliderId).toBe(collider.id)
+      }
+      const topGuide = scene.getReference('gravity-gate-top-entry')!.object
+      const sideGuide = scene.getReference('gravity-gate-side-exit')!.object
+      expect(topGuide.getWorldPosition(new THREE.Vector3()).toArray()).toEqual([6, 29, -43])
+      expect(sideGuide.getWorldPosition(new THREE.Vector3()).toArray()).toEqual([6, 22, -50])
+      const topOpening = scene.scene.getObjectByName('gravity-gate-top-opening-guide') as THREE.LineLoop
+      const sideOpening = scene.scene.getObjectByName('gravity-gate-side-opening-guide') as THREE.LineLoop
+      expect(topOpening.isLineLoop).toBe(true)
+      expect(sideOpening.isLineLoop).toBe(true)
+      expect(frame.children.every((child) => (child as THREE.Mesh).isMesh)).toBe(true)
+      expect(scene.scene.getObjectByName('gravity-gate-downward-entry-arrow')).toBeDefined()
+      expect(scene.scene.getObjectByName('gravity-gate-outward-exit-arrow')).toBeDefined()
+      expect(scene.scene.getObjectByName('gravity-gate-height-guide')).toBeDefined()
+      expect(scene.scene.getObjectByName('gravity-gate-illustrative-route')).toBeDefined()
+      expect(JSON.stringify(config)).toBe(original)
+      scene.setLessonTarget(null)
+      expect(reference.object.visible).toBe(false)
+      expect(scene.getReference('orbit-poi')?.object.visible).toBe(true)
+    } finally { scene.dispose() }
+  })
+
+  it('changes gravity guidance through eight stages without moving or hiding physical beams or opening references', () => {
+    const scene = createFlightScene()
+    try {
+      scene.setLessonTarget('gravity-gate')
+      scene.scene.updateMatrixWorld(true)
+      const frame = scene.scene.getObjectByName('gravity-gate-physical-frame')!
+      const frameMatrix = frame.matrixWorld.clone()
+      const drone = scene.drone.matrixWorld.clone()
+      const anchors = scene.sceneReferences.map(({ id, positionM }) => ({ id, positionM: { ...positionM } }))
+      const topGuide = scene.getReference('gravity-gate-top-entry')!.object
+      const sideGuide = scene.getReference('gravity-gate-side-exit')!.object
+      const topMatrix = topGuide.matrixWorld.clone()
+      const sideMatrix = sideGuide.matrixWorld.clone()
+      const accent = scene.scene.getObjectByName('gravity-gate-stage-guidance')!
+      const ring = scene.scene.getObjectByName('gravity-gate-stage-reference') as THREE.LineLoop<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      const topOpening = scene.scene.getObjectByName('gravity-gate-top-opening-guide') as THREE.LineLoop<THREE.BufferGeometry, THREE.LineDashedMaterial>
+      const sideOpening = scene.scene.getObjectByName('gravity-gate-side-opening-guide') as THREE.LineLoop<THREE.BufferGeometry, THREE.LineDashedMaterial>
+      for (let stage = 0; stage <= 8; stage += 1) {
+        scene.setGravityGateStage(stage)
+        scene.scene.updateMatrixWorld(true)
+        expect(accent.visible).toBe(true)
+        expect(ring.material.color.getHex()).toBe(stage >= 8 ? 0xb8f36b : stage >= 4 && stage <= 5 ? 0xffc978 : 0x45d7f7)
+        expect(topOpening.material.opacity).toBe(stage >= 4 && stage <= 5 ? 1 : 0.65)
+        expect(sideOpening.material.opacity).toBe(stage >= 6 ? 1 : 0.65)
+        expect(frame.visible).toBe(true)
+        expect(frame.children.every(({ visible }) => visible)).toBe(true)
+        expect(frame.matrixWorld.equals(frameMatrix)).toBe(true)
+        expect(topGuide.matrixWorld.equals(topMatrix)).toBe(true)
+        expect(sideGuide.matrixWorld.equals(sideMatrix)).toBe(true)
+        expect(scene.drone.matrixWorld.equals(drone)).toBe(true)
+      }
+      for (const stage of [null, -1, 9, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+        scene.setGravityGateStage(stage)
+        expect(accent.visible).toBe(false)
+        expect(frame.visible).toBe(true)
+        expect(frame.children.every(({ visible }) => visible)).toBe(true)
+        expect(topGuide.visible).toBe(true)
+        expect(sideGuide.visible).toBe(true)
+      }
+      expect(scene.sceneReferences.map(({ id, positionM }) => ({ id, positionM }))).toEqual(anchors)
+    } finally { scene.dispose() }
+  })
+
+  it('disposes gravity beams, shared steel and both open-face guides exactly once', () => {
+    const scene = createFlightScene()
+    const resources = new Set<THREE.BufferGeometry | THREE.Material>()
+    scene.getReference('gravity-gate-frame')!.object.traverse((object) => {
+      const visual = object as THREE.Mesh<THREE.BufferGeometry, THREE.Material | THREE.Material[]>
+      if (visual.geometry) resources.add(visual.geometry)
+      for (const resource of Array.isArray(visual.material) ? visual.material : visual.material ? [visual.material] : []) resources.add(resource)
+    })
+    const disposals = [...resources].map((resource) => vi.spyOn(resource, 'dispose'))
+    scene.dispose()
+    for (const dispose of disposals) expect(dispose).toHaveBeenCalledOnce()
   })
 
 })

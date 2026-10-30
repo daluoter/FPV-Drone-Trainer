@@ -20,10 +20,11 @@ import { recordSplitSDemonstration } from './splitSDemonstration'
 import { recordOrbitDemonstration } from './orbitDemonstration'
 import { recordReverseOrbitDemonstration } from './reverseOrbitDemonstration'
 import { recordBackwardFlightDemonstration } from './backwardFlightDemonstration'
+import { recordGravityGateDemonstration } from './gravityGateDemonstration'
 import { BACK_FLIP_LESSON, FRONT_FLIP_LESSON, FULL_FLIP_LESSON } from './fullFlip'
 import { lessonLearningContent } from './catalog'
 
-export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'front-flip' | 'back-flip' | 'power-loop' | 'split-s' | 'orbit' | 'reverse-orbit' | 'backward-flight' | 'roll' | 'pitch' | 'yaw'
+export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'front-flip' | 'back-flip' | 'power-loop' | 'split-s' | 'orbit' | 'reverse-orbit' | 'backward-flight' | 'gravity-gate' | 'roll' | 'pitch' | 'yaw'
 
 export interface TeachingCue {
   readonly timeSeconds: number
@@ -37,12 +38,13 @@ export interface TeachingCue {
   readonly orbitPhase?: number
   readonly reverseOrbitPhase?: number
   readonly backwardPhase?: number
+  readonly gravityGatePhase?: number
 }
 
 export interface TeachingDemonstration {
   readonly schemaVersion: 1
   readonly kind: TeachingDemonstrationKind
-  readonly lessonId: 'intro' | 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'front-flip' | 'back-flip' | 'power-loop' | 'split-s' | 'orbit' | 'reverse-orbit' | 'backward-flight'
+  readonly lessonId: 'intro' | 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'front-flip' | 'back-flip' | 'power-loop' | 'split-s' | 'orbit' | 'reverse-orbit' | 'backward-flight' | 'gravity-gate'
   readonly rulesVersion: TrainingAttemptContext['rulesVersion']
   readonly physicsVersion: 1
   readonly presetId: TuningPresetSelection
@@ -193,13 +195,24 @@ export function createTeachingDemonstration(
   kind: TeachingDemonstrationKind,
 ): TeachingDemonstration {
   if (!validateTuningSettings(settings).valid) throw new RangeError('示範設定未通過驗證，請先還原有效設定。')
-  if (!['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'reverse-orbit', 'backward-flight', 'roll', 'pitch', 'yaw'].includes(kind)) {
+  if (!['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'reverse-orbit', 'backward-flight', 'gravity-gate', 'roll', 'pitch', 'yaw'].includes(kind)) {
     throw new RangeError('不支援此示範種類。')
   }
   const simulation = new FlightSimulation(flightSimulationConfigFromTuning(settings))
   const maximumThrust = settings.drone.motors.reduce((sum, motor) => sum + motor.maxThrustN, 0)
   if (settings.drone.massKg * settings.drone.gravityMps2 / maximumThrust >= 0.8) {
     throw new RangeError('目前推力不足以完成穩定示範，請檢查機體設定。')
+  }
+  if (kind === 'gravity-gate') {
+    const { recording, cues } = recordGravityGateDemonstration(simulation, settings, stickForRate, collectiveThrottle)
+    return Object.freeze({
+      schemaVersion: 1, kind, lessonId: kind,
+      rulesVersion: trainingRulesVersionForLesson(kind), physicsVersion: 1,
+      presetId: identifyTuningPreset(settings), settingsFingerprint: fingerprintTrainingSettings(settings),
+      title: courseDemonstrationTitle(kind, '地面起飛、上拋收油、頂部進框與側面改出'),
+      description: '模擬示範，以實際搖桿、同一套物理與實體門框完成重力門；從頂部向下進框，再從指定側面飛出並恢復控制。真人練習全程自行操控，觀看不計通關。',
+      source: 'simulated', recording, cues,
+    })
   }
   if (kind === 'reverse-orbit') {
     const { recording, cues } = recordReverseOrbitDemonstration(simulation, settings, stickForRate, collectiveThrottle)
@@ -520,6 +533,18 @@ export function teachingReverseOrbitPhaseAt(demonstration: TeachingDemonstration
     if (cue.timeSeconds > time + TEACHING_CLOCK_TOLERANCE_SECONDS) break
     const candidate = cue.reverseOrbitPhase
     if (typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 0 && candidate <= 7) phase = candidate
+  }
+  return phase
+}
+
+/** Gravity-gate guidance follows observed checkpoints on the independent movie clock. */
+export function teachingGravityGatePhaseAt(demonstration: TeachingDemonstration, timeSeconds: number): number | null {
+  const time = Number.isFinite(timeSeconds) ? Math.max(0, timeSeconds) : 0
+  let phase: number | null = null
+  for (const cue of demonstration.cues) {
+    if (cue.timeSeconds > time + TEACHING_CLOCK_TOLERANCE_SECONDS) break
+    const candidate = cue.gravityGatePhase
+    if (typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 0 && candidate <= 8) phase = candidate
   }
   return phase
 }

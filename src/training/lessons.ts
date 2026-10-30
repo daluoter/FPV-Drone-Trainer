@@ -1,3 +1,4 @@
+import { GRAVITY_GATE_LESSON } from './gravityGate'
 import { LANDING_LESSON } from './landing'
 import { STRAIGHT_LINE_LESSON } from './straightLine'
 import { DIRECTION_CONTROL_LESSON } from './directionControl'
@@ -143,6 +144,7 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
   POWER_LOOP_LESSON,
   BACKWARD_FLIGHT_LESSON,
   REVERSE_ORBIT_LESSON,
+  GRAVITY_GATE_LESSON,
 ]
 
 /** Legacy hover and combined-flip definitions remain available only for history. */

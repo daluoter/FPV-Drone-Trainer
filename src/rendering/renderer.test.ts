@@ -346,6 +346,47 @@ describe('FlightRenderer crane-orbit presentation', () => {
   })
 })
 
+describe('FlightRenderer gravity-gate presentation', () => {
+  it('retains top-entry and side-exit guidance across scene rebuild on the same canvas without touching flight', () => {
+    const canvas = document.createElement('canvas')
+    const rendererStub = createRendererStub()
+    const renderer = new FlightRenderer(canvas, { rendererFactory: () => rendererStub })
+    try {
+      renderer.setLessonTarget('gravity-gate')
+      renderer.setGravityGateStage(6)
+      const state = createInitialDroneState(DEFAULT_DRONE_CONFIG)
+      const original = JSON.stringify(state)
+      renderer.render(state)
+      const previous = renderer.flightScene
+      const dispose = vi.spyOn(previous, 'dispose')
+      renderer.reconfigureScene({ ...DEFAULT_DRONE_CONFIG, ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 35, z: -3 } })
+      expect(renderer.canvas).toBe(canvas)
+      expect(renderer.renderer).toBe(rendererStub)
+      expect(dispose).toHaveBeenCalledOnce()
+      expect(renderer.flightScene.getReference('gravity-gate-frame')?.positionM).toEqual({ x: 6, y: 22, z: -43 })
+      expect(renderer.flightScene.getReference('gravity-gate-top-entry')?.positionM).toEqual({ x: 6, y: 29, z: -43 })
+      expect(renderer.flightScene.getReference('gravity-gate-side-exit')?.positionM).toEqual({ x: 6, y: 22, z: -50 })
+      expect(renderer.scene.getObjectByName('gravity-gate-field')?.visible).toBe(true)
+      expect(renderer.scene.getObjectByName('gravity-gate-physical-frame')?.children).toHaveLength(12)
+      expect(renderer.scene.getObjectByName('reverse-orbit-field')?.visible).toBe(false)
+      const accent = renderer.scene.getObjectByName('gravity-gate-stage-guidance')!
+      expect(accent.getWorldPosition(new THREE.Vector3()).toArray()).toEqual([6, 22, -50])
+      const guide = renderer.scene.getObjectByName('gravity-gate-stage-reference') as THREE.LineLoop<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      expect(guide.material.color.getHex()).toBe(0x45d7f7)
+      renderer.setGravityGateStage(8)
+      expect(guide.material.color.getHex()).toBe(0xb8f36b)
+      renderer.setGravityGateStage(null)
+      renderer.reconfigureScene(DEFAULT_DRONE_CONFIG)
+      expect(renderer.scene.getObjectByName('gravity-gate-stage-guidance')?.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('gravity-gate-physical-frame')?.visible).toBe(true)
+      renderer.setLessonTarget('backward-flight')
+      expect(renderer.scene.getObjectByName('gravity-gate-field')?.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('backward-field')?.visible).toBe(true)
+      expect(JSON.stringify(state)).toBe(original)
+    } finally { renderer.dispose() }
+  })
+})
+
 describe('FlightRenderer lifecycle and failure contract', () => {
   it('reuses a canvas after disposal without forcing its WebGL context lost', () => {
     const canvas = document.createElement('canvas')

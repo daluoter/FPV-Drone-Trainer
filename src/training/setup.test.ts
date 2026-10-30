@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_LESSONS } from './lessons'
 import { prepareTrainingSetup } from './setup'
 import type { TrainingSetupRequest } from './types'
+import { createGravityGate } from '../world/gravityGate'
 
 function requestFor(lessonId: string): TrainingSetupRequest {
   return { lessonId, sessionId: 'setup-test', setup: DEFAULT_LESSONS.find((lesson) => lesson.id === lessonId)!.setup }
@@ -43,5 +44,26 @@ describe('reference-relative training setup', () => {
     const landing = requestFor('landing')
     expect(prepareTrainingSetup(landing, [])).toBe(landing)
     expect(prepareTrainingSetup(null, [])).toBeNull()
+  })
+
+  it('prepares L19 only from explicit launch and ground anchors and installs the shared solid frame', () => {
+    const request: TrainingSetupRequest = { lessonId: 'gravity-gate', sessionId: 'gravity-setup', setup: {
+      requiresDisarmed: true, resetSimulation: true,
+      sceneReferenceIds: ['training-launch', 'landing-surface', 'gravity-gate-frame'],
+      spawnOrientation: { x: 0, y: 0, z: 0, w: 1 },
+    } }
+    const before = JSON.stringify(request)
+    const references = [
+      { id: 'training-launch', kind: 'pad', positionM: { x: 6, y: 5.05, z: -3 } },
+      { id: 'landing-surface', kind: 'zone', positionM: { x: 0, y: 5, z: 0 } },
+    ]
+    const prepared = prepareTrainingSetup(request, references)!
+    expect(prepared.setup.spawnPositionM).toEqual(references[0].positionM)
+    expect(prepared.setup.spawnOrientation).toEqual({ x: 0, y: 0, z: 0, w: 1 })
+    expect(prepared.setup.staticObstacles).toEqual(createGravityGate(references[0].positionM, 5).colliders)
+    expect(prepared.setup.staticObstacles).toHaveLength(12)
+    expect(JSON.stringify(request)).toBe(before)
+    expect(prepareTrainingSetup(request, references.slice(0, 1))).toBe(request)
+    expect(prepareTrainingSetup(request, references.slice(1))).toBe(request)
   })
 })

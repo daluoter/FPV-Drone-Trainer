@@ -23,3 +23,5 @@ export * from './basicRecovery'
 export * from './fullRoll'
 export * from './backwardFlight'
 export * from './reverseOrbit'
+
+export * from './gravityGate'

@@ -38,6 +38,9 @@ vi.mock('../rendering', () => {
     { id: 'orbit-poi', kind: 'poi', positionM: { x: 4, y: 2.5, z: 4 }, sizeM: { x: 0.36, y: 4, z: 0.36 } },
     { id: 'training-launch', kind: 'pad', positionM: { x: 0, y: 0.046, z: 0 } },
     { id: 'landing-surface', kind: 'zone', positionM: { x: 0, y: 0, z: -8 }, sizeM: { x: 3, y: 0, z: 3 } },
+    { id: 'gravity-gate-frame', kind: 'gate', positionM: { x: 0, y: 17, z: -40 }, sizeM: { x: 14, y: 14, z: 14 } },
+    { id: 'gravity-gate-top-entry', kind: 'marker', positionM: { x: 0, y: 24, z: -40 } },
+    { id: 'gravity-gate-side-exit', kind: 'marker', positionM: { x: 0, y: 17, z: -47 } },
   ]
 
   class MockFlightRenderer {
@@ -312,7 +315,9 @@ describe('integrated training/runtime UI boundaries', () => {
     { lessonId: 'split-s', code: 'L14', steps: 8, nextCode: 'L15' },
     { lessonId: 'reverse-orbit', code: 'L16', steps: 7, nextCode: 'L17' },
     { lessonId: 'reverse-orbit', code: 'L16 一般鏡頭', steps: 7, nextCode: 'L17', presetId: 'standard' },
-    { lessonId: 'backward-flight', code: 'L17', steps: 7, nextCode: null },
+    { lessonId: 'backward-flight', code: 'L17', steps: 7, nextCode: 'L19' },
+    { lessonId: 'gravity-gate', code: 'L19', steps: 8, nextCode: null },
+    { lessonId: 'gravity-gate', code: 'L19 一般設定', steps: 8, nextCode: null, presetId: 'standard' },
   ] as const)('records an ordered $code result once and restores its current-rule progress after reload', (definition) => {
     const { lessonId, steps, nextCode } = definition
     const presetId = 'presetId' in definition && definition.presetId ? definition.presetId : 'beginner'

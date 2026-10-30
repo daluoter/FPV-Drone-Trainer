@@ -18,6 +18,7 @@ import { createOrbitTarget, ORBIT_TARGET_HEIGHT_M, ORBIT_TARGET_RADIUS_M, ORBIT_
 import { BACKWARD_FLIGHT_TARGET_HEIGHT_M } from '../training/backwardFlight'
 import { createReverseOrbitTarget, REVERSE_ORBIT_TARGET_HEIGHT_M, REVERSE_ORBIT_FLIGHT_HEIGHT_M, REVERSE_ORBIT_TARGET_RADIUS_M, REVERSE_ORBIT_MIN_RADIUS_M, REVERSE_ORBIT_MAX_RADIUS_M, REVERSE_ORBIT_MIN_ENTRY_HEIGHT_M, REVERSE_ORBIT_MAX_ENTRY_HEIGHT_M } from '../training/reverseOrbit'
 import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
+import { createGravityGate, GRAVITY_GATE_OPENING_WIDTH_M, GRAVITY_GATE_OPENING_DEPTH_M, GRAVITY_GATE_OPENING_HEIGHT_M } from '../world/gravityGate'
 import type { Vector3 } from '../math/vector'
 import type { ReplayGhostState } from '../replay'
 
@@ -75,6 +76,8 @@ export interface FlightScene {
   setBackwardFlightStage(stage: number | null): void
   /** Highlight the crane, three lap milestones and exit without steering flight. */
   setReverseOrbitStage(stage: number | null): void
+  /** Highlight the top entry and marked side exit while keeping the physical frame fixed. */
+  setGravityGateStage(stage: number | null): void
   /** Presentation-only bounded path trace; evaluators remain renderer-independent. */
   setTrainingPath(path: readonly Vector3[]): void
   setReplayPath(path: readonly Vector3[]): void
@@ -1505,9 +1508,130 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     positionM: { ...reverseOrbitTarget }, sizeM: { x: REVERSE_ORBIT_MAX_RADIUS_M * 2,
       y: REVERSE_ORBIT_TARGET_HEIGHT_M, z: REVERSE_ORBIT_MAX_RADIUS_M * 2 } }
 
+  // Every solid beam comes from the same immutable boxes installed in physics.
+  // The colored lines and arrows mark genuinely open faces; they add no panels.
+  const gravityGate = createGravityGate(field.launch, config.ground.heightM)
+  const gravityField = new THREE.Group()
+  gravityField.name = 'gravity-gate-field'
+  gravityField.position.set(gravityGate.centerM.x, gravityGate.centerM.y, gravityGate.centerM.z)
+  gravityField.visible = false
+  const gravityLocal = (point: Vector3): THREE.Vector3 => new THREE.Vector3(
+    point.x - gravityGate.centerM.x, point.y - gravityGate.centerM.y, point.z - gravityGate.centerM.z)
+  const gravityFrame = new THREE.Group()
+  gravityFrame.name = 'gravity-gate-physical-frame'
+  const gravitySteel = material(0x879ba4, 0.5, 0.22)
+  const gravityTopSteel = material(0xffc15b, 0.52, 0.18)
+  gravityTopSteel.emissive.set(0x704310)
+  gravityTopSteel.emissiveIntensity = 0.38
+  const gravityExitSteel = material(0x45d7f7, 0.52, 0.18)
+  gravityExitSteel.emissive.set(0x105363)
+  gravityExitSteel.emissiveIntensity = 0.38
+  for (const collider of gravityGate.colliders) {
+    const box = new THREE.Mesh(new THREE.BoxGeometry(
+      collider.halfExtentsM.x * 2, collider.halfExtentsM.y * 2, collider.halfExtentsM.z * 2),
+    collider.id.includes('-top-') ? gravityTopSteel : collider.id.includes('-far-') ? gravityExitSteel : gravitySteel)
+    box.name = collider.id
+    box.position.copy(gravityLocal(collider.centerM))
+    box.userData = { physicalColliderId: collider.id }
+    gravityFrame.add(box)
+  }
+  gravityField.add(gravityFrame)
+  const gravityHalfWidth = GRAVITY_GATE_OPENING_WIDTH_M / 2
+  const gravityHalfDepth = GRAVITY_GATE_OPENING_DEPTH_M / 2
+  const gravityHalfHeight = GRAVITY_GATE_OPENING_HEIGHT_M / 2
+  const gravityTopGuide = new THREE.Group()
+  gravityTopGuide.name = 'gravity-gate-top-entry'
+  gravityTopGuide.position.copy(gravityLocal(gravityGate.topEntryCenterM))
+  gravityTopGuide.userData = { teachingReference: '金色頂部入口；由上往下進入', collision: false }
+  const gravityTopLineMaterial = new THREE.LineDashedMaterial({ color: 0xffc978, transparent: true,
+    opacity: 0.75, dashSize: 0.65, gapSize: 0.5, depthWrite: false })
+  const gravityTopOpening = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-gravityHalfWidth + 0.65, 0.05, -gravityHalfDepth + 0.65),
+    new THREE.Vector3(gravityHalfWidth - 0.65, 0.05, -gravityHalfDepth + 0.65),
+    new THREE.Vector3(gravityHalfWidth - 0.65, 0.05, gravityHalfDepth - 0.65),
+    new THREE.Vector3(-gravityHalfWidth + 0.65, 0.05, gravityHalfDepth - 0.65),
+  ]), gravityTopLineMaterial)
+  gravityTopOpening.name = 'gravity-gate-top-opening-guide'
+  gravityTopOpening.computeLineDistances()
+  const gravityDropArrow = new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0),
+    new THREE.Vector3(-2.7, 5, 0), 4, 0xffc978, 1.1, 0.7)
+  gravityDropArrow.name = 'gravity-gate-downward-entry-arrow'
+  gravityTopGuide.add(gravityTopOpening, gravityDropArrow)
+  gravityField.add(gravityTopGuide)
+  const gravitySideGuide = new THREE.Group()
+  gravitySideGuide.name = 'gravity-gate-side-exit'
+  gravitySideGuide.position.copy(gravityLocal(gravityGate.sideExitCenterM))
+  gravitySideGuide.userData = { teachingReference: '青色側面出口；由框內向外離開', collision: false }
+  const gravitySideLineMaterial = new THREE.LineDashedMaterial({ color: 0x45d7f7, transparent: true,
+    opacity: 0.75, dashSize: 0.65, gapSize: 0.5, depthWrite: false })
+  const gravitySideOpening = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-gravityHalfWidth + 0.65, -gravityHalfHeight + 0.65, -0.05),
+    new THREE.Vector3(gravityHalfWidth - 0.65, -gravityHalfHeight + 0.65, -0.05),
+    new THREE.Vector3(gravityHalfWidth - 0.65, gravityHalfHeight - 0.65, -0.05),
+    new THREE.Vector3(-gravityHalfWidth + 0.65, gravityHalfHeight - 0.65, -0.05),
+  ]), gravitySideLineMaterial)
+  gravitySideOpening.name = 'gravity-gate-side-opening-guide'
+  gravitySideOpening.computeLineDistances()
+  const gravityExitArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1),
+    new THREE.Vector3(0, 0, 1), 6, 0x45d7f7, 1.2, 0.85)
+  gravityExitArrow.name = 'gravity-gate-outward-exit-arrow'
+  gravitySideGuide.add(gravitySideOpening, gravityExitArrow)
+  gravityField.add(gravitySideGuide)
+  // This illustrative route leaves room above the frame and does not impose
+  // exact waypoints, an exact flip or an airborne starting pose.
+  const gravityRoutePoints = [
+    { x: field.launch.x, y: config.ground.heightM + 0.15, z: field.launch.z },
+    { x: field.launch.x, y: config.ground.heightM + 13, z: field.launch.z - 12 },
+    { x: field.launch.x, y: gravityGate.topY + 5, z: gravityGate.centerM.z + 3 },
+    { x: gravityGate.centerM.x, y: gravityGate.topY + 1, z: gravityGate.centerM.z },
+    { x: gravityGate.centerM.x, y: gravityGate.centerM.y + 1, z: gravityGate.centerM.z - 3 },
+    { x: gravityGate.centerM.x, y: gravityGate.centerM.y, z: gravityGate.exitZ - 8 },
+  ].map(gravityLocal)
+  const gravityRoute = new THREE.Line(new THREE.BufferGeometry().setFromPoints(
+    new THREE.CatmullRomCurve3(gravityRoutePoints, false, 'centripetal').getPoints(120)),
+  new THREE.LineDashedMaterial({ color: 0x99b2bb, transparent: true, opacity: 0.4,
+    dashSize: 0.7, gapSize: 0.55, depthWrite: false }))
+  gravityRoute.name = 'gravity-gate-illustrative-route'
+  gravityRoute.userData = { teachingReference: '上拋、頂入、側出的路線示意；不要求貼線', collision: false }
+  gravityRoute.computeLineDistances()
+  gravityField.add(gravityRoute)
+  const gravityRulerX = gravityGate.minX - 3
+  const gravityRulerZ = gravityGate.maxZ
+  const gravityHeightGuide = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([
+    gravityLocal({ x: gravityRulerX, y: config.ground.heightM + 0.02, z: gravityRulerZ }),
+    gravityLocal({ x: gravityRulerX, y: gravityGate.topY + 5, z: gravityRulerZ }),
+    ...[gravityGate.bottomY, gravityGate.topY, gravityGate.topY + 5].flatMap((y) => [
+      gravityLocal({ x: gravityRulerX - 0.6, y, z: gravityRulerZ }),
+      gravityLocal({ x: gravityRulerX + 0.6, y, z: gravityRulerZ }),
+    ]),
+  ]), new THREE.LineBasicMaterial({ color: 0x99b2bb, transparent: true, opacity: 0.65, depthWrite: false }))
+  gravityHeightGuide.name = 'gravity-gate-height-guide'
+  gravityField.add(gravityHeightGuide)
+  const gravityAccent = new THREE.Group()
+  gravityAccent.name = 'gravity-gate-stage-guidance'
+  gravityAccent.position.copy(gravityLocal({ x: field.launch.x, y: config.ground.heightM + 0.08, z: field.launch.z }))
+  const gravityStageMaterial = new THREE.LineBasicMaterial({ color: 0x45d7f7,
+    transparent: true, opacity: 0.95, depthWrite: false })
+  const gravityStageRing = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 48 }, (_, index) => {
+    const angle = index / 48 * Math.PI * 2
+    return new THREE.Vector3(Math.sin(angle) * 2, 0, Math.cos(angle) * 2)
+  })), gravityStageMaterial)
+  gravityStageRing.name = 'gravity-gate-stage-reference'
+  gravityAccent.add(gravityStageRing)
+  gravityField.add(gravityAccent)
+  scene.add(gravityField)
+  const gravityGateReferences: FlightSceneReference[] = [
+    { id: 'gravity-gate-frame', kind: 'gate', object: gravityField, positionM: { ...gravityGate.centerM },
+      sizeM: { x: GRAVITY_GATE_OPENING_WIDTH_M, y: GRAVITY_GATE_OPENING_HEIGHT_M, z: GRAVITY_GATE_OPENING_DEPTH_M } },
+    { id: 'gravity-gate-top-entry', kind: 'marker', object: gravityTopGuide, positionM: { ...gravityGate.topEntryCenterM },
+      sizeM: { x: GRAVITY_GATE_OPENING_WIDTH_M, y: 0, z: GRAVITY_GATE_OPENING_DEPTH_M } },
+    { id: 'gravity-gate-side-exit', kind: 'marker', object: gravitySideGuide, positionM: { ...gravityGate.sideExitCenterM },
+      sizeM: { x: GRAVITY_GATE_OPENING_WIDTH_M, y: GRAVITY_GATE_OPENING_HEIGHT_M, z: 0 } },
+  ]
+
   const landingSurface: FlightSceneReference = { id: 'landing-surface', kind: 'zone', object: landingTarget, positionM: { ...field.landing }, sizeM: { x: LANDING_ZONE_RADIUS_M * 2, y: 0, z: LANDING_ZONE_RADIUS_M * 2 } }
   const launchReference: FlightSceneReference = { id: 'training-launch', kind: 'pad', object: takeoffPad, positionM: { ...field.launch } }
-  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, recoveryReference, rollReference, flipReference, loopReference, splitReference, orbitReference, backwardReference, reverseOrbitReference]
+  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, recoveryReference, rollReference, flipReference, loopReference, splitReference, orbitReference, backwardReference, reverseOrbitReference, ...gravityGateReferences]
   const referenceById = new Map(sceneReferences.map((reference) => [reference.id, reference]))
 
   const drone = createQuadVisual()
@@ -1594,7 +1718,8 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     orbitField.visible = lessonId === 'orbit'
     backwardField.visible = lessonId === 'backward-flight'
     reverseOrbitField.visible = lessonId === 'reverse-orbit'
-    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'backward-flight', 'reverse-orbit'].includes(lessonId ?? '')
+    gravityField.visible = lessonId === 'gravity-gate'
+    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'backward-flight', 'reverse-orbit', 'gravity-gate'].includes(lessonId ?? '')
     for (const reference of referenceSet.contract) {
       reference.object.visible = !beginner
     }
@@ -1725,6 +1850,30 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
       stage <= 1 ? field.launch.z - reverseOrbitTarget.z : stage === 2 ? REVERSE_ORBIT_TARGET_RADIUS_M : 0)
   }
 
+  const setGravityGateStage = (stage: number | null): void => {
+    if (stage === null || !Number.isInteger(stage) || stage < 0 || stage > 8) {
+      gravityAccent.visible = false
+      gravityTopLineMaterial.opacity = 0.5
+      gravitySideLineMaterial.opacity = 0.5
+      return
+    }
+    gravityAccent.visible = true
+    gravityTopLineMaterial.opacity = stage >= 4 && stage <= 5 ? 1 : 0.65
+    gravitySideLineMaterial.opacity = stage >= 6 ? 1 : 0.65
+    gravityStageMaterial.color.set(stage >= 8 ? 0xb8f36b : stage >= 4 && stage <= 5 ? 0xffc978 : 0x45d7f7)
+    const point: Vector3 = stage <= 1
+      ? { x: field.launch.x, y: config.ground.heightM + 0.08, z: field.launch.z }
+      : stage <= 3
+        ? { x: field.launch.x, y: config.ground.heightM + 13, z: field.launch.z - 12 }
+        : stage <= 5 ? gravityGate.topEntryCenterM
+          : stage === 6 ? gravityGate.sideExitCenterM
+            : { ...gravityGate.sideExitCenterM, z: gravityGate.exitZ - 8 }
+    gravityAccent.position.copy(gravityLocal(point))
+    // The highlighted ring changes orientation for the side opening only.
+    // The physical beams and both opening references remain fixed throughout.
+    gravityStageRing.rotation.x = stage >= 6 && stage <= 7 ? Math.PI / 2 : 0
+  }
+
   const setPath = (line: THREE.Line, path: readonly Vector3[], yOffset: number): void => {
     const maximumPoints = 1_200
     const stride = Math.max(1, Math.ceil(path.length / maximumPoints))
@@ -1778,6 +1927,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     setOrbitStage,
     setBackwardFlightStage,
     setReverseOrbitStage,
+    setGravityGateStage,
     setTrainingPath,
     setReplayPath,
     dispose: () => disposeFlightScene(scene),

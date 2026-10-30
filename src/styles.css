@@ -1851,16 +1851,20 @@ h1 em {
 .flight-reverse-orbit-hud { width: 315px; }
 .flight-reverse-orbit-hud > small { display: block; margin-top: 4px; color: #afc6c5; font-size: 10px; }
 .flight-reverse-orbit-hud > small b { display: inline; font-size: 11px; }
-/* Overhead crane arms remain visible above the L16 instrument dock. */
-.has-reverse-orbit-hud .flight-instruments { top: auto; bottom: 12px; align-items: flex-end; }
-.has-reverse-orbit-hud .flight-position-hud > small,
-.has-reverse-orbit-hud .flight-reverse-orbit-hud > small:last-child { display: none; }
-.has-reverse-orbit-hud .flight-position-hud { font-size: 11px; line-height: 1.4; }
-.has-reverse-orbit-hud .flight-altitude strong { font-size: 20px; }
-.has-reverse-orbit-hud .flight-safe-overlay { top: 40%; }
+.flight-gravity-gate-hud { width: 310px; }
+.flight-gravity-gate-hud > div { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px 12px; }
+.flight-gravity-gate-hud > small { display: block; color: #ffd182; font-size: 11px; }
+/* Keep overhead teaching references clear above the instrument dock. */
+:is(.has-reverse-orbit-hud, .has-gravity-gate-hud) .flight-instruments { top: auto; bottom: 12px; align-items: flex-end; }
+:is(.has-reverse-orbit-hud, .has-gravity-gate-hud) .flight-position-hud > small,
+:is(.has-reverse-orbit-hud, .has-gravity-gate-hud) .flight-reverse-orbit-hud > small:last-child { display: none; }
+:is(.has-reverse-orbit-hud, .has-gravity-gate-hud) .flight-position-hud { font-size: 11px; line-height: 1.4; }
+:is(.has-reverse-orbit-hud, .has-gravity-gate-hud) .flight-altitude strong { font-size: 20px; }
+:is(.has-reverse-orbit-hud, .has-gravity-gate-hud) .flight-safe-overlay { top: 40%; }
 .school-viewport-hint.is-below-viewport { position: static; max-height: none; overflow: visible; }
 @media (max-width: 620px) {
   .has-reverse-orbit-hud .flight-safe-overlay { top: 90px; }
+  .has-gravity-gate-hud .flight-safe-overlay { top: 64px; }
 }
 .flight-backward-hud > small { display: block; margin-top: 4px; color: #afc6c5; font-size: 10px; }
 .has-backward-hud .flight-safe-overlay { top: max(246px, 62%); }

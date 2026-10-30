@@ -238,6 +238,118 @@ describe('interactive free camera', () => {
 })
 
 describe('Free Flight native navigation confirmation', () => {
+  it('shows gravity-gate entry errors and retains the first retry facts below the viewport', () => {
+    const props = { poller: createBrowserGamepadPoller(), profile: null, settings: createDefaultTuningSettings() }
+    const base = createTrainingMachineState({ initialLessonId: 'gravity-gate' })
+    const { rerender } = render(<FreeFlight {...props} trainingState={base} />)
+    expect(screen.getByRole('group', { name: '重力門即時狀態' })).toHaveTextContent('即時重力門數值')
+    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ○ → 側面出 ○')
+    for (const id of ['gravity-gate-top-offset', 'gravity-gate-entry-x', 'gravity-gate-entry-z', 'gravity-gate-side-distance']) {
+      expect(screen.getByTestId(id)).toHaveTextContent('—')
+    }
+    const observed: TrainingMachineState = { ...base, phase: 'ACTIVE', lastEvaluation: { status: 'continue', metrics: {
+      gravityGatePhase: 6, gravityGateEntered: 1, gravityGateExited: 0,
+      gravityGateTopHeightDifferenceM: -2.5, gravityGateEntryHorizontalErrorM: 1.2,
+      gravityGateEntryForwardErrorM: -1.7, gravityGateExitDistanceM: 5.3,
+    } } }
+    rerender(<FreeFlight {...props} trainingState={observed} />)
+    expect(screen.getByTestId('gravity-gate-phase')).toHaveTextContent('6 / 8 步')
+    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ✓ → 側面出 ○')
+    expect(screen.getByTestId('gravity-gate-top-offset')).toHaveTextContent('-2.5 m')
+    expect(screen.getByTestId('gravity-gate-entry-x')).toHaveTextContent('1.2 m')
+    expect(screen.getByTestId('gravity-gate-entry-z')).toHaveTextContent('-1.7 m')
+    expect(screen.getByTestId('gravity-gate-side-distance')).toHaveTextContent('5.3 m')
+    const recovering = { ...observed, recoveryInProgress: true, lastRecovery: { timestampSeconds: 12,
+      message: '頂入口錯過：當時右偏 8.2 m', hint: '拉開距離，重新帶速上拋。', metrics: { interruptionGravityGateEntryHorizontalErrorM: 8.2 } } }
+    rerender(<FreeFlight {...props} trainingState={recovering} />)
+    const hint = screen.getByLabelText('目前練習提示')
+    expect(hint).toHaveTextContent('當時右偏 8.2 m')
+    expect(hint).toHaveTextContent('重新帶速上拋')
+    expect(hint).toHaveClass('is-below-viewport')
+    const viewport = screen.getByRole('group', { name: 'Three.js Free Flight simulation viewport' })
+    expect(viewport.contains(hint)).toBe(false)
+    for (const id of ['flight-altitude', 'flight-position-x', 'flight-position-y', 'flight-position-z']) {
+      expect(within(viewport).getByTestId(id)).toBeInTheDocument()
+    }
+    rerender(<FreeFlight {...props} trainingState={createTrainingMachineState({ initialLessonId: 'takeoff' })} />)
+    expect(screen.queryByRole('group', { name: '重力門即時狀態' })).not.toBeInTheDocument()
+    rerender(<FreeFlight {...props} trainingState={base} />)
+    expect(screen.getByTestId('gravity-gate-top-offset')).toHaveTextContent('—')
+    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ○ → 側面出 ○')
+  })
+
+  it('plays eight measured gravity-gate steps and rewinds passage proof without updating live flight or saved results', () => {
+    window.localStorage.clear()
+    render(<App />)
+    const canvas = screen.getByLabelText('Free Flight 3D scene')
+    fireEvent.change(screen.getByLabelText('選擇課程'), { target: { value: 'gravity-gate' } })
+    fireEvent.change(screen.getByLabelText('控制方式'), { target: { value: 'keyboard' } })
+    const hud = () => screen.getByRole('group', { name: '重力門即時狀態' })
+    const frameVisible = () => frames.renderer!.scene.getObjectByName('gravity-gate-field')?.visible
+    expect(hud()).toHaveTextContent('即時')
+    expect(frameVisible()).toBe(true)
+    const physicalFrame = frames.runtime!.simulation.getStaticObstacles()
+    expect(physicalFrame).toHaveLength(12)
+    const liveSteps = screen.getByRole('list', { name: '本課步驟' }).textContent
+    const stored = () => Object.fromEntries(Object.entries(window.localStorage).filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.')))
+    const before = stored()
+    const live = JSON.stringify(frames.runtime!.simulation.getState())
+    fireEvent.click(screen.getByRole('button', { name: 'L19 重力門示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    expect(screen.getByRole('button', { name: '0.5×' })).toHaveAttribute('aria-pressed', 'true')
+    const progress = screen.getByRole('region', { name: '示範進度' })
+    expect(progress).toHaveTextContent('L19 重力門')
+    const chapters = within(progress).getAllByRole('button')
+    expect(chapters).toHaveLength(8)
+    fireEvent.click(chapters[6])
+    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ✓ → 側面出 ○')
+    const playback = frames.runtime!.getReplayPlayback()!
+    const pausedTime = playback.getState().currentTimeSeconds
+    const held = hud().textContent
+    frame(400)
+    expect(hud().textContent).toBe(held)
+    expect(playback.getState().currentTimeSeconds).toBe(pausedTime)
+    expect(JSON.stringify(frames.runtime!.simulation.getState())).toBe(live)
+    expect(frames.runtime!.simulation.getStaticObstacles()).toEqual(physicalFrame)
+    fireEvent.change(screen.getByRole('slider'), { target: { value: playback.durationSeconds } })
+    expect(progress).toHaveTextContent('8 / 8 個示範步驟完成')
+    expect(screen.getByTestId('gravity-gate-phase')).toHaveTextContent('8 / 8 步')
+    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ✓ → 側面出 ✓')
+    expect(Number.parseFloat(screen.getByTestId('gravity-gate-side-distance').textContent!)).toBeLessThan(0)
+    fireEvent.click(chapters[6])
+    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ✓ → 側面出 ○')
+    fireEvent.change(screen.getByRole('slider'), { target: { value: 0 } })
+    expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ○ → 側面出 ○')
+    expect(progress).not.toHaveTextContent('8 / 8 個示範步驟完成')
+    fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
+    expect(screen.getByRole('list', { name: '本課步驟' }).textContent).toBe(liveSteps)
+    expect(screen.getByTestId('gravity-gate-top-offset')).toHaveTextContent('—')
+    expect(hud()).toHaveTextContent('即時')
+    expect(frameVisible()).toBe(true)
+    expect(frames.runtime!.simulation.getStaticObstacles()).toEqual(physicalFrame)
+    act(() => { expect(frames.runtime!.enterReplay(playback.recording)).toBe(true) })
+    frame(500)
+    expect(screen.queryByRole('group', { name: '重力門即時狀態' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '示範進度' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '結束回放' }))
+    fireEvent.click(screen.getByRole('button', { name: /^偏航$/ }))
+    expect(screen.queryByRole('group', { name: '重力門即時狀態' })).not.toBeInTheDocument()
+    expect(frameVisible()).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
+    expect(frameVisible()).toBe(true)
+    expect(frames.runtime!.simulation.getStaticObstacles()).toEqual(physicalFrame)
+    expect(screen.getByLabelText('選擇課程')).toHaveValue('gravity-gate')
+    expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
+    expect(screen.getByRole('button', { name: /^Arm$/ })).toBeEnabled()
+    expect(stored()).toEqual(before)
+    fireEvent.click(screen.getByRole('button', { name: '自由飛行' }))
+    expect(frames.runtime!.simulation.getStaticObstacles()).toHaveLength(0)
+    expect(frameVisible()).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: '開始學飛' }))
+    expect(frames.runtime!.simulation.getStaticObstacles()).toEqual(physicalFrame)
+    expect(frameVisible()).toBe(true)
+  }, 15_000)
+
   it('shows observed upward view and crane visibility without carrying readings across lessons', () => {
     const props = { poller: createBrowserGamepadPoller(), profile: null, settings: createDefaultTuningSettings() }
     const base = createTrainingMachineState({ initialLessonId: 'reverse-orbit' })
@@ -295,9 +407,10 @@ describe('Free Flight native navigation confirmation', () => {
     expect(frames.renderer!.scene.getObjectByName('reverse-orbit-crane')).toBeDefined()
     expect(frames.runtime!.simulation.getStaticObstacles()).toHaveLength(0)
     const demoButtons = within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')
-    expect(demoButtons).toHaveLength(20)
-    expect(demoButtons.at(-2)).toHaveTextContent('L16 倒刷鍋示範')
-    expect(demoButtons.at(-1)).toHaveTextContent('L17 後退飛行示範')
+    expect(demoButtons).toHaveLength(21)
+    expect(demoButtons.at(-3)).toHaveTextContent('L16 倒刷鍋示範')
+    expect(demoButtons.at(-2)).toHaveTextContent('L17 後退飛行示範')
+    expect(demoButtons.at(-1)).toHaveTextContent('L19 重力門示範')
     const initialAltitude = screen.getByTestId('flight-altitude').textContent
     const liveSteps = screen.getByRole('list', { name: '本課步驟' }).textContent
     const stored = () => Object.fromEntries(Object.entries(window.localStorage).filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.')))
@@ -399,7 +512,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(hud()).toHaveTextContent('即時')
     expect(frames.renderer!.scene.getObjectByName('backward-field')?.visible).toBe(true)
     expect(frames.runtime!.simulation.getStaticObstacles()).toHaveLength(0)
-    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(20)
+    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(21)
     const initialAltitude = screen.getByTestId('flight-altitude').textContent
     const liveSteps = screen.getByRole('list', { name: '本課步驟' }).textContent
     const stored = () => Object.fromEntries(Object.entries(window.localStorage).filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.')))
@@ -466,7 +579,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(screen.getByTestId('orbit-progress')).toHaveTextContent('0°')
     expect(screen.getByTestId('orbit-radius')).toHaveTextContent('—')
     expect(screen.getByTestId('orbit-heading')).toHaveTextContent('—')
-    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(20)
+    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(21)
     expect(frames.renderer!.scene.getObjectByName('orbit-field')?.visible).toBe(true)
     expect(frames.renderer!.scene.getObjectByName('orbit-reference-tower')).toBeDefined()
     expect(frames.renderer!.flightScene.getReference('orbit-poi')?.object.visible).toBe(false)
@@ -911,14 +1024,17 @@ describe('Free Flight native navigation confirmation', () => {
     expect(scene.scene.getObjectByName(group)!.visible).toBe(false)
   })
 
-  it('keeps visible L08 frames aligned with live colliders through Reset, Arm, replay and course changes', () => {
+  it.each([
+    { lessonId: 'wide-gate', code: 'L08', fieldName: 'wide-gate-field', demoLabel: 'L08 穿門示範' },
+    { lessonId: 'gravity-gate', code: 'L19', fieldName: 'gravity-gate-field', demoLabel: 'L19 重力門示範' },
+  ])('keeps visible $code frames aligned with live colliders through Reset, Arm, replay and course changes', ({ lessonId, fieldName, demoLabel }) => {
     const settings = createDefaultTuningSettings()
     const props = { poller: createBrowserGamepadPoller(), profile: null, settings }
-    const selected = createTrainingMachineState({ initialLessonId: 'wide-gate' })
+    const selected = createTrainingMachineState({ initialLessonId: lessonId })
     const { rerender } = render(<FreeFlight {...props} trainingState={selected} />)
     const canvas = screen.getByLabelText('Free Flight 3D scene')
     const colliders = () => frames.runtime!.simulation.getStaticObstacles()
-    const field = () => frames.renderer!.flightScene.scene.getObjectByName('wide-gate-field')!
+    const field = () => frames.renderer!.flightScene.scene.getObjectByName(fieldName)!
     expect(colliders()).toHaveLength(12)
     expect(field().visible).toBe(true)
     fireEvent.click(screen.getByRole('button', { name: /^Reset$/ }))
@@ -936,7 +1052,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(colliders()).toHaveLength(12)
     const before = frames.runtime!.getTelemetry().state
     const savedEnvironment = colliders()
-    fireEvent.click(screen.getByRole('button', { name: 'L08 穿門示範' }))
+    fireEvent.click(screen.getByRole('button', { name: demoLabel }))
     fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
     fireEvent.change(screen.getByRole('slider'), { target: { value: 20 } })
     expect(colliders()).toEqual(savedEnvironment)
@@ -957,10 +1073,13 @@ describe('Free Flight native navigation confirmation', () => {
     expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
   })
 
-  it('shows the actual frame part after a real solver collision and requires Reset', () => {
+  it.each([
+    { lessonId: 'wide-gate', code: 'L08', cause: /碰到第 1 道門的左柱/ },
+    { lessonId: 'gravity-gate', code: 'L19', cause: /重力門.*立柱/ },
+  ])('shows the actual $code frame part after a real solver collision and requires Reset', ({ lessonId, cause }) => {
     const settings = createDefaultTuningSettings()
     render(<FreeFlight poller={createBrowserGamepadPoller()} profile={null} settings={settings}
-      trainingState={createTrainingMachineState({ initialLessonId: 'wide-gate' })} />)
+      trainingState={createTrainingMachineState({ initialLessonId: lessonId })} />)
     const post = frames.runtime!.simulation.getStaticObstacles()[0]
     act(() => {
       frames.runtime!.resetForTraining({ requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: [],
@@ -972,7 +1091,7 @@ describe('Free Flight native navigation confirmation', () => {
     frame(0)
     frame(120)
     expect(frames.runtime!.getTelemetry().state.crashed).toBe(true)
-    expect(screen.getByText(/碰到第 1 道門的左柱/)).toHaveTextContent('請按 Reset 重設後重試')
+    expect(screen.getByText(cause)).toHaveTextContent('請按 Reset 重設後重試')
     expect(screen.getByRole('button', { name: /^Arm$/ })).toBeDisabled()
     expect(screen.getByTestId('flight-altitude')).not.toHaveTextContent('—')
     fireEvent.click(screen.getByRole('button', { name: 'Reset crashed drone' }))
