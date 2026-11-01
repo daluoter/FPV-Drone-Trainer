@@ -10,10 +10,6 @@ export const GRAVITY_GATE_PRACTICE_HEIGHT_M = 8
 export const GRAVITY_GATE_MIN_ENTRY_HEIGHT_M = 4
 export const GRAVITY_GATE_MIN_HEIGHT_M = 2
 export const GRAVITY_GATE_AREA_RADIUS_M = 150
-export const GRAVITY_GATE_MIN_RETURN_SPEED_MPS = 0.5
-export const GRAVITY_GATE_RETURN_DISTANCE_M = 0.3
-/** A stopped or still-inward lower-level observation is enough; negative speed is not required. */
-export const GRAVITY_GATE_RETURN_READY_SPEED_MPS = 0.2
 export const GRAVITY_GATE_RECOVERY_SECONDS = 0.2
 export const GRAVITY_GATE_TIME_LIMIT_SECONDS = 300
 export const GRAVITY_GATE_PHASE_IDS = Object.freeze([
@@ -48,9 +44,8 @@ function episodeDefaults(): Record<string, number> {
     gravityGateEpisodeValid: 0, gravityGateInterrupted: 0, gravityGateInterruptionReason: 0,
     gravityGateForwardEstablished: 0, gravityGateTossed: 0, gravityGateAdjusted: 0,
     gravityGateEntered: 0, gravityGateLowerReached: 0, gravityGateReturned: 0, gravityGateExited: 0, gravityGateRecovered: 0,
-    gravityGateReturnStartX: 0, gravityGateReturnStartProjectionM: 0, gravityGateReturnDistanceM: 0, gravityGateReturnSegmentValid: 0,
+    gravityGateReturnStartX: 0, gravityGateReturnStartProjectionM: 0, gravityGateReturnDistanceM: 0,
     gravityGateApproachSide: 0,
-    gravityGateReturnReady: 0,
     gravityGatePreparationQualifying: 0, gravityGatePreparationDwellSeconds: 0,
     gravityGateStartHeightM: 0, gravityGateStartUpX: 0, gravityGateStartUpY: 1, gravityGateStartUpZ: 0,
     gravityGateMomentumLostSeconds: 0,
@@ -76,9 +71,8 @@ function hint(metrics: Readonly<Record<string, number>>): string {
   if (metrics.gravityGateEpisodeValid < 0.5) return `${metrics.gravityGateInterrupted > 0.5 ? '本次路線已中斷；先前勾選保留，但須重新完成頂口落入及低層同側折返。' : ''}從任意方向重新取得頂口上方的高度，向下落入水平開口；不限制上拋方向、前速、收油或調姿幅度。`
   if (metrics.gravityGateTossed < 0.5) return `取得水平頂口上方的高度；頂部離地 ${GRAVITY_GATE_TOP_HEIGHT_M} m，建議上拋到約 17～18 m，從哪一面上拋皆可。`
   if (metrics.gravityGateEntered < 0.5) return `對準黃色水平頂口，實際向下落入；目前比入口${metrics.gravityGateTopHeightDifferenceM >= 0 ? '高' : '低'} ${Math.abs(metrics.gravityGateTopHeightDifferenceM).toFixed(1)} m，左右偏差 ${metrics.gravityGateEntryHorizontalErrorM.toFixed(1)} m、前後偏差 ${metrics.gravityGateEntryForwardErrorM.toFixed(1)} m。`
-  if (metrics.gravityGateLowerReached < 0.5) return '已由水平頂口入框；留在框內向下降到中環以下的低層，再朝來向折返。上層直接側出不能完成。'
-  if (metrics.gravityGateReturnReady < 0.5) return '已下降至低層；先在框內減少原方向速度、近乎停住，再向來向折返。不要在上層便反向飛回後直接側出。'
-  if (metrics.gravityGateReturned < 0.5) return `已下降至低層；朝來向那側實際飛回，回程速度至少 ${GRAVITY_GATE_MIN_RETURN_SPEED_MPS} m/s、回程位移至少 ${GRAVITY_GATE_RETURN_DISTANCE_M} m。轉頭本身不能代替反向移動。`
+  if (metrics.gravityGateLowerReached < 0.5) return '已由水平頂口入框；可在下降途中提早轉向，仍須留在框內降到低層，從來向同側的低層出口飛出。上層直接側出不能完成。'
+  if (metrics.gravityGateReturned < 0.5) return '已下降至低層；向來向那側折返並從低層開口飛出即可，可以提早轉向，不要求停住或指定速度。'
   if (metrics.gravityGateExited < 0.5) return `已在低層反向移動；從本次來向那側的低層出口飛出，還差 ${Math.max(0, metrics.gravityGateExitDistanceM).toFixed(1)} m。`
   if (metrics.gravityGateRecovered < 0.5) return '已由來向那側的低層出口改出；主動修回正飛，減緩下降與旋轉，穩住 0.2 秒；不需要降落。'
   return '已完成水平頂口落入、框內下降、低層同側折返與空中恢復。'
@@ -198,7 +192,7 @@ function evaluateGravityGate(sample: TrainingSample, context: TrainingEvaluation
   const passageProof = (): boolean => metrics.gravityGateEpisodeValid > 0.5
     && metrics.gravityGateForwardEstablished > 0.5 && metrics.gravityGateTossed > 0.5
     && metrics.gravityGateAdjusted > 0.5 && metrics.gravityGateEntered > 0.5 && metrics.gravityGateLowerReached > 0.5
-    && metrics.gravityGateReturnReady > 0.5 && metrics.gravityGateReturned > 0.5 && metrics.gravityGateExited > 0.5
+    && metrics.gravityGateReturned > 0.5 && metrics.gravityGateExited > 0.5
   if (phase >= 8) return passageProof() && metrics.gravityGateRecovered > 0.5
     && metrics.gravityGateRecoveryDwellSeconds + 1e-8 >= GRAVITY_GATE_RECOVERY_SECONDS
     ? { status: 'success', score: 100, metrics, message: '已完成重力門及空中恢復。', hint: hint(metrics) }
@@ -256,7 +250,6 @@ function evaluateGravityGate(sample: TrainingSample, context: TrainingEvaluation
         metrics.gravityGateLowerReached = 1
         metrics.gravityGateReturnStartX = lower.positionM.x
         metrics.gravityGateReturnStartProjectionM = lower.positionM.x * outward.x + lower.positionM.z * outward.z
-        metrics.gravityGateReturnSegmentValid = 1
       }
       const exit = gravityGateExitCrossing(before, position, gate, 0, side)
       if (exit) {
@@ -264,7 +257,9 @@ function evaluateGravityGate(sample: TrainingSample, context: TrainingEvaluation
         // happen first within that segment, never after the side crossing.
         if (!exit.insideOpening || metrics.gravityGateLowerReached < 0.5
           || lower && lower.fraction >= exit.fraction) return interrupt(11)
-        if (metrics.gravityGateReturnReady < 0.5 || returnSpeed < GRAVITY_GATE_MIN_RETURN_SPEED_MPS) return interrupt(12)
+        // Crossing the same low opening outward proves the return itself.
+        // There is no required near-stop sample, speed or travel threshold.
+        metrics.gravityGateReturned = 1
         metrics.gravityGateExited = 1
         metrics.gravityGateExitCrossingX = exit.positionM.x - gate.centerM.x
         metrics.gravityGateExitCrossingY = exit.positionM.y - gate.centerM.y
@@ -273,35 +268,18 @@ function evaluateGravityGate(sample: TrainingSample, context: TrainingEvaluation
     }
     if (metrics.gravityGateExited > 0.5 && (inside || projection < exitProjection - 0.05)) return interrupt(7)
     if (metrics.gravityGateLowerReached > 0.5) {
-      // Net displacement from the innermost low-level position proves actual
-      // return travel without rewarding repeated back-and-forth pumping. A
-      // learner falling close to the return face may finish this short proof
-      // just outside the already verified lower opening.
+      // These measurements describe the flight; they do not gate passage.
+      // Turning above the lower level is fine if the route stays inside and
+      // subsequently crosses the recorded low opening outward.
       const atLowerLevel = position.y > gate.lowerExitMinY && position.y <= gate.lowerExitMaxY
       if (atLowerLevel && (inside || metrics.gravityGateExited > 0.5)) {
-        if (inside && metrics.gravityGateReturnReady < 0.5
-          && returnSpeed <= GRAVITY_GATE_RETURN_READY_SPEED_MPS) {
-          metrics.gravityGateReturnReady = 1
-          metrics.gravityGateReturnStartX = position.x
-          metrics.gravityGateReturnStartProjectionM = projection
-          metrics.gravityGateReturnDistanceM = 0
-          metrics.gravityGateReturnSegmentValid = 1
-        }
-        if (metrics.gravityGateReturnSegmentValid < 0.5) {
-          metrics.gravityGateReturnStartX = position.x
-          metrics.gravityGateReturnStartProjectionM = projection
-          metrics.gravityGateReturnDistanceM = 0
-          metrics.gravityGateReturnSegmentValid = 1
-        } else {
-          metrics.gravityGateReturnStartProjectionM = Math.min(metrics.gravityGateReturnStartProjectionM, projection)
-          metrics.gravityGateReturnDistanceM = Math.max(0, projection - metrics.gravityGateReturnStartProjectionM)
-        }
-        if (metrics.gravityGateReturnReady > 0.5 && returnSpeed >= GRAVITY_GATE_MIN_RETURN_SPEED_MPS
-          && metrics.gravityGateReturnDistanceM + 1e-8 >= GRAVITY_GATE_RETURN_DISTANCE_M) metrics.gravityGateReturned = 1
-      } else if (metrics.gravityGateReturned < 0.5) {
-        metrics.gravityGateReturnSegmentValid = 0
+        metrics.gravityGateReturnStartProjectionM = Math.min(metrics.gravityGateReturnStartProjectionM, projection)
+        metrics.gravityGateReturnDistanceM = Math.max(0, projection - metrics.gravityGateReturnStartProjectionM)
+        const beforeProjection = before.x * outward.x + before.z * outward.z
+        if (projection > beforeProjection) metrics.gravityGateReturned = 1
+      } else if (metrics.gravityGateExited < 0.5) {
+        metrics.gravityGateReturnStartProjectionM = projection
         metrics.gravityGateReturnDistanceM = 0
-        metrics.gravityGateReturnReady = 0
       }
     }
   }
@@ -313,8 +291,7 @@ function evaluateGravityGate(sample: TrainingSample, context: TrainingEvaluation
     ? metrics.gravityGateRecoveryDwellSeconds + delta : 0
   if (metrics.gravityGateRecoveryDwellSeconds + 1e-8 >= GRAVITY_GATE_RECOVERY_SECONDS) metrics.gravityGateRecovered = 1
   const milestoneKeys = ['gravityGateForwardEstablished', 'gravityGateTossed', 'gravityGateAdjusted', 'gravityGateEntered', 'gravityGateExited', 'gravityGateRecovered']
-  if (phase >= 2 && phase <= 7 && metrics[milestoneKeys[phase - 2]] > 0.5
-    && (phase !== 6 || metrics.gravityGateReturned > 0.5)) return advance()
+  if (phase >= 2 && phase <= 7 && metrics[milestoneKeys[phase - 2]] > 0.5) return advance()
   return continuing()
 }
 
@@ -322,7 +299,7 @@ export const gravityGateEvaluator: LessonEvaluatorContract = { evaluate: evaluat
 export const GRAVITY_GATE_LESSON: LessonDefinition = {
   id: 'gravity-gate', priority: 18, title: '重力門', availability: 'available', available: true,
   description: '從地面起飛，從任意方向取得頂口上方高度，由水平頂口向下落入；下降到低層後折返，從來向同側飛出並恢復控制。',
-  objectives: ['辨認黃色水平頂口、兩層中環、青色低層返出口及實體門框。', '不限制上拋方向、前速或收油調姿幅度；實際從水平頂口落入、框內下降，再反向從低層同側飛出。', '保留改出高度，不要求翻滿一圈、緊貼門框或精準停點。'],
+  objectives: ['辨認黃色水平頂口、兩層中環、青色低層返出口及實體門框。', '從水平頂口落入、框內下降，再從低層同側折返飛出；轉向時機、停留與速度不另設門檻。', '保留改出高度，不要求翻滿一圈、緊貼門框或精準停點。'],
   setup: { requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: ['training-launch', 'landing-surface', 'gravity-gate-frame'], spawnOrientation: { x: 0, y: 0, z: 0, w: 1 } },
   checkpoints: [
     { id: 'gravity-ground', title: '地面開始', description: '在起飛區實際接地，明確解鎖後自行起飛。' },
@@ -331,7 +308,7 @@ export const GRAVITY_GATE_LESSON: LessonDefinition = {
     { id: 'gravity-tossed', title: '取得頂口上方高度', description: '取得水平頂口上方的高度；不限制上拋方向、升速或起始位置。' },
     { id: 'gravity-adjusted', title: '對準水平頂口', description: '讓航線對準水平開口；依需要收油與調姿，不設定固定油門或傾角條件。' },
     { id: 'gravity-entered', title: '從頂部向下入框', description: '由上往下實際穿過黃色頂部開口，機體避開實體門框。' },
-    { id: 'gravity-exited', title: '下降至低層並折返側出', description: '在框內穿過中環下降到低層，再向本次來向實際飛回，從同側低層出口改出。' },
+    { id: 'gravity-exited', title: '下降至低層並折返側出', description: '在框內下降到低層，從本次來向同側的低層出口折返飛出；可以提早轉向，不要求低層停住或指定速度。' },
     { id: 'gravity-recovered', title: '恢復正飛與控制', description: '離框後修平機體，穩住升降與旋轉 0.2 秒，不需要降落。' },
   ],
   success: { title: '重力門完成', description: '已觀察到同一次水平頂口落入、框內下降、低層折返來向同側與恢復。', criteria: ['地面自行起飛', '由任意來向從水平頂口向下落入', '框內下降至低層後反向從來向側面飛出', '未碰框並恢復正飛'] },
@@ -342,6 +319,6 @@ export const GRAVITY_GATE_LESSON: LessonDefinition = {
 export const GRAVITY_GATE_LEARNING_CONTENT: LessonLearningContent = {
   code: 'L19', title: '重力門', level: '近障礙花飛', prerequisiteIds: ['wide-gate', 'basic-recovery', 'full-roll'],
   objectives: ['從任意方向取得水平頂口上方的空間，依需要練習收油及調姿。', '辨認兩層門與反向路線，依序完成頂口落入、框內下降、低層同側折返。'],
-  steps: ['從地面自行起飛至約 8 m，認清黃色水平頂口；建議從正面接近，也可選其他來向。', '取得 14 m 高水平頂口上方的高度，建議約 17～18 m；不限制上拋位置或方向。', '依需要收油及調姿，對準寬 8 m、深 8 m 的水平頂口，實際向下落入；不設定固定前速、油門或傾角門檻。', '留在框內穿過中環下降至低層，再朝本次來向真正反向移動；轉頭本身不能代替折返。', '從來向那側的青色低層出口飛出後回正，穩住升降與旋轉 0.2 秒；不要求降落、完整八字或固定翻轉圈數。'],
+  steps: ['從地面自行起飛至約 8 m，認清黃色水平頂口；建議從正面接近，也可選其他來向。', '取得 14 m 高水平頂口上方的高度，建議約 17～18 m；不限制上拋位置或方向。', '依需要收油及調姿，對準寬 8 m、深 8 m 的水平頂口，實際向下落入；不設定固定前速、油門或傾角門檻。', '留在框內穿過中環下降至低層，再從本次來向同側的低層出口折返飛出；可提早轉向，不要求停住、最低速度或最低返回位移。', '從來向那側的青色低層出口飛出後回正，穩住升降與旋轉 0.2 秒；不要求降落、完整八字或固定翻轉圈數。'],
   commonMistakes: ['從側門直接穿過，沒有由水平頂口向下落入。', '進框後仍在上層便側出，或保持原方向從另一側直出。', '在框外先下降再從低層繞入，借用先前頂入勾選代替完整連續路線。', '只把機頭轉向，實際移動仍未反向；應觀察回程速度與位置變化。'],
 }

@@ -15,7 +15,7 @@ function result(overrides: Partial<TrainingResult> = {}): TrainingResult {
 }
 const proof = { gravityGatePhase: 8, gravityGateEpisodeValid: 1, gravityGateForwardEstablished: 1,
   gravityGateTossed: 1, gravityGateAdjusted: 1, gravityGateEntered: 1, gravityGateLowerReached: 1,
-  gravityGateReturnReady: 1, gravityGateReturned: 1, gravityGateReturnDistanceM: 0.3, gravityGateExited: 1,
+  gravityGateReturned: 1, gravityGateExited: 1,
   gravityGateRecovered: 1, gravityGateRecoveryQualifying: 1, gravityGateRecoveryDwellSeconds: 0.2 }
 
 describe('L19 gravity gate guidance and result evidence', () => {
@@ -105,17 +105,29 @@ describe('L19 gravity gate guidance and result evidence', () => {
     const metrics = { gravityGateInterrupted: 1, gravityGateInterruptionReason: 10 }
     expect(gravityGateInterruptionReason(metrics)).toContain('目前不再限制上拋前速')
   })
-  it('explains each low-level substage and the near-stop witness instead of hiding a condition', () => {
+  it('explains low-level same-side exit without a stop, speed or travel condition', () => {
     const entered = { gravityGatePhase: 6, gravityGateEpisodeValid: 1, gravityGateTossed: 1,
       gravityGateAdjusted: 1, gravityGateEntered: 1, gravityGateLowerHeightDifferenceM: 3.5 }
     expect(trainingObjective('gravity-gate', { metrics: entered })?.detail).toContain('3.5 m')
-    const low = { ...entered, gravityGateLowerReached: 1 }
-    expect(trainingObjective('gravity-gate', { metrics: low })?.detail).toContain('近乎停住')
-    const ready = { ...low, gravityGateReturnReady: 1, gravityGateReturnSpeedMps: 0.1, gravityGateReturnDistanceM: 0.05 }
-    expect(trainingObjective('gravity-gate', { metrics: ready })?.detail).toContain('至少 0.5 m/s')
-    expect(trainingObjective('gravity-gate', { metrics: ready })?.detail).toContain('至少 0.3 m')
-    const returned = { ...ready, gravityGateReturned: 1 }
+    const low = { ...entered, gravityGateLowerReached: 1, gravityGateReturnSpeedMps: 8.1 }
+    const detail = trainingObjective('gravity-gate', { metrics: low })?.detail
+    expect(detail).toContain('不要求在低層停住')
+    expect(detail).toContain('可以在上層提早轉向')
+    expect(detail).not.toMatch(/至少 0\.5|至少 0\.3|近乎停住/)
+    const returned = { ...low, gravityGateReturned: 1 }
     expect(trainingObjective('gravity-gate', { metrics: returned })?.title).toContain('來向那側')
+  })
+  it('explains that the historical return-stop condition no longer blocks passage', () => {
+    const metrics = { gravityGateInterrupted: 1, gravityGateInterruptionReason: 12, interruptionGravityGateReturnSpeedMps: 8.1 }
+    const detail = gravityGateInterruptionReason(metrics)
+    expect(detail).toContain('已取消停住、最低速度與最低位移要求')
+    expect(detail).not.toContain('先在低層減少原方向速度')
+  })
+  it('accepts complete return evidence without readiness or minimum distance in stored feedback', () => {
+    const passed = result({ outcome: 'SUCCESS', completedCheckpoints: 8,
+      metrics: { ...proof, gravityGateReturnReady: 0, gravityGateReturnDistanceM: 0.01, gravityGateReturnSpeedMps: 0.1 } })
+    expect(summarizeTrainingResult(passed).observedGap).toBeNull()
+    expect(trainingObjective('gravity-gate', { metrics: passed.metrics })?.title).toContain('恢復完成')
   })
   it('formats actual lower-level return measurements with a clear signed direction', () => {
     const displays = formatTrainingMetrics({ gravityGatePhase: 6, gravityGateLowerReached: 1,

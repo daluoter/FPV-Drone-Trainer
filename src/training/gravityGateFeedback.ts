@@ -1,7 +1,7 @@
 import type { TrainingObjective } from './feedback'
 import type { TrainingResultFeedback } from './resultFeedback'
 import type { TrainingEvaluation, TrainingResult } from './types'
-import { GRAVITY_GATE_AREA_RADIUS_M, GRAVITY_GATE_MIN_HEIGHT_M, GRAVITY_GATE_PHASE_IDS, GRAVITY_GATE_RECOVERY_SECONDS, GRAVITY_GATE_TIME_LIMIT_SECONDS, GRAVITY_GATE_PRACTICE_HEIGHT_M, GRAVITY_GATE_MIN_RETURN_SPEED_MPS, GRAVITY_GATE_RETURN_DISTANCE_M } from './gravityGate'
+import { GRAVITY_GATE_AREA_RADIUS_M, GRAVITY_GATE_MIN_HEIGHT_M, GRAVITY_GATE_PHASE_IDS, GRAVITY_GATE_RECOVERY_SECONDS, GRAVITY_GATE_TIME_LIMIT_SECONDS, GRAVITY_GATE_PRACTICE_HEIGHT_M } from './gravityGate'
 import { GRAVITY_GATE_OPENING_WIDTH_M, GRAVITY_GATE_OPENING_DEPTH_M, GRAVITY_GATE_TOP_HEIGHT_M, GRAVITY_GATE_MIDDLE_HEIGHT_M, GRAVITY_GATE_FRAME_THICKNESS_M } from '../world/gravityGate'
 
 type Metrics = Readonly<Record<string, number>>
@@ -13,8 +13,7 @@ function hasPassageProof(metrics: Metrics): boolean {
   return metrics.gravityGateEpisodeValid > 0.5 && !(metrics.gravityGateInterrupted > 0.5)
     && metrics.gravityGateForwardEstablished > 0.5 && metrics.gravityGateTossed > 0.5 && metrics.gravityGateAdjusted > 0.5
     && metrics.gravityGateEntered > 0.5 && metrics.gravityGateLowerReached > 0.5
-    && metrics.gravityGateReturnReady > 0.5 && metrics.gravityGateReturned > 0.5
-    && metrics.gravityGateReturnDistanceM + 1e-8 >= GRAVITY_GATE_RETURN_DISTANCE_M
+    && metrics.gravityGateReturned > 0.5
     && metrics.gravityGateExited > 0.5
 }
 function hasCompleteProof(metrics: Metrics): boolean {
@@ -29,7 +28,7 @@ export function gravityGateCollisionCause(warning: string): string | null {
   return match[3] ? `${sides[match[1]]}${sides[match[2]]}立柱` : `${match[4] === 'top' ? '頂部' : match[4] === 'middle' ? '中層' : '底部'}${sides[match[5]]}橫樑`
 }
 export function gravityGateRouteGuide(): string {
-  return `地面自行起飛至約 ${GRAVITY_GATE_PRACTICE_HEIGHT_M} m → 建議從正面上拋至約 17～18 m（任意來向皆可）→ 對準黃色水平頂口向下落入 → 留在框內穿過中環下降到低層 → 朝本次來向實際折返，從同一側低層出口飛出 → 回正並恢復空中控制。頂口離地 ${GRAVITY_GATE_TOP_HEIGHT_M} m，淨開口寬 ${GRAVITY_GATE_OPENING_WIDTH_M} m、深 ${GRAVITY_GATE_OPENING_DEPTH_M} m；低層出口上緣約 ${GRAVITY_GATE_MIDDLE_HEIGHT_M - GRAVITY_GATE_FRAME_THICKNESS_M / 2} m，門框有實際碰撞。系統記住進頂口前最後位於框外的一側，作為本次返出口；不限制上拋方向、前速、收油或姿態變化。先完成單次流程，不要求固定翻轉圈數、精準半圓、緊貼門框或八字串接。漏門可重新取得頂口上方高度、入框與折返；先前勾選不代替新一段完整路線。引導練習不限時，挑戰 ${GRAVITY_GATE_TIME_LIMIT_SECONDS} 秒。`
+  return `地面自行起飛至約 ${GRAVITY_GATE_PRACTICE_HEIGHT_M} m → 建議從正面上拋至約 17～18 m（任意來向皆可）→ 對準黃色水平頂口向下落入 → 留在框內穿過中環下降到低層 → 朝本次來向實際折返，從同一側低層出口飛出 → 回正並恢復空中控制。頂口離地 ${GRAVITY_GATE_TOP_HEIGHT_M} m，淨開口寬 ${GRAVITY_GATE_OPENING_WIDTH_M} m、深 ${GRAVITY_GATE_OPENING_DEPTH_M} m；低層出口上緣約 ${GRAVITY_GATE_MIDDLE_HEIGHT_M - GRAVITY_GATE_FRAME_THICKNESS_M / 2} m，門框有實際碰撞。系統記住進頂口前最後位於框外的一側，作為本次返出口；不限制上拋方向、前速、收油或姿態變化；低層折返可提早轉向，不要求停住、最低速度或最低返回位移。先完成單次流程，不要求固定翻轉圈數、精準半圓、緊貼門框或八字串接。漏門可重新取得頂口上方高度、入框與折返；先前勾選不代替新一段完整路線。引導練習不限時，挑戰 ${GRAVITY_GATE_TIME_LIMIT_SECONDS} 秒。`
 }
 export function gravityGateInterruptionReason(metrics: Metrics): string | null {
   if (!(metrics.gravityGateInterrupted > 0.5)) return null
@@ -39,12 +38,12 @@ export function gravityGateInterruptionReason(metrics: Metrics): string | null {
     case 3: return `中斷時距起飛點 ${observed(metrics, 'interruptionLaunchDistanceM', 'm')}，超出 ${GRAVITY_GATE_AREA_RADIUS_M} m 練習區。`
     case 4: return `向下穿過頂部高度時沒有對準開口：左右偏差 ${observed(metrics, 'interruptionGravityGateEntryHorizontalErrorM', 'm')}（右＋）、前後偏差 ${observed(metrics, 'interruptionGravityGateEntryForwardErrorM', 'm')}（後＋）。重新取得頂口上方高度，從黃色水平頂口內向下落入；任意來向皆可。`
     case 5: return '這次從側面或底部進入框內，尚未從水平頂口向下落入；請重新取得頂口上方高度後向下落入。'
-    case 6: return `進框後從錯誤的面離框，尚未完成低層折返：中斷時離地 ${observed(metrics, 'interruptionAltitudeM', 'm')}，距指定側出口 ${observed(metrics, 'interruptionGravityGateExitDistanceM', 'm')}。頂口落入後，留在框內下降至低層，再沿青色箭頭反向飛回來向。`
+    case 6: return `進框後從錯誤的面離框，尚未完成低層折返：中斷時離地 ${observed(metrics, 'interruptionAltitudeM', 'm')}，距指定側出口 ${observed(metrics, 'interruptionGravityGateExitDistanceM', 'm')}。頂口落入後，留在框內下降至低層，再沿青色箭頭從來向同側的低層出口飛出。`
     case 7: return '低層側面飛出後又回到框內；本段已中斷，重新完成頂口落入、框內下降及低層折返。'
     case 9: return '這是舊版前置動作中斷紀錄；目前不再限制上拋方向、收油或調姿幅度，從水平頂口向下落入即可。'
     case 10: return '這是舊版前速中斷紀錄；目前不再限制上拋前速，可以先停住，再從水平頂口向下落入。'
     case 11: return `尚未在框內下降到低層便側出：中斷時離地 ${observed(metrics, 'interruptionAltitudeM', 'm')}，比低層出口上緣高 ${observed(metrics, 'interruptionGravityGateLowerHeightDifferenceM', 'm')}。頂口落入後先穿過中環下降，再從來向那側飛出。`
-    case 12: return `尚未在框內低層建立完整折返：當時回程速度 ${observed(metrics, 'interruptionGravityGateReturnSpeedMps', 'm/s')}（朝來向＋）。先在低層減少原方向速度、近乎停住，再朝來向加速至至少 ${GRAVITY_GATE_MIN_RETURN_SPEED_MPS} m/s；上層已轉向後直接落低側出，或只轉動機頭，都不能代替。`
+    case 12: return '這是舊版低層折返條件的中斷紀錄；目前已取消停住、最低速度與最低位移要求，也可提早轉向。從頂口落入、框內降至低層，再從來向同側的低層出口飛出即可。'
     default: return '本段路線已中斷，重新從水平頂口落入、框內下降，再從低層折返來向同側。'
   }
 }
@@ -58,9 +57,8 @@ export function gravityGateObjective(metrics: Metrics): TrainingObjective {
   if (!(metrics.gravityGateTossed > 0.5)) return { title: '4／8 取得頂口上方高度', detail: `水平頂口離地 14 m，建議升到約 17～18 m；不限制上拋起點、方向或速度。本段已升高 ${observed(metrics, 'gravityGateHeightGainM', 'm')}，目前升降速度 ${observed(metrics, 'verticalSpeedMps', 'm/s')}（上＋）。` }
   if (!(metrics.gravityGateAdjusted > 0.5)) return { title: '5／8 對準水平頂口', detail: '讓航線對準黃色水平頂口，依需要收油及調姿；沒有固定油門、傾角或翻轉圈數條件，實際由水平頂口向下落入即可。' }
   if (!(metrics.gravityGateEntered > 0.5)) return { title: '6／8 從頂部向下入框', detail: `從黃色水平頂口內由上往下落入，不從側面或底部進入。比頂入口高低 ${observed(metrics, 'gravityGateTopHeightDifferenceM', 'm')}（高＋），左右偏差 ${observed(metrics, 'gravityGateEntryHorizontalErrorM', 'm')}（右＋）、前後偏差 ${observed(metrics, 'gravityGateEntryForwardErrorM', 'm')}（後＋）；先調整實際航線再穿入。` }
-  if (!(metrics.gravityGateLowerReached > 0.5)) return { title: '7／8 在框內下降至低層', detail: `已由水平頂口落入；先留在框內穿過中環下降。比低層出口上緣高 ${observed(metrics, 'gravityGateLowerHeightDifferenceM', 'm')}（高＋）；降至中環下方後，再朝來向折返，上層直接側出不能完成。` }
-  if (!(metrics.gravityGateReturnReady > 0.5)) return { title: '7／8 先在低層穩住原方向速度', detail: '已下降至低層；先留在框內減少原方向速度、近乎停住，再向來向折返。可以先停住，不要求仍維持負向速度；不要在上層已轉向後，直接落低側出。' }
-  if (!(metrics.gravityGateReturned > 0.5)) return { title: '7／8 在低層實際折返', detail: `已下降到低層，朝本次來向那側飛回；回程速度 ${observed(metrics, 'gravityGateReturnSpeedMps', 'm/s')}／至少 ${GRAVITY_GATE_MIN_RETURN_SPEED_MPS} m/s，反向位移 ${observed(metrics, 'gravityGateReturnDistanceM', 'm')}／至少 ${GRAVITY_GATE_RETURN_DISTANCE_M} m。只把機頭轉向而仍往原方向移動不算。` }
+  if (!(metrics.gravityGateLowerReached > 0.5)) return { title: '7／8 在框內下降至低層', detail: `已由水平頂口落入；先留在框內穿過中環下降。比低層出口上緣高 ${observed(metrics, 'gravityGateLowerHeightDifferenceM', 'm')}（高＋）；可在下降途中提早轉向；仍須留在框內降到低層，從來向同側的低層出口飛出，上層直接側出不能完成。` }
+  if (!(metrics.gravityGateReturned > 0.5)) return { title: '7／8 從低層折返來向', detail: '已下降到低層，朝本次來向那側折返並飛出低層開口即可。可以在上層提早轉向，不要求在低層停住，也不要求最低速度或最低返回位移。只轉動機頭而未飛出開口，仍待完成。' }
   if (!(metrics.gravityGateExited > 0.5)) return { title: '7／8 從來向那側的低層出口飛出', detail: `已在低層反向移動，沿青色箭頭從來向那側的低層出口飛出，還差 ${observed(metrics, 'gravityGateExitDistanceM', 'm')}；不要從另一側直出或爬回上層側出。` }
   return hasCompleteProof(metrics)
     ? { title: '8／8 重力門與恢復完成', detail: '已觀察到同一次頂口落入、框內下降、低層折返來向同側與正飛恢復；不需要降落。' }
