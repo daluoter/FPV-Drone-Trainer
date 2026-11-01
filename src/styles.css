@@ -1863,11 +1863,12 @@ h1 em {
 :is(.has-reverse-orbit-hud, .has-gravity-gate-hud) .flight-position-hud { font-size: 11px; line-height: 1.4; }
 :is(.has-reverse-orbit-hud, .has-gravity-gate-hud) .flight-altitude strong { font-size: 20px; }
 :is(.has-reverse-orbit-hud, .has-gravity-gate-hud) .flight-safe-overlay { top: 40%; }
+/* Keep the expanded same-side return instrument clear of playback status. */
+.has-gravity-gate-hud .flight-safe-overlay { top: 64px; }
 .school-viewport-hint.is-below-viewport { position: static; max-height: none; overflow: visible; }
 @media (max-width: 620px) {
   .school-flight .free-flight-viewport.has-gravity-gate-hud { min-height: 350px; height: clamp(350px, 45vh, 480px); }
   .has-reverse-orbit-hud .flight-safe-overlay { top: 90px; }
-  .has-gravity-gate-hud .flight-safe-overlay { top: 64px; }
 }
 .flight-backward-hud > small { display: block; margin-top: 4px; color: #afc6c5; font-size: 10px; }
 .has-backward-hud .flight-safe-overlay { top: max(246px, 62%); }

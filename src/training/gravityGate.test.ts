@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createInitialDroneState, DEFAULT_DRONE_CONFIG, DRONE_GROUND_CLEARANCE_M, droneGroundSupport } from '../drone'
 import { integrateBodyAngularVelocity, quaternionFromRotationVector, type Quaternion } from '../math/quaternion'
 import type { Vector3 } from '../math/vector'
-import { createGravityGate } from '../world/gravityGate'
+import { createGravityGate, gravityGateSideExit, type GravityGateSide } from '../world/gravityGate'
 import { createTrainingFieldAnchors } from './field'
 import { TrainingSession } from './machine'
 import { GRAVITY_GATE_LEARNING_CONTENT, GRAVITY_GATE_LESSON, GRAVITY_GATE_PHASE_IDS, gravityGateEvaluator } from './gravityGate'
@@ -88,8 +88,8 @@ function approach(config = DEFAULT_DRONE_CONFIG): Observer {
   const gate = createGravityGate(createTrainingFieldAnchors(config).launch, config.ground.heightM)
   observer.safe()
   observer.axisTo('y', config.ground.heightM + 8)
-  observer.axisTo('x', gate.approachPointM.x)
-  observer.axisTo('z', gate.approachPointM.z)
+  observer.axisTo('x', gate.centerM.x + 14)
+  observer.axisTo('z', gate.centerM.z)
   observer.repeat(8, { x: -3, y: 0, z: 0 })
   expect(observer.evaluation?.metrics).toMatchObject({ gravityGatePhase: 3, gravityGateEpisodeValid: 1 })
   return observer
@@ -125,6 +125,21 @@ function exited(config = DEFAULT_DRONE_CONFIG): Observer {
   return observer
 }
 
+function anySideEntered(side: GravityGateSide): Observer {
+  const observer = new Observer()
+  const gate = createGravityGate(createTrainingFieldAnchors(observer.config).launch, observer.config.ground.heightM)
+  const outward = gravityGateSideExit(gate, side).outwardDirection
+  observer.safe()
+  observer.axisTo('y', 17)
+  observer.axisTo('x', gate.centerM.x + outward.x * 12)
+  observer.axisTo('z', gate.centerM.z + outward.z * 12)
+  const axis = outward.x === 0 ? 'z' : 'x'
+  observer.axisTo(axis, gate.centerM[axis] + outward[axis])
+  observer.until('gravityGateEntered', { x: 0, y: -3, z: 0 })
+  observer.repeat(5)
+  return observer
+}
+
 describe('gravity gate ordered top-entry and lower-level return course', () => {
   it('keeps eight Chinese checkpoints and changes the route to a low same-side return', () => {
     expect(GRAVITY_GATE_LESSON).toMatchObject({ id: 'gravity-gate', title: '重力門', available: true })
@@ -142,6 +157,55 @@ describe('gravity gate ordered top-entry and lower-level return course', () => {
       gravityGateReturnReady: 1, gravityGateReturned: 1, gravityGateRecovered: 1 })
     expect(observer.evaluation?.metrics?.gravityGateAttitudeChangeDegrees).toBeLessThan(20)
     expect(Object.keys(observer.checkpointStates)).toEqual(GRAVITY_GATE_PHASE_IDS)
+  })
+  it.each([
+    ['front', 1], ['right', 2], ['back', 3], ['left', 4],
+  ] as const)('accepts %s top approach and freezes its own low same-side exit', (side, code) => {
+    const observer = anySideEntered(side)
+    const gate = createGravityGate(createTrainingFieldAnchors(observer.config).launch, observer.config.ground.heightM)
+    const outward = gravityGateSideExit(gate, side).outwardDirection
+    expect(observer.evaluation?.metrics).toMatchObject({ gravityGateEntered: 1, gravityGateApproachSide: code,
+      gravityGateThrottleCutObserved: 0, gravityGateAttitudeChangeDegrees: 0 })
+    observer.until('gravityGateLowerReached', { x: 0, y: -3, z: 0 })
+    observer.axisTo('y', gate.sideExitCenterM.y, 3)
+    observer.until('gravityGateExited', { x: outward.x * 2, y: 0, z: outward.z * 2 })
+    observer.repeat(8)
+    expect(observer.evaluation?.status).toBe('success')
+    expect(observer.evaluation?.metrics).toMatchObject({ gravityGateApproachSide: code, gravityGateLowerReached: 1,
+      gravityGateReturned: 1, gravityGateExited: 1, gravityGatePhase: 8 })
+  })
+  it('keeps the entry side frozen when the low-level route goes toward another face', () => {
+    const observer = anySideEntered('back')
+    observer.until('gravityGateLowerReached', { x: 0, y: -3, z: 0 })
+    observer.axisTo('y', 6.5, 3)
+    observer.repeat(50, { x: 3, y: 0, z: 0 })
+    expect(observer.evaluations.some(({ metrics }) => metrics?.gravityGateInterruptionReason === 6
+      && metrics?.interruptionGravityGateApproachSide === 3)).toBe(true)
+    expect(observer.checkpointStates['gravity-exited']).toBeUndefined()
+  })
+  it('does not use a post-entry endpoint on another side to change the recorded approach', () => {
+    const gate = createGravityGate(references()[0].positionM, 0)
+    const velocityMps = { x: 15.5, y: -15, z: 0 }
+    const sample = (time: number, positionM: Vector3): TrainingSample => ({ timestampSeconds: time, armed: true,
+      groundContact: { heightM: 0, supportOffsetM: 0.05, touching: false }, normalizedInput: null,
+      state: { ...createInitialDroneState(DEFAULT_DRONE_CONFIG, positionM), positionM, velocityMps,
+        stepIndex: Math.round(time * 100), timeSeconds: time } })
+    const before = sample(1, { x: gate.centerM.x + 1, y: 15, z: gate.centerM.z + 1 })
+    const current = sample(1.2, { x: gate.centerM.x + 4.1, y: 12, z: gate.centerM.z + 1 })
+    const result = gravityGateEvaluator.evaluate(current, context({ checkpoints: checkpoints(5), previousSample: before,
+      previousFlightSample: before, previousEvaluation: { status: 'continue', metrics: { gravityGateEpisodeValid: 1,
+        gravityGateApproachSide: 1, gravityGateForwardEstablished: 1, gravityGateTossed: 1, gravityGateAdjusted: 1 } } }))
+    expect(result.status).toBe('continue')
+    expect(result.metrics).toMatchObject({ gravityGateInterruptionReason: 6, interruptionGravityGateApproachSide: 1 })
+  })
+  it('allows the pre-entry approach side to change above the top before it is frozen', () => {
+    const observer = above({ cut: false, adjust: false })
+    const gate = createGravityGate(createTrainingFieldAnchors(observer.config).launch, observer.config.ground.heightM)
+    observer.axisTo('z', gate.centerM.z + 10)
+    observer.axisTo('x', gate.centerM.x)
+    observer.axisTo('z', gate.centerM.z + 1)
+    observer.until('gravityGateEntered', { x: 0, y: -3, z: 0 })
+    expect(observer.evaluation?.metrics).toMatchObject({ gravityGateEntered: 1, gravityGateApproachSide: 1 })
   })
   it('uses translated launch anchors and raised ground for the same low return', () => {
     const config = { ...DEFAULT_DRONE_CONFIG, ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 8 }, spawnPositionM: { x: 6, y: 45, z: -3 } }
@@ -163,11 +227,11 @@ describe('gravity gate ordered top-entry and lower-level return course', () => {
     }
     expect(session.getState().result).toMatchObject({ lessonId: 'gravity-gate', outcome: 'SUCCESS', completedCheckpoints: 8, totalCheckpoints: 8 })
   })
-  it('does not use takeoff climb or the old frontal approach as a side toss', () => {
+  it('accepts the frontal climb without requiring a fixed side approach or forward speed', () => {
     const observer = new Observer()
     observer.safe()
     observer.repeat(60, { x: 0, y: 4, z: -3 })
-    expect(observer.evaluation?.metrics).toMatchObject({ gravityGatePhase: 2, gravityGateEpisodeValid: 0, gravityGateTossed: 0 })
+    expect(observer.evaluation?.metrics).toMatchObject({ gravityGatePhase: 3, gravityGateEpisodeValid: 1, gravityGateTossed: 0 })
   })
   it('does not grant top entry for direct side-to-side passage', () => {
     const observer = approach()
@@ -176,10 +240,10 @@ describe('gravity gate ordered top-entry and lower-level return course', () => {
     expect(observer.evaluation?.metrics?.gravityGateEntered).toBe(0)
     expect(observer.checkpointStates['gravity-entered']).toBeUndefined()
   })
-  it.each([{ cut: false }, { adjust: false }])('requires real throttle reduction and attitude correction: %j', (options) => {
+  it.each([{ cut: false }, { adjust: false }])('accepts valid top entry without mandatory RC or attitude correction: %j', (options) => {
     const observer = above(options)
     observer.repeat(30, { x: 0, y: -3, z: 0 })
-    expect(observer.evaluation?.metrics).toMatchObject({ gravityGateEntered: 0, gravityGateInterruptionReason: 9, gravityGateEpisodeValid: 0 })
+    expect(observer.evaluation?.metrics).toMatchObject({ gravityGateEntered: 1, gravityGateEpisodeValid: 1 })
   })
   it('freezes the first missed top-aperture measurements while later flight continues', () => {
     const observer = above()
@@ -250,12 +314,12 @@ describe('gravity gate ordered top-entry and lower-level return course', () => {
     expect(observer.evaluation?.metrics).toMatchObject({ gravityGatePhase: 7, gravityGateLowerReached: 0, gravityGateReturned: 0 })
     expect(observer.evaluation?.status).toBe('continue')
   })
-  it('cannot retain forward momentum after stopping before the toss', () => {
+  it('permits stopping before climbing above the top without a momentum gate', () => {
     const observer = approach()
     observer.repeat(18)
-    expect(observer.evaluation?.metrics).toMatchObject({ gravityGateEpisodeValid: 0, gravityGateInterruptionReason: 10 })
+    expect(observer.evaluation?.metrics).toMatchObject({ gravityGateEpisodeValid: 1, gravityGateInterruptionReason: 0 })
     observer.repeat(45, { x: 0, y: 4, z: 0 })
-    expect(observer.evaluation?.metrics?.gravityGateTossed).toBe(0)
+    expect(observer.evaluation?.metrics?.gravityGateTossed).toBe(1)
   })
   it('cannot reuse a completed exit after reentering the frame', () => {
     const observer = exited()
@@ -278,7 +342,7 @@ describe('gravity gate ordered top-entry and lower-level return course', () => {
     expect(observer.evaluation?.metrics?.gravityGateInterruptionReason).toBe(11)
     expect(observer.checkpointStates['gravity-entered']?.completed).toBe(true)
     const gate = createGravityGate(createTrainingFieldAnchors(observer.config).launch, observer.config.ground.heightM)
-    observer.axisTo('x', gate.approachPointM.x)
+    observer.axisTo('x', gate.centerM.x + 14)
     observer.axisTo('y', gate.approachPointM.y)
     observer.throttle = 0.6
     observer.repeat(8, { x: -3, y: 0, z: 0 })

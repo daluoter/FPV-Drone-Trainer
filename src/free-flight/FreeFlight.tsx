@@ -24,7 +24,7 @@ import { SQUARE_ROUTE_TARGET_IDS } from '../training/squareRoute'
 import { FIGURE_EIGHT_TARGET_IDS } from '../training/figureEight'
 import { createTrainingFieldAnchors } from '../training/field'
 import { createWideGates, WIDE_GATE_IDS } from '../world/wideGates'
-import { createGravityGate } from '../world/gravityGate'
+import { createGravityGate, type GravityGateSide } from '../world/gravityGate'
 import { gravityGateCollisionCause } from '../training/gravityGateFeedback'
 import { measureBasicRecoveryMotion } from '../training/basicRecovery'
 import { measureFullFlipMotion } from '../training/fullFlip'
@@ -60,6 +60,14 @@ export interface FreeFlightProps {
 
 function format(value: number | undefined, digits = 2): string {
   return value !== undefined && Number.isFinite(value) ? value.toFixed(digits) : '—'
+}
+
+function gravityGateSide(value: number | undefined): GravityGateSide | null {
+  return value === 1 ? 'front' : value === 2 ? 'right' : value === 3 ? 'back' : value === 4 ? 'left' : null
+}
+
+const GRAVITY_GATE_SIDE_LABELS: Readonly<Record<GravityGateSide, string>> = {
+  front: '前側（＋Z）', right: '右側（＋X）', back: '後側（−Z）', left: '左側（−X）',
 }
 
 function isFlipLesson(lessonId: string | null | undefined): boolean {
@@ -410,8 +418,12 @@ export default function FreeFlight({
     const gravityGatePhase = lessonId !== 'gravity-gate' ? null : telemetry?.replay.active
       ? demonstration ? teachingGravityGatePhaseAt(demonstration, telemetry.replay.currentTimeSeconds) : null
       : trainingState?.lastEvaluation?.metrics?.gravityGatePhase ?? 0
+    const gravitySideMetric = telemetry?.replay.active
+      ? demonstrationProgress?.metrics?.gravityGateApproachSide
+      : trainingState?.lastEvaluation?.metrics?.gravityGateApproachSide
+    rendererRef.current?.setGravityGateSide?.(lessonId === 'gravity-gate' ? gravityGateSide(gravitySideMetric) : null)
     rendererRef.current?.setGravityGateStage?.(gravityGatePhase)
-  }, [trainingState?.lessonId, trainingState?.lastEvaluation?.metrics?.directionTargetIndex, trainingState?.lastEvaluation?.metrics?.turnTargetIndex, trainingState?.lastEvaluation?.metrics?.squareTargetIndex, trainingState?.lastEvaluation?.metrics?.eightTargetIndex, trainingState?.lastEvaluation?.metrics?.gateTargetIndex, trainingState?.lastEvaluation?.metrics?.recoveryPhase, trainingState?.lastEvaluation?.metrics?.rollPhase, trainingState?.lastEvaluation?.metrics?.flipPhase, trainingState?.lastEvaluation?.metrics?.loopPhase, trainingState?.lastEvaluation?.metrics?.splitPhase, trainingState?.lastEvaluation?.metrics?.orbitPhase, trainingState?.lastEvaluation?.metrics?.reverseOrbitPhase, trainingState?.lastEvaluation?.metrics?.backwardPhase, trainingState?.lastEvaluation?.metrics?.gravityGatePhase, rendererRetryKey, telemetry?.replay.active, telemetry?.replay.currentTimeSeconds, demonstration])
+  }, [trainingState?.lessonId, trainingState?.lastEvaluation?.metrics?.directionTargetIndex, trainingState?.lastEvaluation?.metrics?.turnTargetIndex, trainingState?.lastEvaluation?.metrics?.squareTargetIndex, trainingState?.lastEvaluation?.metrics?.eightTargetIndex, trainingState?.lastEvaluation?.metrics?.gateTargetIndex, trainingState?.lastEvaluation?.metrics?.recoveryPhase, trainingState?.lastEvaluation?.metrics?.rollPhase, trainingState?.lastEvaluation?.metrics?.flipPhase, trainingState?.lastEvaluation?.metrics?.loopPhase, trainingState?.lastEvaluation?.metrics?.splitPhase, trainingState?.lastEvaluation?.metrics?.orbitPhase, trainingState?.lastEvaluation?.metrics?.reverseOrbitPhase, trainingState?.lastEvaluation?.metrics?.backwardPhase, trainingState?.lastEvaluation?.metrics?.gravityGatePhase, trainingState?.lastEvaluation?.metrics?.gravityGateApproachSide, demonstrationProgress?.metrics?.gravityGateApproachSide, rendererRetryKey, telemetry?.replay.active, telemetry?.replay.currentTimeSeconds, demonstration])
 
   useEffect(() => {
     rendererRef.current?.setTrainingPath(trainingPath.map((sample) => sample.state.positionM))
@@ -630,6 +642,7 @@ export default function FreeFlight({
     : backwardSpeed > 0.25 ? '往機尾移動（後退）' : backwardSpeed < -0.25 ? '往機頭移動（前進）' : '前後移動很慢'
   const showGravityGateHud = (telemetry?.replay.active ? demonstration?.lessonId : trainingState?.lessonId) === 'gravity-gate'
   const gravityGateMetrics = telemetry?.replay.active ? demonstrationProgress?.metrics : trainingState?.lastEvaluation?.metrics
+  const gravitySide = gravityGateSide(gravityGateMetrics?.gravityGateApproachSide)
   const dockInstruments = showReverseOrbitHud || showGravityGateHud
   const showMotionHud = showRecoveryHud || showRollHud || showFlipHud || showLoopHud || showSplitHud || showOrbitHud || showReverseOrbitHud || showBackwardHud || showGravityGateHud
   const rollMotion = showRollHud && recoveryMotionState ? measureBasicRecoveryMotion(recoveryMotionState) : null
@@ -758,6 +771,7 @@ export default function FreeFlight({
               </div>}
               {showGravityGateHud && <div className="flight-recovery-hud flight-gravity-gate-hud" role="group" aria-label="重力門即時狀態">
                 <strong>{telemetry?.replay.active ? '回放重力門數值' : '即時重力門數值'} · <span data-testid="gravity-gate-phase">{format(gravityGateMetrics?.gravityGatePhase ?? 0, 0)} / 8 步</span></strong>
+                <small data-testid="gravity-gate-side">{gravitySide ? `來向／底層返出口：${GRAVITY_GATE_SIDE_LABELS[gravitySide]}` : '來向待確認 · 預設正面（＋Z）'}</small>
                 <small data-testid="gravity-gate-status">頂部入 {gravityGateMetrics?.gravityGateEntered === 1 ? '✓' : '○'} · 低層 {gravityGateMetrics?.gravityGateLowerReached === 1 ? '✓' : '○'} · 折返 {gravityGateMetrics?.gravityGateReturned === 1 ? '✓' : '○'} · 同側出 {gravityGateMetrics?.gravityGateExited === 1 ? '✓' : '○'}</small>
                 <div>
                   <span>高於頂入口（＋）<b data-testid="gravity-gate-top-offset">{format(gravityGateMetrics?.gravityGateTopHeightDifferenceM, 1)} m</b></span>
@@ -765,7 +779,7 @@ export default function FreeFlight({
                   <span>入口左右偏差（右＋）<b data-testid="gravity-gate-entry-x">{format(gravityGateMetrics?.gravityGateEntryHorizontalErrorM, 1)} m</b></span>
                   <span>入口前後偏差（後＋）<b data-testid="gravity-gate-entry-z">{format(gravityGateMetrics?.gravityGateEntryForwardErrorM, 1)} m</b></span>
                 </div>
-                <small className="flight-gravity-gate-return">回向速度（＋X） <b data-testid="gravity-gate-return-speed">{format(gravityGateMetrics?.gravityGateReturnSpeedMps, 1)} m/s</b> · 回程 <b data-testid="gravity-gate-return-distance">{format(gravityGateMetrics?.gravityGateReturnDistanceM, 1)} m</b></small>
+                <small className="flight-gravity-gate-return">回向速度（朝來向＋） <b data-testid="gravity-gate-return-speed">{format(gravityGateMetrics?.gravityGateReturnSpeedMps, 1)} m/s</b> · 回程 <b data-testid="gravity-gate-return-distance">{format(gravityGateMetrics?.gravityGateReturnDistanceM, 1)} m</b></small>
               </div>}
               {showBackwardHud && <div className="flight-recovery-hud flight-backward-hud" role="group" aria-label="後退飛行即時狀態">
                 <strong>{telemetry?.replay.active ? '回放後退飛行數值' : '即時後退飛行數值'}</strong>

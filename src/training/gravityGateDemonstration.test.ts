@@ -44,7 +44,7 @@ function evaluateRecording(settings: TuningSettings, demo: ReturnType<typeof cre
 }
 
 describe('actual gravity-gate teaching recording', () => {
-  it.each(['beginner', 'standard', 'raised-field'] as const)('approaches from the side, drops through the top, then reverses through the same lower side with %s settings', (preset) => {
+  it.each(['beginner', 'standard', 'raised-field'] as const)('approaches from the front, drops through the top, then reverses through the same lower front with %s settings', (preset) => {
     const base = createTuningPreset(preset === 'standard' ? 'standard' : 'beginner')
     const settings = preset === 'raised-field' ? { ...base, drone: { ...base.drone,
       ground: { ...base.drone.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 35, z: -3 } } } : base
@@ -93,22 +93,22 @@ describe('actual gravity-gate teaching recording', () => {
       const top = gravityGateTopCrossing(previous.positionM, pose.positionM, gate, 0.3)
       if (top?.insideOpening) {
         topAt ??= pose.timestampSeconds
-        expect(pose.velocityMps.x).toBeLessThan(-0.5)
-        expect(Math.abs(top.positionM.z - gate.centerM.z)).toBeLessThan(1)
+        expect(pose.velocityMps.z).toBeLessThan(-0.5)
+        expect(Math.abs(top.positionM.x - gate.centerM.x)).toBeLessThan(1)
       }
       const lower = gravityGateLowerCrossing(previous.positionM, pose.positionM, gate, 0.3)
       if (lower?.insideOpening && topAt !== null) {
         lowerAt ??= pose.timestampSeconds
-        expect(pose.velocityMps.x).toBeLessThan(0.25)
+        expect(pose.velocityMps.z).toBeLessThan(0.25)
       }
       // Brake while descending; begin the visible reversal only in the lower
       // level. An early yaw without actual movement cannot stand in for this.
-      if (topAt !== null && lowerAt === null) expect(pose.velocityMps.x).toBeLessThan(0.25)
-      if (lowerAt !== null && pose.velocityMps.x >= 0.5) returnAt ??= pose.timestampSeconds
+      if (topAt !== null && lowerAt === null) expect(pose.velocityMps.z).toBeLessThan(0.25)
+      if (lowerAt !== null && pose.velocityMps.z >= 0.5) returnAt ??= pose.timestampSeconds
       const exit = gravityGateExitCrossing(previous.positionM, pose.positionM, gate, 0.3)
       if (exit?.insideOpening && topAt !== null) {
         exitAt ??= pose.timestampSeconds
-        expect(pose.velocityMps.x).toBeGreaterThan(0.5)
+        expect(pose.velocityMps.z).toBeGreaterThan(0.5)
         expect(exit.positionM.y).toBeGreaterThan(gate.lowerExitMinY + 0.3)
         expect(exit.positionM.y).toBeLessThan(gate.lowerExitMaxY - 0.3)
       }
@@ -126,10 +126,11 @@ describe('actual gravity-gate teaching recording', () => {
     expect(exitAt!).toBeGreaterThan(returnAt!)
     const { evaluation, checkpoints } = evaluateRecording(settings, demo)
     expect(evaluation?.status).toBe('success')
+    expect(evaluation?.metrics).toMatchObject({ gravityGateApproachSide: 1, gravityGateLowerReached: 1, gravityGateReturned: 1, gravityGateExited: 1 })
     expect(GRAVITY_GATE_PHASE_IDS.every((id) => checkpoints[id]?.completed)).toBe(true)
     const end = demo.recording.samples.at(-1)!
-    expect(end.positionM.x).toBeGreaterThan(gate.exitX)
-    expect(rotateVectorByQuaternion(end.orientation, { x: 0, y: 0, z: -1 }).x).toBeGreaterThan(0.9)
+    expect(end.positionM.z).toBeGreaterThan(gate.maxZ)
+    expect(rotateVectorByQuaternion(end.orientation, { x: 0, y: 0, z: -1 }).z).toBeGreaterThan(0.9)
     expect(rotateVectorByQuaternion(end.orientation, { x: 0, y: 1, z: 0 }).y).toBeGreaterThan(Math.cos(45 * Math.PI / 180))
     expect(Math.abs(end.velocityMps.y)).toBeLessThan(6)
     expect(JSON.stringify(settings)).toBe(before)

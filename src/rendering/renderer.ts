@@ -2,6 +2,7 @@ import * as THREE from 'three'
 
 import { DEFAULT_DRONE_CONFIG, type DroneConfig, type DroneState } from '../drone'
 import type { ReplayGhostState } from '../replay'
+import type { GravityGateSide } from '../world/gravityGate'
 import type { Vector3 } from '../math/vector'
 import {
   activeCamera,
@@ -74,6 +75,7 @@ export class FlightRenderer {
   private backwardFlightStage: number | null = 0
   private reverseOrbitStage: number | null = 0
   private gravityGateStage: number | null = 0
+  private gravityGateSide: GravityGateSide | null = null
   public get flightScene(): FlightScene { return this.currentFlightScene }
   public readonly cameraRig: FlightCameraRig
   public readonly renderer: THREE.WebGLRenderer
@@ -272,6 +274,13 @@ export class FlightRenderer {
     this.flightScene.setGravityGateStage(stage)
   }
 
+  /** Change presentation to the recorded approach face, keeping physical geometry fixed. */
+  public setGravityGateSide(side: GravityGateSide | null): void {
+    if (this.disposed) return
+    this.gravityGateSide = side
+    this.flightScene.setGravityGateSide(side)
+  }
+
   /** Rebuild anchors only after the owner has explicitly reset and disarmed. */
   public reconfigureScene(config: DroneConfig): void {
     if (this.disposed) return
@@ -291,6 +300,7 @@ export class FlightRenderer {
     this.currentFlightScene.setOrbitStage(this.orbitStage)
     this.currentFlightScene.setBackwardFlightStage(this.backwardFlightStage)
     this.currentFlightScene.setReverseOrbitStage(this.reverseOrbitStage)
+    this.currentFlightScene.setGravityGateSide(this.gravityGateSide)
     this.currentFlightScene.setGravityGateStage(this.gravityGateStage)
     previous.dispose()
   }

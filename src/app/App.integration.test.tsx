@@ -40,7 +40,7 @@ vi.mock('../rendering', () => {
     { id: 'landing-surface', kind: 'zone', positionM: { x: 0, y: 0, z: -8 }, sizeM: { x: 3, y: 0, z: 3 } },
     { id: 'gravity-gate-frame', kind: 'gate', positionM: { x: 0, y: 9, z: -28 }, sizeM: { x: 8, y: 10, z: 8 } },
     { id: 'gravity-gate-top-entry', kind: 'marker', positionM: { x: 0, y: 14, z: -28 } },
-    { id: 'gravity-gate-side-exit', kind: 'marker', positionM: { x: 4, y: 6.43, z: -28 } },
+    { id: 'gravity-gate-side-exit', kind: 'marker', positionM: { x: 0, y: 6.43, z: -24 } },
   ]
 
   class MockFlightRenderer {

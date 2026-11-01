@@ -243,12 +243,14 @@ describe('Free Flight native navigation confirmation', () => {
     const base = createTrainingMachineState({ initialLessonId: 'gravity-gate' })
     const { rerender } = render(<FreeFlight {...props} trainingState={base} />)
     expect(screen.getByRole('group', { name: '重力門即時狀態' })).toHaveTextContent('即時重力門數值')
+    expect(screen.getByTestId('gravity-gate-side')).toHaveTextContent('來向待確認 · 預設正面（＋Z）')
+    expect(frames.renderer!.flightScene.getReference('gravity-gate-side-exit')!.positionM).toEqual({ x: 0, y: 6.43, z: -24 })
     expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ○ · 低層 ○ · 折返 ○ · 同側出 ○')
     for (const id of ['gravity-gate-top-offset', 'gravity-gate-entry-x', 'gravity-gate-entry-z', 'gravity-gate-side-distance', 'gravity-gate-return-speed', 'gravity-gate-return-distance']) {
       expect(screen.getByTestId(id)).toHaveTextContent('—')
     }
     const observed: TrainingMachineState = { ...base, phase: 'ACTIVE', lastEvaluation: { status: 'continue', metrics: {
-      gravityGatePhase: 6, gravityGateEntered: 1, gravityGateExited: 0,
+      gravityGatePhase: 6, gravityGateApproachSide: 2, gravityGateEntered: 1, gravityGateExited: 0,
       gravityGateLowerReached: 0, gravityGateReturned: 0, gravityGateReturnSpeedMps: -2,
       gravityGateReturnDistanceM: 0,
       gravityGateTopHeightDifferenceM: -2.5, gravityGateEntryHorizontalErrorM: 1.2,
@@ -271,6 +273,17 @@ describe('Free Flight native navigation confirmation', () => {
     expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ✓ · 低層 ✓ · 折返 ✓ · 同側出 ○')
     expect(screen.getByTestId('gravity-gate-return-speed')).toHaveTextContent('1.2 m/s')
     expect(screen.getByTestId('gravity-gate-return-distance')).toHaveTextContent('0.4 m')
+    // A side change at the same phase must update both the instrument and guide.
+    for (const [side, label, x, z] of [
+      [1, '前側（＋Z）', 0, -24], [2, '右側（＋X）', 4, -28],
+      [3, '後側（−Z）', 0, -32], [4, '左側（−X）', -4, -28],
+    ] as const) {
+      rerender(<FreeFlight {...props} trainingState={{ ...returning, lastEvaluation: {
+        ...returning.lastEvaluation!, metrics: { ...returning.lastEvaluation!.metrics, gravityGateApproachSide: side },
+      } }} />)
+      expect(screen.getByTestId('gravity-gate-side')).toHaveTextContent(`來向／底層返出口：${label}`)
+      expect(frames.renderer!.flightScene.getReference('gravity-gate-side-exit')!.positionM).toEqual({ x, y: 6.43, z })
+    }
     const recovering = { ...observed, recoveryInProgress: true, lastRecovery: { timestampSeconds: 12,
       message: '頂入口錯過：當時右偏 8.2 m', hint: '拉開距離，重新帶速上拋。', metrics: { interruptionGravityGateEntryHorizontalErrorM: 8.2 } } }
     rerender(<FreeFlight {...props} trainingState={recovering} />)
@@ -329,6 +342,8 @@ describe('Free Flight native navigation confirmation', () => {
     fireEvent.change(screen.getByRole('slider'), { target: { value: playback.durationSeconds } })
     expect(progress).toHaveTextContent('8 / 8 個示範步驟完成')
     expect(screen.getByTestId('gravity-gate-phase')).toHaveTextContent('8 / 8 步')
+    expect(screen.getByTestId('gravity-gate-side')).toHaveTextContent('來向／底層返出口：前側（＋Z）')
+    expect(frames.renderer!.flightScene.getReference('gravity-gate-side-exit')!.positionM).toEqual({ x: 0, y: 6.43, z: -24 })
     expect(screen.getByTestId('gravity-gate-status')).toHaveTextContent('頂部入 ✓ · 低層 ✓ · 折返 ✓ · 同側出 ✓')
     expect(Number.parseFloat(screen.getByTestId('gravity-gate-side-distance').textContent!)).toBeLessThan(0)
     expect(Number.parseFloat(screen.getByTestId('gravity-gate-return-distance').textContent!)).toBeGreaterThanOrEqual(0.3)
@@ -344,6 +359,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(screen.getByRole('list', { name: '本課步驟' }).textContent).toBe(liveSteps)
     expect(screen.getByTestId('gravity-gate-top-offset')).toHaveTextContent('—')
     expect(hud()).toHaveTextContent('即時')
+    expect(screen.getByTestId('gravity-gate-side')).toHaveTextContent('來向待確認')
     expect(frameVisible()).toBe(true)
     expect(frames.runtime!.simulation.getStaticObstacles()).toEqual(physicalFrame)
     act(() => { expect(frames.runtime!.enterReplay(playback.recording)).toBe(true) })

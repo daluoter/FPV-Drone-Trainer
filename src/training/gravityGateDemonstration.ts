@@ -19,14 +19,14 @@ const COAST_THROTTLE = 0.04
 const RETURN_TURN_SECONDS = 1.25
 const CAPTIONS = [
   '從地面自行起飛；重力門示範使用實際搖桿、同一套物理與實體門框，觀看不計真人成績。',
-  `第 2 步：自行起飛至約 ${GRAVITY_GATE_PRACTICE_HEIGHT_M} m，再繞到門框右側的進場點；頂部入、低層向來向折返。`,
-  '第 3 步：從進場點朝門框側邊前飛；先建立側向進場速度，再向上拋。',
-  `第 4 步：保留側向前進動量加油門上拋，到 ${GRAVITY_GATE_TOP_HEIGHT_M} m 水平頂口上方。`,
-  '第 5 步：上拋後收油並調姿，沿實際慣性越過頂點，對準金色水平頂口。',
-  '第 6 步：已收油並調姿；由水平頂口向下落入框內。',
+  `第 2 步：自行起飛至約 ${GRAVITY_GATE_PRACTICE_HEIGHT_M} m，移動到門框正面的進場點；頂部入、低層向來向折返。`,
+  '第 3 步：從進場點朝門框正面前飛，再向上拋；真人練習不限上拋來向。',
+  `第 4 步：已確認本次正面來向；本示範保留前進動量加油門上拋，到 ${GRAVITY_GATE_TOP_HEIGHT_M} m 水平頂口上方。`,
+  '第 5 步：已取得頂口上方高度；本示範收油調姿，沿實際慣性越過頂點，對準金色水平頂口。',
+  '第 6 步：已對準金色水平頂口；向下落入框內。真人練習不限定上拋方向或固定收油姿態。',
   '第 7 步：已由頂口落入；先下降到低層，再向來向折返，從同側青色出口飛出。',
   '第 8 步：已在低層反向飛出同側出口；修平姿態、減緩升降與旋轉，不需要降落。',
-  '重力門八步已完成：地面起飛、側向前飛上拋、收油調姿、頂口落入、低層折返同側飛出，再恢復控制。',
+  '重力門八步已完成：地面起飛、正面前飛上拋、收油調姿、頂口落入、低層折返同側飛出，再恢復控制。',
 ] as const
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -122,33 +122,32 @@ export function recordGravityGateDemonstration(
     const altitude = state.positionM.y - ground
     if (stage === 'lift' && Math.abs(altitude - GRAVITY_GATE_PRACTICE_HEIGHT_M) < 0.3 && Math.abs(velocity.y) < 0.5) {
       stage = 'position'
-      pendingCaption = '先繞到門框右側的進場點，轉向門框側邊；金色水平頂口才是下降入口。'
+      pendingCaption = '先到門框正面的進場點，朝向門框；金色水平頂口才是下降入口。'
     }
     if (stage === 'position') {
       const nose = rotateVectorByQuaternion(state.orientation, { x: 0, y: 0, z: -1 })
       if (Math.hypot(state.positionM.x - gate.approachPointM.x, state.positionM.z - gate.approachPointM.z) < 0.3
-        && Math.hypot(velocity.x, velocity.z) < 0.4 && nose.x < -0.97) stage = 'approach'
+        && Math.hypot(velocity.x, velocity.z) < 0.4 && nose.z < -0.97) stage = 'approach'
     }
-    if (stage === 'approach' && state.positionM.x <= gate.centerM.x + 11 && velocity.x < -2.5) {
+    if (stage === 'approach' && state.positionM.z <= gate.centerM.z + 11 && velocity.z < -2.5) {
       stage = 'throw'
-      pendingCaption = `保留朝門框側邊的動量，現在加油門上拋；先取得高於 ${GRAVITY_GATE_TOP_HEIGHT_M} m 頂口的高度。`
+      pendingCaption = `保留朝門框正面的動量，現在加油門上拋；先取得高於 ${GRAVITY_GATE_TOP_HEIGHT_M} m 頂口的高度。`
     }
     if (stage === 'throw' && altitude >= 12.1 && velocity.y >= 8.3) {
       stage = 'coast'
       pendingCaption = '現在收油並調整俯仰；讓慣性帶飛機越過最高點，再朝水平頂口下落。'
     }
     if (time < 0.5) return { roll: 0, pitch: 0, yaw: 0, throttle: collectiveThrottle(simulation, launch.y, 1) }
-    if (stage === 'coast') return attitudeInput(multiplyQuaternions(quaternionFromRotationVector({ x: 0, y: Math.PI / 2, z: 0 }),
-      quaternionFromRotationVector({ x: -25 * Math.PI / 180, y: 0, z: 0 })), COAST_THROTTLE)
+    if (stage === 'coast') return attitudeInput(quaternionFromRotationVector({ x: -25 * Math.PI / 180, y: 0, z: 0 }), COAST_THROTTLE)
     const turnU = turnAt === null ? 0 : clamp((time - turnAt) / RETURN_TURN_SECONDS, 0, 1)
-    const yaw = stage === 'lift' ? 0 : Math.PI / 2 - Math.PI * turnU * turnU * (3 - 2 * turnU)
+    const yaw = -Math.PI * turnU * turnU * (3 - 2 * turnU)
     const yawRate = turnU > 0 && turnU < 1 ? -Math.PI * 6 * turnU * (1 - turnU) / RETURN_TURN_SECONDS : 0
-    const targetVx = stage === 'lift' ? clamp((launch.x - state.positionM.x) * 1.2, -3, 3)
-      : stage === 'position' ? clamp((gate.approachPointM.x - state.positionM.x) * 1.2, -3.5, 3.5)
+    const targetX = stage === 'lift' ? launch.x : gate.centerM.x
+    const targetVx = clamp((targetX - state.positionM.x) * 1.2, -3.5, 3.5)
+    const targetVz = stage === 'lift' ? clamp((launch.z - state.positionM.z) * 1.2, -3, 3)
+      : stage === 'position' ? clamp((gate.approachPointM.z - state.positionM.z) * 1.2, -3.5, 3.5)
         : stage === 'descend' ? 0
           : stage === 'return' ? APPROACH_SPEED_MPS : -APPROACH_SPEED_MPS
-    const targetZ = stage === 'lift' ? launch.z : gate.centerM.z
-    const targetVz = clamp((targetZ - state.positionM.z) * 1.2, -3.5, 3.5)
     const accelerationX = clamp((targetVx - velocity.x) * 2.5, -8, 8)
     const accelerationZ = clamp((targetVz - velocity.z) * 2.5, -8, 8)
     const targetY = stage === 'descend' || stage === 'return' ? gate.sideExitCenterM.y : ground + GRAVITY_GATE_PRACTICE_HEIGHT_M

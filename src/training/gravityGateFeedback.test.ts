@@ -21,7 +21,7 @@ const proof = { gravityGatePhase: 8, gravityGateEpisodeValid: 1, gravityGateForw
 describe('L19 gravity gate guidance and result evidence', () => {
   it('explains the genuine top entrance, marked side exit, collisions and broad initial version', () => {
     const guide = trainingRouteGuide('gravity-gate')!
-    expect(guide).toMatch(/地面自行起飛.*8 m.*右側.*前速.*上拋.*收油.*頂口.*低層.*折返.*恢復/)
+    expect(guide).toMatch(/地面自行起飛.*8 m.*正面.*任意來向.*頂口.*低層.*折返.*恢復/)
     expect(guide).toContain('寬 8 m、深 8 m')
     expect(guide).toContain('8.86 m')
     expect(guide).toContain('實際碰撞')
@@ -54,9 +54,9 @@ describe('L19 gravity gate guidance and result evidence', () => {
     expect(objective.detail).toContain('2.6 m')
   })
   it('chooses next instruction from fresh episode facts rather than historic checkmarks', () => {
-    expect(trainingObjective('gravity-gate', { metrics: { gravityGatePhase: 7, gravityGateEpisodeValid: 0 } })?.title).toContain('建立前進速度')
-    expect(trainingObjective('gravity-gate', { metrics: { gravityGatePhase: 7, gravityGateEpisodeValid: 1 } })?.title).toContain('帶速向上拋')
-    expect(trainingObjective('gravity-gate', { metrics: { gravityGatePhase: 7, gravityGateEpisodeValid: 1, gravityGateTossed: 1 } })?.title).toContain('收油')
+    expect(trainingObjective('gravity-gate', { metrics: { gravityGatePhase: 7, gravityGateEpisodeValid: 0 } })?.title).toContain('確認本次進場來向')
+    expect(trainingObjective('gravity-gate', { metrics: { gravityGatePhase: 7, gravityGateEpisodeValid: 1 } })?.title).toContain('取得頂口上方高度')
+    expect(trainingObjective('gravity-gate', { metrics: { gravityGatePhase: 7, gravityGateEpisodeValid: 1, gravityGateTossed: 1 } })?.title).toContain('對準水平頂口')
     for (let phase = 0; phase <= 8; phase += 1) {
       const objective = trainingObjective('gravity-gate', { metrics: { gravityGatePhase: phase } })!
       expect(objective.detail).not.toMatch(/NaN|Infinity/)
@@ -101,9 +101,9 @@ describe('L19 gravity gate guidance and result evidence', () => {
       expect(feedback.observedGap).toContain(expected)
     }
   })
-  it('explains lost approach momentum instead of silently restarting the task', () => {
+  it('explains that historical approach momentum restrictions no longer apply', () => {
     const metrics = { gravityGateInterrupted: 1, gravityGateInterruptionReason: 10 }
-    expect(gravityGateInterruptionReason(metrics)).toContain('不能先停住後直上直下')
+    expect(gravityGateInterruptionReason(metrics)).toContain('目前不再限制上拋前速')
   })
   it('explains each low-level substage and the near-stop witness instead of hiding a condition', () => {
     const entered = { gravityGatePhase: 6, gravityGateEpisodeValid: 1, gravityGateTossed: 1,

@@ -10,6 +10,8 @@ export const GRAVITY_GATE_TOP_HEIGHT_M = GRAVITY_GATE_BOTTOM_HEIGHT_M + GRAVITY_
 export const GRAVITY_GATE_FORWARD_DISTANCE_M = 28
 export const GRAVITY_GATE_FRAME_THICKNESS_M = 0.28
 
+export type GravityGateSide = 'front' | 'right' | 'back' | 'left'
+
 /** All bounds are the inner faces of the physical beams, never expanded scoring tolerances. */
 export interface GravityGate {
   readonly id: 'gravity-gate-frame'
@@ -22,8 +24,10 @@ export interface GravityGate {
   readonly maxX: number
   readonly minZ: number
   readonly maxZ: number
-  /** The marked return face is the positive-X side from which the approach begins. */
+  /** Physical right boundary retained for existing coordinate consumers. */
   readonly exitX: number
+  /** Default guidance returns through the front, positive-Z face. */
+  readonly exitZ: number
   readonly lowerExitMinY: number
   /** The underside of the middle ring defines the lower exit's clear upper edge. */
   readonly lowerExitMaxY: number
@@ -83,16 +87,16 @@ export function createGravityGate(launch: Vector3, groundHeightM: number): Gravi
   }
   const lowerExitMaxY = middleY - halfBeam
   return Object.freeze({ id: 'gravity-gate-frame', centerM, topY, middleY, bottomY, minX, maxX, minZ, maxZ,
-    exitX: maxX, lowerExitMinY: bottomY, lowerExitMaxY,
-    approachPointM: Object.freeze({ x: centerM.x + 14, y: groundHeightM + 8, z: centerM.z }),
-    approachDirection: Object.freeze({ x: -1, y: 0, z: 0 }),
-    exitDirection: Object.freeze({ x: 1, y: 0, z: 0 }),
+    exitX: maxX, exitZ: maxZ, lowerExitMinY: bottomY, lowerExitMaxY,
+    approachPointM: Object.freeze({ x: centerM.x, y: groundHeightM + 8, z: centerM.z + 14 }),
+    approachDirection: Object.freeze({ x: 0, y: 0, z: -1 }),
+    exitDirection: Object.freeze({ x: 0, y: 0, z: 1 }),
     topEntryCenterM: Object.freeze({ x: centerM.x, y: topY, z: centerM.z }),
-    sideExitCenterM: Object.freeze({ x: maxX, y: (bottomY + lowerExitMaxY) / 2, z: centerM.z }),
+    sideExitCenterM: Object.freeze({ x: centerM.x, y: (bottomY + lowerExitMaxY) / 2, z: maxZ }),
     colliders: Object.freeze(boxes) })
 }
 
-function crossing(before: Vector3, current: Vector3, axis: 'x' | 'y', plane: number, direction: -1 | 1): Omit<GravityGateCrossing, 'insideOpening'> | null {
+function crossing(before: Vector3, current: Vector3, axis: 'x' | 'y' | 'z', plane: number, direction: -1 | 1): Omit<GravityGateCrossing, 'insideOpening'> | null {
   if (!isFiniteVector3(before) || !isFiniteVector3(current)
     || !((current[axis] - before[axis]) * direction > 0
       && (before[axis] - plane) * direction <= 0 && (current[axis] - plane) * direction >= 0)) return null
@@ -127,11 +131,38 @@ export function gravityGateLowerCrossing(before: Vector3, current: Vector3, gate
     && clear(passage.positionM.z, gate.minZ, gate.maxZ, radiusM) }
 }
 
-/** Return through the approach-side positive-X face, below the middle ring. */
-export function gravityGateExitCrossing(before: Vector3, current: Vector3, gate: GravityGate, radiusM = 0): GravityGateCrossing | null {
+/** Last outside-footprint face, using the dominant normalized offset at corners. */
+export function gravityGateApproachSide(point: Vector3, gate: GravityGate): GravityGateSide | null {
+  if (!isFiniteVector3(point)) return null
+  const x = (point.x - gate.centerM.x) / ((gate.maxX - gate.minX) / 2)
+  const z = (point.z - gate.centerM.z) / ((gate.maxZ - gate.minZ) / 2)
+  if (Math.abs(x) <= 1 && Math.abs(z) <= 1) return null
+  return Math.abs(z) >= Math.abs(x) ? z >= 0 ? 'front' : 'back' : x >= 0 ? 'right' : 'left'
+}
+
+/** Low clear opening and outward normal for a recorded approach face. */
+export function gravityGateSideExit(gate: GravityGate, side: GravityGateSide): {
+  readonly centerM: Vector3
+  readonly outwardDirection: Vector3
+  readonly halfWidthM: number
+} {
+  const y = (gate.lowerExitMinY + gate.lowerExitMaxY) / 2
+  switch (side) {
+    case 'front': return { centerM: { x: gate.centerM.x, y, z: gate.maxZ }, outwardDirection: { x: 0, y: 0, z: 1 }, halfWidthM: (gate.maxX - gate.minX) / 2 }
+    case 'back': return { centerM: { x: gate.centerM.x, y, z: gate.minZ }, outwardDirection: { x: 0, y: 0, z: -1 }, halfWidthM: (gate.maxX - gate.minX) / 2 }
+    case 'right': return { centerM: { x: gate.maxX, y, z: gate.centerM.z }, outwardDirection: { x: 1, y: 0, z: 0 }, halfWidthM: (gate.maxZ - gate.minZ) / 2 }
+    case 'left': return { centerM: { x: gate.minX, y, z: gate.centerM.z }, outwardDirection: { x: -1, y: 0, z: 0 }, halfWidthM: (gate.maxZ - gate.minZ) / 2 }
+  }
+}
+
+/** Outward crossing of the recorded approach-side opening, below the middle ring. */
+export function gravityGateExitCrossing(before: Vector3, current: Vector3, gate: GravityGate, radiusM = 0, side: GravityGateSide = 'front'): GravityGateCrossing | null {
   if (!Number.isFinite(radiusM) || radiusM < 0) return null
-  const passage = crossing(before, current, 'x', gate.exitX, 1)
+  const exit = gravityGateSideExit(gate, side)
+  const axis = exit.outwardDirection.x === 0 ? 'z' : 'x'
+  const transverse = axis === 'x' ? 'z' : 'x'
+  const passage = crossing(before, current, axis, exit.centerM[axis], exit.outwardDirection[axis] as -1 | 1)
   if (!passage) return null
-  return { ...passage, insideOpening: clear(passage.positionM.z, gate.minZ, gate.maxZ, radiusM)
+  return { ...passage, insideOpening: clear(passage.positionM[transverse], gate.centerM[transverse] - exit.halfWidthM, gate.centerM[transverse] + exit.halfWidthM, radiusM)
     && clear(passage.positionM.y, gate.lowerExitMinY, gate.lowerExitMaxY, radiusM) }
 }

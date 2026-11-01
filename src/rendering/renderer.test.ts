@@ -353,6 +353,7 @@ describe('FlightRenderer gravity-gate presentation', () => {
     const renderer = new FlightRenderer(canvas, { rendererFactory: () => rendererStub })
     try {
       renderer.setLessonTarget('gravity-gate')
+      renderer.setGravityGateSide('left')
       renderer.setGravityGateStage(6)
       const state = createInitialDroneState(DEFAULT_DRONE_CONFIG)
       const original = JSON.stringify(state)
@@ -365,12 +366,12 @@ describe('FlightRenderer gravity-gate presentation', () => {
       expect(dispose).toHaveBeenCalledOnce()
       expect(renderer.flightScene.getReference('gravity-gate-frame')?.positionM).toEqual({ x: 6, y: 14, z: -31 })
       expect(renderer.flightScene.getReference('gravity-gate-top-entry')?.positionM).toEqual({ x: 6, y: 19, z: -31 })
-      expect(renderer.flightScene.getReference('gravity-gate-side-exit')?.positionM).toEqual({ x: 10, y: 11.43, z: -31 })
+      expect(renderer.flightScene.getReference('gravity-gate-side-exit')?.positionM).toEqual({ x: 2, y: 11.43, z: -31 })
       expect(renderer.scene.getObjectByName('gravity-gate-field')?.visible).toBe(true)
       expect(renderer.scene.getObjectByName('gravity-gate-physical-frame')?.children).toHaveLength(16)
       expect(renderer.scene.getObjectByName('reverse-orbit-field')?.visible).toBe(false)
       const accent = renderer.scene.getObjectByName('gravity-gate-stage-guidance')!
-      expect(accent.getWorldPosition(new THREE.Vector3()).toArray()).toEqual([10, 11.43, -31])
+      expect(accent.getWorldPosition(new THREE.Vector3()).toArray()).toEqual([2, 11.43, -31])
       const guide = renderer.scene.getObjectByName('gravity-gate-stage-reference') as THREE.LineLoop<THREE.BufferGeometry, THREE.LineBasicMaterial>
       expect(guide.material.color.getHex()).toBe(0x45d7f7)
       renderer.setGravityGateStage(8)

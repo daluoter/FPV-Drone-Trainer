@@ -7,7 +7,7 @@ import { createCoordinatedTurnTargets, COORDINATED_TURN_TARGET_RADIUS_M } from '
 import { createSquareRouteTargets, SQUARE_ROUTE_TARGET_RADIUS_M } from '../training/squareRoute'
 import { createFigureEightTargets, FIGURE_EIGHT_TARGET_RADIUS_M } from '../training/figureEight'
 import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
-import { createGravityGate, gravityGateExitCrossing, gravityGateLowerCrossing, gravityGateTopCrossing } from '../world/gravityGate'
+import { createGravityGate, gravityGateSideExit, gravityGateExitCrossing, gravityGateLowerCrossing, gravityGateTopCrossing } from '../world/gravityGate'
 import { findSweptObstacleHit } from '../simulation/obstacles'
 import { SPLIT_S_MIN_HEIGHT_M, SPLIT_S_TARGET_HEIGHT_M } from '../training/splitS'
 import { POWER_LOOP_TARGET_HEIGHT_M } from '../training/powerLoop'
@@ -1605,10 +1605,10 @@ describe('flight scene reference contract', () => {
       expect(reference.sizeM).toEqual({ x: 8, y: 10, z: 8 })
       expect(scene.getReference('gravity-gate-top-entry')!.positionM).toEqual({ x: 6, y: 19, z: -31 })
       expect(scene.getReference('gravity-gate-side-exit')!.positionM).toEqual(gate.sideExitCenterM)
-      expect(gate.sideExitCenterM.x).toBe(10)
+      expect(gate.sideExitCenterM.x).toBe(6)
       expect(gate.sideExitCenterM.y).toBeCloseTo(11.43)
-      expect(scene.getReference('gravity-gate-side-exit')!.sizeM).toEqual({ x: 0,
-        y: gate.lowerExitMaxY - gate.lowerExitMinY, z: 8 })
+      expect(scene.getReference('gravity-gate-side-exit')!.sizeM).toEqual({ x: 8,
+        y: gate.lowerExitMaxY - gate.lowerExitMinY, z: 0 })
       expect(reference.object.visible).toBe(false)
       scene.setLessonTarget('gravity-gate')
       expect(reference.object.visible).toBe(true)
@@ -1637,9 +1637,9 @@ describe('flight scene reference contract', () => {
       const sideGuide = scene.getReference('gravity-gate-side-exit')!.object
       expect(topGuide.getWorldPosition(new THREE.Vector3()).toArray()).toEqual([6, 19, -31])
       const sidePosition = sideGuide.getWorldPosition(new THREE.Vector3())
-      expect(sidePosition.x).toBe(gate.exitX)
+      expect(sidePosition.x).toBe(gate.centerM.x)
       expect(sidePosition.y).toBeCloseTo(gate.sideExitCenterM.y)
-      expect(sidePosition.z).toBe(gate.centerM.z)
+      expect(sidePosition.z).toBe(gate.exitZ)
       const topOpening = scene.scene.getObjectByName('gravity-gate-top-opening-guide') as THREE.LineLoop
       const sideOpening = scene.scene.getObjectByName('gravity-gate-side-opening-guide') as THREE.LineLoop
       expect(topOpening.isLineLoop).toBe(true)
@@ -1658,7 +1658,7 @@ describe('flight scene reference contract', () => {
     } finally { scene.dispose() }
   })
 
-  it('illustrates a side approach, downward top entry, lower descent and opposite return without a path through beams', () => {
+  it('illustrates the suggested front approach, downward top entry, lower descent and opposite return without a path through beams', () => {
     const scene = createFlightScene()
     try {
       scene.setLessonTarget('gravity-gate')
@@ -1669,21 +1669,21 @@ describe('flight scene reference contract', () => {
       expect(approach.getWorldPosition(new THREE.Vector3()).toArray()).toEqual([
         gate.approachPointM.x, gate.approachPointM.y, gate.approachPointM.z,
       ])
-      for (const [name, direction] of [['gravity-gate-side-approach-arrow', [-1, 0, 0]],
-        ['gravity-gate-outward-exit-arrow', [1, 0, 0]], ['gravity-gate-descend-to-lower-arrow', [0, -1, 0]]] as const) {
+      for (const [name, direction] of [['gravity-gate-side-approach-arrow', [0, 0, -1]],
+        ['gravity-gate-outward-exit-arrow', [0, 0, 1]], ['gravity-gate-descend-to-lower-arrow', [0, -1, 0]]] as const) {
         const arrow = scene.scene.getObjectByName(name)!
-        const measured = new THREE.Vector3(0, 1, 0).applyQuaternion(arrow.quaternion)
+        const measured = new THREE.Vector3(0, 1, 0).applyQuaternion(arrow.getWorldQuaternion(new THREE.Quaternion()))
         for (const [axis, index] of [['x', 0], ['y', 1], ['z', 2]] as const) expect(measured[axis]).toBeCloseTo(direction[index], 10)
       }
       const exit = scene.scene.getObjectByName('gravity-gate-side-opening-guide') as THREE.LineLoop<THREE.BufferGeometry>
       const exitPoints = exit.geometry.getAttribute('position')
       for (let index = 0; index < exitPoints.count; index += 1) {
         const point = exit.localToWorld(new THREE.Vector3().fromBufferAttribute(exitPoints, index))
-        expect(point.x).toBeCloseTo(gate.exitX + 0.05)
+        expect(point.z).toBeCloseTo(gate.exitZ + 0.05)
         expect(point.y).toBeGreaterThan(gate.lowerExitMinY)
         expect(point.y).toBeLessThan(gate.lowerExitMaxY)
-        expect(point.z).toBeGreaterThan(gate.minZ)
-        expect(point.z).toBeLessThan(gate.maxZ)
+        expect(point.x).toBeGreaterThan(gate.minX)
+        expect(point.x).toBeLessThan(gate.maxX)
       }
       const route = scene.scene.getObjectByName('gravity-gate-illustrative-route') as THREE.Line<THREE.BufferGeometry>
       const points = route.geometry.getAttribute('position')
@@ -1695,12 +1695,12 @@ describe('flight scene reference contract', () => {
         const current = route.localToWorld(new THREE.Vector3().fromBufferAttribute(points, index))
         expect(findSweptObstacleHit(before, current, 0.3, gate.colliders), `route segment ${index}`).toBeNull()
         if (gravityGateTopCrossing(before, current, gate, 0.3)?.insideOpening) {
-          expect(current.x).toBeLessThan(before.x)
+          expect(current.z).toBeLessThan(before.z)
           enteredAt = index
         }
         if (gravityGateLowerCrossing(before, current, gate, 0.3)?.insideOpening) lowerAt = index
         if (gravityGateExitCrossing(before, current, gate, 0.3)?.insideOpening) {
-          expect(current.x).toBeGreaterThan(before.x)
+          expect(current.z).toBeGreaterThan(before.z)
           exitAt = index
         }
       }
@@ -1708,6 +1708,51 @@ describe('flight scene reference contract', () => {
       expect(lowerAt).toBeGreaterThan(enteredAt)
       expect(exitAt).toBeGreaterThan(lowerAt)
       expect(scene.scene.getObjectByName('gravity-gate-height-guide')!.userData.levelHeightsM).toEqual([4, 9, 14])
+    } finally { scene.dispose() }
+  })
+
+
+  it('moves approach and low-exit guidance to all recorded faces while every physical beam stays fixed', () => {
+    const scene = createFlightScene()
+    try {
+      const gate = createGravityGate(scene.getReference('training-launch')!.positionM, 0)
+      const frame = scene.scene.getObjectByName('gravity-gate-physical-frame')!
+      scene.scene.updateMatrixWorld(true)
+      const physical = frame.children.map((beam) => beam.matrixWorld.clone())
+      const drone = scene.drone.matrixWorld.clone()
+      for (const side of ['right', 'back', 'left', 'front'] as const) {
+        scene.setGravityGateSide(side)
+        scene.setGravityGateStage(7)
+        scene.scene.updateMatrixWorld(true)
+        const exit = gravityGateSideExit(gate, side)
+        const ref = scene.getReference('gravity-gate-side-exit')!
+        expect(ref.positionM).toEqual(exit.centerM)
+        expect(ref.object.getWorldPosition(new THREE.Vector3()).toArray()).toEqual([exit.centerM.x, exit.centerM.y, exit.centerM.z])
+        const arrow = scene.scene.getObjectByName('gravity-gate-outward-exit-arrow')!
+        const direction = new THREE.Vector3(0, 1, 0).applyQuaternion(arrow.getWorldQuaternion(new THREE.Quaternion()))
+        expect(direction.x).toBeCloseTo(exit.outwardDirection.x)
+        expect(direction.z).toBeCloseTo(exit.outwardDirection.z)
+        const route = scene.scene.getObjectByName('gravity-gate-illustrative-route') as THREE.Line<THREE.BufferGeometry>
+        const points = route.geometry.getAttribute('position')
+        let topIndex = -1
+        let lowerIndex = -1
+        let exitIndex = -1
+        for (let index = 1; index < points.count; index += 1) {
+          const before = route.localToWorld(new THREE.Vector3().fromBufferAttribute(points, index - 1))
+          const current = route.localToWorld(new THREE.Vector3().fromBufferAttribute(points, index))
+          expect(findSweptObstacleHit(before, current, 0.3, gate.colliders), `${side} route segment ${index}`).toBeNull()
+          if (gravityGateTopCrossing(before, current, gate, 0.3)?.insideOpening) topIndex = index
+          if (gravityGateLowerCrossing(before, current, gate, 0.3)?.insideOpening) lowerIndex = index
+          if (gravityGateExitCrossing(before, current, gate, 0.3, side)?.insideOpening) exitIndex = index
+        }
+        expect(topIndex).toBeGreaterThan(0)
+        expect(lowerIndex).toBeGreaterThan(topIndex)
+        expect(exitIndex).toBeGreaterThan(lowerIndex)
+        expect(frame.children.every((beam, index) => beam.matrixWorld.equals(physical[index]))).toBe(true)
+        expect(scene.drone.matrixWorld.equals(drone)).toBe(true)
+      }
+      scene.setGravityGateSide(null)
+      expect(scene.getReference('gravity-gate-side-exit')!.positionM).toEqual(gate.sideExitCenterM)
     } finally { scene.dispose() }
   })
 

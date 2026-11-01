@@ -105,7 +105,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if response is None or response.status != 200:
                 raise AssertionError("The production entry page did not return HTTP 200.")
             expect(page).to_have_title("FPV Drone Trainer")
-            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.10.30.2")
+            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.11.01.1")
             report["release"] = page.get_by_test_id("app-release").inner_text()
 
             asset_urls = page.locator("script[src], link[rel='stylesheet'][href]").evaluate_all(
@@ -2066,6 +2066,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(training.get_by_role("heading", name="重力門", exact=True)).to_be_visible()
             gravity_hud = flight.get_by_role("group", name="重力門即時狀態", exact=True)
             gravity_status = flight.get_by_test_id("gravity-gate-status")
+            gravity_side = flight.get_by_test_id("gravity-gate-side")
             gravity_fields = {
                 "phase": flight.get_by_test_id("gravity-gate-phase"),
                 "top_offset_m": flight.get_by_test_id("gravity-gate-top-offset"),
@@ -2111,9 +2112,10 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             timeline.press("End")
             demonstration_snapshot("L19", 8, complete=True)
             end_gravity = gravity_motion()
+            expect(gravity_side).to_contain_text("前側（＋Z）")
             expect(gravity_status).to_have_text("頂部入 ✓ · 低層 ✓ · 折返 ✓ · 同側出 ✓")
             if (end_gravity["phase"] != 8 or end_gravity["side_distance_m"] >= 0
-                    or end_gravity["altitude_m"] < 4 or end_gravity["entry_x_m"] < 4
+                    or end_gravity["altitude_m"] < 4 or end_gravity["entry_z_m"] < 4
                     or end_gravity["return_speed_mps"] < .5 or end_gravity["return_distance_m"] < .3):
                 raise AssertionError(f"L19 completion lacks actual lower-level reversal and return through the approach side: {end_gravity}")
             held_gravity_time = float(timeline.input_value())
@@ -2126,11 +2128,13 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             gravity_chapters.nth(3).click()
             expect(demo_progress).to_contain_text("3 / 8 個示範步驟完成")
             approaching_gravity = gravity_motion()
-            if approaching_gravity["return_speed_mps"] > -1 or approaching_gravity["entry_x_m"] <= 4:
-                raise AssertionError(f"L19 does not establish a real inward approach from the marked lateral side: {approaching_gravity}")
+            expect(gravity_side).to_contain_text("前側（＋Z）")
+            if approaching_gravity["phase"] != 3 or approaching_gravity["entry_z_m"] <= 4:
+                raise AssertionError(f"L19 preparatory chapter does not record the front approach independently of its speed: {approaching_gravity}")
             gravity_chapters.nth(6).click()
             expect(demo_progress).to_contain_text("6 / 8 個示範步驟完成")
             entered_gravity = gravity_motion()
+            expect(gravity_side).to_contain_text("前側（＋Z）")
             entered_gravity_time = float(timeline.input_value())
             expect(gravity_status).to_have_text("頂部入 ✓ · 低層 ○ · 折返 ○ · 同側出 ○")
             if abs(entered_gravity["entry_x_m"]) >= 4 or abs(entered_gravity["entry_z_m"]) >= 4 or not (-1 <= entered_gravity["top_offset_m"] <= .1):
@@ -2142,7 +2146,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             exited_gravity = gravity_motion()
             expect(gravity_status).to_have_text("頂部入 ✓ · 低層 ✓ · 折返 ✓ · 同側出 ✓")
             if (exited_gravity["side_distance_m"] > .1 or not (4 <= exited_gravity["altitude_m"] < 8.9)
-                    or exited_gravity["entry_x_m"] < 3.9 or exited_gravity["return_speed_mps"] < .5
+                    or exited_gravity["entry_z_m"] < 3.9 or exited_gravity["return_speed_mps"] < .5
                     or exited_gravity["return_distance_m"] < .3):
                 raise AssertionError(f"L19 did not descend and reverse through the low opening on the approach side: {exited_gravity}")
             gravity_chapters.nth(4).click()
@@ -2220,7 +2224,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(training.locator(".school-progress")).to_contain_text("已練 0 次")
             if training_progress(page) != before_gravity_demo:
                 raise AssertionError("L19 demo, separate L00 pitch or reload wrote live results.")
-            checks.append("L19 physical lateral approach, toss and throttle reduction, downward top entry, lower-level reversal and return through the approach side, eight independent chapters and backward seek without live-result writes")
+            checks.append("L19 physical front-approach example, downward horizontal top entry, lower-level reversal and same-front exit, eight independent chapters and backward seek without live-result writes")
             checks.append("L19 measured entry and exit HUD preserves altitude/XYZ and playback banner on desktop, short desktop and mobile with all three camera modes")
             checks.append("L19 scene selection and unchanged live checkpoints persist across reload and separate L00 playback")
 

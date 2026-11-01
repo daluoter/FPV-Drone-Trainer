@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_DRONE_CONFIG, droneGroundContactRadius } from '../drone'
 import { FlightSimulation } from '../flight-controller'
 import { findSweptObstacleHit, validateStaticObstacles } from '../simulation/obstacles'
-import { createGravityGate, gravityGateExitCrossing, gravityGateLowerCrossing, gravityGateTopCrossing, GRAVITY_GATE_FRAME_THICKNESS_M } from './gravityGate'
+import { createGravityGate, gravityGateApproachSide, gravityGateSideExit, type GravityGateSide, gravityGateExitCrossing, gravityGateLowerCrossing, gravityGateTopCrossing, GRAVITY_GATE_FRAME_THICKNESS_M } from './gravityGate'
 
 const launch = { x: 0, y: 0.05, z: 0 }
 
@@ -11,12 +11,12 @@ describe('shared gravity gate field', () => {
     const gate = createGravityGate(launch, 0)
     expect(gate.centerM).toEqual({ x: 0, y: 9, z: -28 })
     expect(gate.topEntryCenterM).toEqual({ x: 0, y: 14, z: -28 })
-    expect(gate.sideExitCenterM).toEqual({ x: 4, y: 6.43, z: -28 })
+    expect(gate.sideExitCenterM).toEqual({ x: 0, y: 6.43, z: -24 })
     expect([gate.minX, gate.maxX, gate.minZ, gate.maxZ, gate.bottomY, gate.middleY, gate.topY]).toEqual([-4, 4, -32, -24, 4, 9, 14])
     expect([gate.lowerExitMinY, gate.lowerExitMaxY]).toEqual([4, 8.86])
-    expect(gate.approachPointM).toEqual({ x: 14, y: 8, z: -28 })
-    expect(gate.approachDirection).toEqual({ x: -1, y: 0, z: 0 })
-    expect(gate.exitDirection).toEqual({ x: 1, y: 0, z: 0 })
+    expect(gate.approachPointM).toEqual({ x: 0, y: 8, z: -14 })
+    expect(gate.approachDirection).toEqual({ x: 0, y: 0, z: -1 })
+    expect(gate.exitDirection).toEqual({ x: 0, y: 0, z: 1 })
     expect(gate.exitX).toBe(gate.maxX)
     expect(gate.colliders).toHaveLength(16)
     expect(validateStaticObstacles(gate.colliders)).toBe(true)
@@ -38,8 +38,8 @@ describe('shared gravity gate field', () => {
     const shifted = createGravityGate({ x: 6, y: 5.05, z: -3 }, 5)
     expect(shifted.centerM).toEqual({ x: 6, y: 14, z: -31 })
     expect(shifted.topEntryCenterM).toEqual({ x: 6, y: 19, z: -31 })
-    expect(shifted.sideExitCenterM).toEqual({ x: 10, y: 11.43, z: -31 })
-    expect(shifted.approachPointM).toEqual({ x: 20, y: 13, z: -31 })
+    expect(shifted.sideExitCenterM).toEqual({ x: 6, y: 11.43, z: -27 })
+    expect(shifted.approachPointM).toEqual({ x: 6, y: 13, z: -17 })
     expect(shifted.lowerExitMaxY).toBeCloseTo(original.lowerExitMaxY + 5)
     for (const [index, box] of shifted.colliders.entries()) {
       const before = original.colliders[index]
@@ -56,8 +56,8 @@ describe('shared gravity gate field', () => {
     const gate = createGravityGate(launch, 0)
     const radius = droneGroundContactRadius(DEFAULT_DRONE_CONFIG)
     const above = { ...gate.topEntryCenterM, y: gate.topY + 4 }
-    const inside = { ...gate.sideExitCenterM, x: gate.centerM.x }
-    const outside = { ...gate.sideExitCenterM, x: gate.exitX + 4 }
+    const inside = { ...gate.sideExitCenterM, z: gate.centerM.z }
+    const outside = { ...gate.sideExitCenterM, z: gate.exitZ + 4 }
     expect(findSweptObstacleHit(above, inside, radius, gate.colliders)).toBeNull()
     expect(findSweptObstacleHit(inside, outside, radius, gate.colliders)).toBeNull()
     expect(gravityGateTopCrossing(above, inside, gate, radius)?.insideOpening).toBe(true)
@@ -146,13 +146,13 @@ describe('gravity gate continuous opening crossings', () => {
   })
 
   it('requires outward positive-X travel through the low approach-side opening', () => {
-    expect(gravityGateExitCrossing({ x: 2, y: 7, z: -26 }, { x: 6, y: 5, z: -30 }, gate, 0.25))
+    expect(gravityGateExitCrossing({ x: 2, y: 7, z: -26 }, { x: 6, y: 5, z: -30 }, gate, 0.25, 'right'))
       .toEqual({ fraction: 0.5, positionM: { x: 4, y: 6, z: -28 }, insideOpening: true })
-    expect(gravityGateExitCrossing({ x: 6, y: 6, z: -28 }, { x: 2, y: 6, z: -28 }, gate)).toBeNull()
-    expect(gravityGateExitCrossing({ x: 2, y: 6, z: -28 }, { x: 3.9, y: 6, z: -28 }, gate)).toBeNull()
-    expect(gravityGateExitCrossing({ x: 0, y: 6, z: -30 }, { x: 0, y: 6, z: -34 }, gate)).toBeNull()
+    expect(gravityGateExitCrossing({ x: 6, y: 6, z: -28 }, { x: 2, y: 6, z: -28 }, gate, 0, 'right')).toBeNull()
+    expect(gravityGateExitCrossing({ x: 2, y: 6, z: -28 }, { x: 3.9, y: 6, z: -28 }, gate, 0, 'right')).toBeNull()
+    expect(gravityGateExitCrossing({ x: 0, y: 6, z: -30 }, { x: 0, y: 6, z: -34 }, gate, 0, 'right')).toBeNull()
     // The upper side remains visibly and physically open, but is not the low return exit.
-    expect(gravityGateExitCrossing({ x: 2, y: 12, z: -28 }, { x: 6, y: 12, z: -28 }, gate)?.insideOpening).toBe(false)
+    expect(gravityGateExitCrossing({ x: 2, y: 12, z: -28 }, { x: 6, y: 12, z: -28 }, gate, 0, 'right')?.insideOpening).toBe(false)
     expect(findSweptObstacleHit({ x: 2, y: 12, z: -28 }, { x: 6, y: 12, z: -28 }, 0.25, gate.colliders)).toBeNull()
   })
 
@@ -166,13 +166,33 @@ describe('gravity gate continuous opening crossings', () => {
     for (const y of [gate.lowerExitMinY + 0.1, gate.lowerExitMaxY - 0.1]) {
       const before = { x: 2, y, z: -28 }
       const current = { x: 6, y, z: -28 }
-      expect(gravityGateExitCrossing(before, current, gate, 0.25)?.insideOpening).toBe(false)
+      expect(gravityGateExitCrossing(before, current, gate, 0.25, 'right')?.insideOpening).toBe(false)
       expect(findSweptObstacleHit(before, current, 0.25, gate.colliders)).not.toBeNull()
     }
     const closeToMiddle = { x: gate.maxX - 0.1, y: 11, z: gate.centerM.z }
     const belowMiddle = { ...closeToMiddle, y: 7 }
     expect(findSweptObstacleHit(closeToMiddle, belowMiddle, 0.25, gate.colliders)).not.toBeNull()
     expect(gravityGateTopCrossing({ x: -3.6, y: 16, z: -28 }, { x: -3.6, y: 12, z: -28 }, gate, 0.25)?.insideOpening).toBe(true)
+  })
+
+
+  it.each(['front', 'right', 'back', 'left'] as const)('opens the same low return face for a %s approach', (side: GravityGateSide) => {
+    const exit = gravityGateSideExit(gate, side)
+    const n = exit.outwardDirection
+    const point = (offset: number) => ({ x: exit.centerM.x + n.x * offset, y: exit.centerM.y, z: exit.centerM.z + n.z * offset })
+    expect(gravityGateApproachSide(point(8), gate)).toBe(side)
+    expect(gravityGateExitCrossing(point(-2), point(2), gate, 0.3, side)?.insideOpening).toBe(true)
+    expect(gravityGateExitCrossing(point(2), point(-2), gate, 0.3, side)).toBeNull()
+    expect(findSweptObstacleHit(point(-2), point(2), 0.3, gate.colliders)).toBeNull()
+    expect(gravityGateExitCrossing({ ...point(-2), y: 12 }, { ...point(2), y: 12 }, gate, 0.3, side)?.insideOpening).toBe(false)
+  })
+
+  it('recognizes only outside-footprint approaches with deterministic diagonal ties', () => {
+    expect(gravityGateApproachSide({ ...gate.centerM }, gate)).toBeNull()
+    expect(gravityGateApproachSide({ x: 0, y: 30, z: gate.centerM.z }, gate)).toBeNull()
+    expect(gravityGateApproachSide({ x: 8, y: 30, z: gate.centerM.z + 8 }, gate)).toBe('front')
+    expect(gravityGateApproachSide({ x: 8, y: 30, z: gate.centerM.z - 8 }, gate)).toBe('back')
+    expect(gravityGateApproachSide({ x: NaN, y: 30, z: gate.centerM.z }, gate)).toBeNull()
   })
 
   it('rejects non-finite segments or invalid body radii without inventing a passage', () => {

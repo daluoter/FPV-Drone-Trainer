@@ -121,7 +121,7 @@ const METRICS: Readonly<Record<string, MetricDefinition>> = {
   gravityGateEntryHorizontalErrorM: { label: '入口左右偏差（右＋）', unit: 'm', digits: 2 },
   gravityGateEntryForwardErrorM: { label: '入口前後偏差（後＋）', unit: 'm', digits: 2 },
   gravityGateExitDistanceM: { label: '距低層返出口', unit: 'm', digits: 2 },
-  gravityGateForwardSpeedMps: { label: '側邊進場速度', unit: 'm/s', digits: 2 },
+  gravityGateForwardSpeedMps: { label: '朝頂口進場速度', unit: 'm/s', digits: 2 },
   gravityGateLowerHeightDifferenceM: { label: '高於低層出口上緣', unit: 'm', digits: 2 },
   gravityGateReturnSpeedMps: { label: '回程速度（朝來向＋）', unit: 'm/s', digits: 2 },
   gravityGateReturnDistanceM: { label: '低層反向位移', unit: 'm', digits: 2 },
