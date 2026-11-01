@@ -650,6 +650,7 @@ function DirectionPanel({ profile, processed, onUpdate }: { profile: ControllerP
   return (
     <section className="lab-card direction-card" aria-labelledby="direction-title">
       <div className="lab-card-heading"><div><p className="panel-kicker">07 / Direction + feel</p><h3 id="direction-title">Virtual channels</h3></div><span className="profile-version">{profile.directionVerifiedAt ? 'VERIFIED' : 'VERIFY'}</span></div>
+      <p>Mode 2 俯仰：右桿後拉，PITCH 應為正值（抬頭）；前推應為負值（低頭）。若相反，調整 PITCH 的 Invert，再重新完成方向確認與中立測試。</p>
       <div className="direction-list">{CONTROL_CHANNELS.map((channel) => { const calibration = profile.channels[channel]; const value = processed?.channels[channel].final ?? Number.NaN; return <div className="direction-row" key={channel}><div><strong>{channelLabel(channel)}</strong><span>Axis {calibration.axis} · {formatValue(value)}</span></div><label><input type="checkbox" checked={calibration.invert} onChange={(event) => onUpdate(channel, { invert: event.target.checked })} /> Invert</label>{channel !== 'throttle' && <label className="deadband-control">Deadband <input type="number" min="0" max="0.2" step="0.005" value={calibration.deadband} onChange={(event) => { const next = Number(event.target.value); if (Number.isFinite(next) && next >= 0 && next <= 0.2) onUpdate(channel, { deadband: next }) }} /></label>}</div> })}</div>
     </section>
   )

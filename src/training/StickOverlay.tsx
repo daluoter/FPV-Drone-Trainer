@@ -81,7 +81,7 @@ function StickPad({
       </div>
       <div className="mode2-stick-axis-labels" aria-hidden="true">
         <span>{horizontalLabel} −</span>
-        <span>{verticalLabel} +</span>
+        <span>{verticalLabel} {verticalInverted ? '↓' : '↑'}＋</span>
         <span>{horizontalLabel} +</span>
       </div>
     </div>
@@ -128,9 +128,10 @@ export default function Mode2StickOverlay({
           vertical={live.pitch}
           horizontalRange={[-1, 1]}
           verticalRange={[-1, 1]}
-          verticalInverted={false}
+          verticalInverted
         />
       </div>
+      <p className="mode2-stick-empty mode2-stick-direction">右桿前推：低頭（−）；後拉：抬頭（＋）。</p>
       {!values && <p className="mode2-stick-empty">{mode === 'demonstration' ? '等待示範時間軸資料。' : '等待有效操控資料。'}</p>}
     </section>
   )

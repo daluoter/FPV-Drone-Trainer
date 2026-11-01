@@ -946,7 +946,7 @@ export default function FreeFlight({
           {demonstration && telemetry?.replay.active && <p className="school-demo-cue" aria-live="polite">{teachingCueAt(demonstration, telemetry.replay.currentTimeSeconds)}</p>}
           {source === 'keyboard' && (
             <p className="flight-input-note">
-              鍵盤：W/S 俯仰 · A/D 橫滾 · Q/E 偏航 · R/F 油門 · X 重設。鍵盤是離散輸入；細緻操控練習建議使用 USB 遙控器。
+              鍵盤：W 抬頭／S 低頭 · A/D 橫滾 · Q/E 偏航 · R/F 油門 · X 重設。鍵盤是離散輸入；細緻操控練習建議使用 USB 遙控器。
             </p>
           )}
         </div>

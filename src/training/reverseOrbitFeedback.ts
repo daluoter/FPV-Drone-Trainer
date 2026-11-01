@@ -46,7 +46,7 @@ export function reverseOrbitInterruptionReason(metrics: Metrics): string | null 
 }
 
 export function reverseOrbitRouteGuide(): string {
-  return `地面自行起飛至約 ${REVERSE_ORBIT_FLIGHT_HEIGHT_M} m → 接近前方 30 m 的塔式起重機 → 在約 ${REVERSE_ORBIT_TARGET_RADIUS_M} m 半徑，仰視 ${REVERSE_ORBIT_TARGET_HEIGHT_M} m 高的金色機臂並建立真正環繞 → 同方向連續完成 ${REVERSE_ORBIT_REQUIRED_LAPS} 個完整 360° 圈，共 ${REVERSE_ORBIT_COMPLETION_DEGREES}° → 向外實際飛離至少 ${REVERSE_ORBIT_EXIT_DISTANCE_M} m，再恢復控制 ${REVERSE_ORBIT_HOLD_SECONDS} 秒。左右任一方向皆可。鏡頭仰視至少 ${REVERSE_ORBIT_MIN_VIEW_ELEVATION_DEGREES}°，高處參照物保留在當前 FPV 視角內；按實際鏡頭安裝角與視野判定，不因切換 Chase 或 Free 改成別的標準。半徑 ${REVERSE_ORBIT_MIN_RADIUS_M}～${REVERSE_ORBIT_MAX_RADIUS_M} m、高度 ${REVERSE_ORBIT_MIN_ENTRY_HEIGHT_M}～${REVERSE_ORBIT_MAX_ENTRY_HEIGHT_M} m，不要求完美圓形、精準定距或降落。推力仍要有向上分量，仰視不等於機腹朝天；配合油門支撐高度。中斷後里程碑保留，本組圈數清空，仍須重新連續三圈。引導練習不限時，挑戰 ${REVERSE_ORBIT_TIME_LIMIT_SECONDS} 秒。`
+  return `地面自行起飛至約 ${REVERSE_ORBIT_FLIGHT_HEIGHT_M} m → 接近前方 30 m 的塔式起重機 → 在約 ${REVERSE_ORBIT_TARGET_RADIUS_M} m 半徑，仰視 ${REVERSE_ORBIT_TARGET_HEIGHT_M} m 高的金色機臂並建立真正環繞 → 同方向連續完成 ${REVERSE_ORBIT_REQUIRED_LAPS} 個完整 360° 圈，共 ${REVERSE_ORBIT_COMPLETION_DEGREES}° → 向外實際飛離至少 ${REVERSE_ORBIT_EXIT_DISTANCE_M} m，再恢復控制 ${REVERSE_ORBIT_HOLD_SECONDS} 秒。左右任一方向皆可。鏡頭仰視至少 ${REVERSE_ORBIT_MIN_VIEW_ELEVATION_DEGREES}°，高處參照物保留在當前 FPV 視角內；按實際鏡頭安裝角與視野判定，不因切換 Chase 或 Free 改成別的標準。半徑 ${REVERSE_ORBIT_MIN_RADIUS_M}～${REVERSE_ORBIT_MAX_RADIUS_M} m、高度 ${REVERSE_ORBIT_MIN_ENTRY_HEIGHT_M}～${REVERSE_ORBIT_MAX_ENTRY_HEIGHT_M} m，不要求完美圓形、精準定距或降落。右桿後拉是抬頭，持續拉住會繼續翻轉；到需要的姿態後改用小量修正，不要為了把機臂放在畫面正中央而一直後拉。推力仍要有向上分量，仰視不等於機腹朝天；配合姿態與油門支撐高度，倒置時加油可能加快下墜。可先暫停示範並切換 Chase 核對機身姿態。中斷後里程碑保留，本組圈數清空，仍須重新連續三圈。引導練習不限時，挑戰 ${REVERSE_ORBIT_TIME_LIMIT_SECONDS} 秒。`
 }
 
 export function reverseOrbitObjective(metrics: Metrics): TrainingObjective {

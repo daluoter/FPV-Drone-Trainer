@@ -89,6 +89,16 @@ describe('ControllerLab connection and live polling interactions', () => {
     if (next) next(16)
   }
 
+  it('explains physical pitch direction without rewriting an existing calibration', async () => {
+    seedProfile()
+    const saved = Object.fromEntries(Object.entries(window.localStorage).map(([key, raw]) => [key, JSON.parse(raw)]))
+    render(<ControllerLab />)
+    await act(async () => { vi.advanceTimersByTime(120) })
+
+    expect(screen.getByText(/右桿後拉，PITCH 應為正值（抬頭）；前推應為負值（低頭）/)).toBeInTheDocument()
+    expect(Object.fromEntries(Object.entries(window.localStorage).map(([key, raw]) => [key, JSON.parse(raw)]))).toEqual(saved)
+  })
+
   it('loads calibration but requires a fresh neutral test after reconnect', async () => {
     seedProfile()
     render(<ControllerLab />)
