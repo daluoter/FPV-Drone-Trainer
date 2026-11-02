@@ -1,3 +1,4 @@
+import { slalomResultFeedback } from './slalomFeedback'
 import { gravityGateResultFeedback } from './gravityGateFeedback'
 import { reverseOrbitResultFeedback } from './reverseOrbitFeedback'
 import { backwardFlightResultFeedback } from './backwardFlightFeedback'
@@ -1029,6 +1030,8 @@ function phaseProgress(result: TrainingResult): { observedGap: string; nextPract
 /** Final-sample observations and checkpoint facts, never inferred causes or a claim about the whole flight. */
 export function summarizeTrainingResult(result: TrainingResult): TrainingResultFeedback {
   const scope = scopeNote(result)
+  const slalom = slalomResultFeedback(result, scope)
+  if (slalom) return slalom
   const gravityGate = gravityGateResultFeedback(result, scope)
   if (gravityGate) return gravityGate
   const reverseOrbit = reverseOrbitResultFeedback(result, scope)

@@ -9,6 +9,7 @@ import { createTrainingFieldAnchors } from './field'
 import { createOrbitTarget } from './orbit'
 import { createReverseOrbitTarget } from './reverseOrbit'
 import { createGravityGate } from '../world/gravityGate'
+import { createSlalomFlags, SLALOM_EXIT_DISTANCE_M, SLALOM_TARGET_HEIGHT_M } from '../world/slalomFlags'
 import { lessonById } from './lessons'
 import type { TrainingCheckpointState, TrainingEvaluation, TrainingSample } from './types'
 
@@ -128,6 +129,8 @@ export function createDemonstrationProgress(
   const evaluator = typeof lesson.evaluator === 'function' ? lesson.evaluator : lesson.evaluator?.evaluate
   if (!evaluator) throw new RangeError('此示範沒有可觀察的課程判定。')
   const { pad, launch, landing } = createTrainingFieldAnchors(settings.drone)
+  const slalomFlags = createSlalomFlags(launch, settings.drone.ground.heightM)
+  const lastSlalomFlag = slalomFlags.at(-1)!
   const references = [
     { id: 'takeoff-pad', kind: 'pad', positionM: pad },
     { id: 'training-launch', kind: 'spawn', positionM: launch },
@@ -136,6 +139,9 @@ export function createDemonstrationProgress(
     { id: 'orbit-zone', kind: 'zone', positionM: createOrbitTarget(launch, settings.drone.ground.heightM) },
     { id: 'reverse-orbit-zone', kind: 'zone', positionM: createReverseOrbitTarget(launch, settings.drone.ground.heightM) },
     { id: 'gravity-gate-frame', kind: 'gate', positionM: createGravityGate(launch, settings.drone.ground.heightM).centerM },
+    ...slalomFlags.map((flag) => ({ id: flag.id, kind: 'flag', positionM: flag.positionM })),
+    { id: 'slalom-exit', kind: 'marker', positionM: { x: lastSlalomFlag.passPointM.x,
+      y: settings.drone.ground.heightM + SLALOM_TARGET_HEIGHT_M, z: lastSlalomFlag.positionM.z - SLALOM_EXIT_DISTANCE_M } },
   ]
   const firstTime = demonstration.recording.samples[0]?.timestampSeconds ?? 0
   const steps = lesson.checkpoints.map((checkpoint, index) => ({ id: checkpoint.id, title: checkpoint.title,
@@ -188,7 +194,7 @@ export function createDemonstrationProgress(
     // Complete-turn instruments follow each retained observation rather
     // than guessing progress from captions, elapsed time or the wrapped pose.
     const flip = demonstration.lessonId === 'full-flip' || demonstration.lessonId === 'front-flip' || demonstration.lessonId === 'back-flip'
-    if (changed || complete || demonstration.kind === 'full-roll' || flip || demonstration.kind === 'power-loop' || demonstration.kind === 'split-s' || demonstration.kind === 'orbit' || demonstration.kind === 'reverse-orbit' || demonstration.kind === 'backward-flight' || demonstration.kind === 'gravity-gate') {
+    if (changed || complete || demonstration.kind === 'full-roll' || flip || demonstration.kind === 'power-loop' || demonstration.kind === 'split-s' || demonstration.kind === 'orbit' || demonstration.kind === 'reverse-orbit' || demonstration.kind === 'backward-flight' || demonstration.kind === 'gravity-gate' || demonstration.kind === 'slalom') {
       const metrics: Readonly<Record<string, number>> | undefined = demonstration.kind === 'full-roll' ? {
         rollProgressDegrees: evaluation.metrics?.rollProgressDegrees ?? 0,
         rollSignedDegrees: evaluation.metrics?.rollSignedDegrees ?? 0,
@@ -228,7 +234,7 @@ export function createDemonstrationProgress(
         reverseOrbitTargetViewErrorDegrees: evaluation.metrics?.reverseOrbitTargetViewErrorDegrees ?? 0,
         reverseOrbitExitDistanceM: evaluation.metrics?.reverseOrbitExitDistanceM ?? 0,
         reverseOrbitDirection: evaluation.metrics?.reverseOrbitDirection ?? 0,
-      } : demonstration.kind === 'gravity-gate' ? {
+      } : demonstration.kind === 'gravity-gate' || demonstration.kind === 'slalom' ? {
         ...evaluation.metrics,
       } : demonstration.kind === 'backward-flight' ? {
         backwardPhase: evaluation.metrics?.backwardPhase ?? 0,
@@ -249,7 +255,7 @@ export function createDemonstrationProgress(
       frames.push(frozenFrame(time, completed, false, '這段示範尚未完成全部課程步驟。', frames.at(-1)?.metrics))
       break
     }
-    if (complete && demonstration.kind !== 'orbit' && demonstration.kind !== 'reverse-orbit' && demonstration.kind !== 'backward-flight' && demonstration.kind !== 'gravity-gate') break
+    if (complete && demonstration.kind !== 'orbit' && demonstration.kind !== 'reverse-orbit' && demonstration.kind !== 'backward-flight' && demonstration.kind !== 'gravity-gate' && demonstration.kind !== 'slalom') break
     previous = sample
     previousFlight = sample
     previousEvaluation = evaluation

@@ -8,6 +8,7 @@ import { createSquareRouteTargets, SQUARE_ROUTE_TARGET_RADIUS_M } from '../train
 import { createFigureEightTargets, FIGURE_EIGHT_TARGET_RADIUS_M } from '../training/figureEight'
 import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
 import { createGravityGate, gravityGateSideExit, gravityGateExitCrossing, gravityGateLowerCrossing, gravityGateTopCrossing } from '../world/gravityGate'
+import { createSlalomFlags, slalomFlagCrossing, SLALOM_FLAG_IDS } from '../world/slalomFlags'
 import { findSweptObstacleHit } from '../simulation/obstacles'
 import { SPLIT_S_MIN_HEIGHT_M, SPLIT_S_TARGET_HEIGHT_M } from '../training/splitS'
 import { POWER_LOOP_TARGET_HEIGHT_M } from '../training/powerLoop'
@@ -18,6 +19,119 @@ import { createCameraRig, updateCameraRig } from './camera'
 import { createTuningPreset } from '../tuning/presets'
 
 import { createFlightScene } from './scene'
+
+describe('forward-only alternating slalom field', () => {
+  it('renders six real banners, numbered left/right references and a forward exit on translated ground', () => {
+    const defaults = createDefaultDroneConfig()
+    const config = { ...defaults, ground: { ...defaults.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 35, z: -3 } }
+    const scene = createFlightScene(config)
+    try {
+      const launch = scene.getReference('training-launch')!.positionM
+      const flags = createSlalomFlags(launch, 5)
+      const field = scene.scene.getObjectByName('slalom-field')!
+      expect(field.visible).toBe(false)
+      scene.setLessonTarget('slalom')
+      expect(field.visible).toBe(true)
+      for (const [index, flag] of flags.entries()) {
+        const reference = scene.getReference(flag.id)!
+        expect(reference.positionM).toEqual(flag.positionM)
+        expect(reference.sizeM).toEqual({ x: 0.6, y: 8, z: 0.24 })
+        const banner = scene.scene.getObjectByName(`${flag.id}-banner`) as THREE.Mesh<THREE.BoxGeometry>
+        expect(banner.position.toArray()).toEqual([flag.positionM.x, flag.positionM.y, flag.positionM.z])
+        expect(banner.geometry.parameters).toMatchObject({ width: 0.6, height: 8, depth: 0.24 })
+        expect(banner.userData.physicalColliderId).toBe(flag.colliders[0].id)
+        expect(scene.scene.getObjectByName(`${flag.id}-number`)!.userData.number).toBe(index + 1)
+        const guide = scene.scene.getObjectByName(`${flag.id}-pass-guide`)!
+        expect(guide.position.toArray()).toEqual([flag.passPointM.x, flag.passPointM.y, flag.passPointM.z])
+        expect(guide.userData.collision).toBe(false)
+      }
+      expect(scene.getReference('slalom-exit')!.positionM).toEqual({ x: 10, y: 9, z: -87 })
+      const extension = scene.scene.getObjectByName('slalom-ground-extension') as THREE.Mesh<THREE.PlaneGeometry>
+      expect(extension.geometry.parameters).toMatchObject({ width: 30, height: 104 })
+      expect(extension.position.y).toBeCloseTo(config.ground.heightM, 2)
+      for (const point of [...flags.map(({ passPointM }) => passPointM), scene.getReference('slalom-exit')!.positionM]) {
+        expect(point.x).toBeGreaterThan(extension.userData.minX)
+        expect(point.x).toBeLessThan(extension.userData.maxX)
+        expect(point.z).toBeGreaterThan(extension.userData.minZ)
+        expect(point.z).toBeLessThan(extension.userData.maxZ)
+      }
+      expect(extension.userData.collision).toBe(false)
+      for (const name of ['gravity-gate-field', 'reverse-orbit-field', 'backward-field', 'wide-gate-field']) {
+        expect(scene.scene.getObjectByName(name)?.visible).toBe(false)
+      }
+      scene.setLessonTarget('gravity-gate')
+      expect(field.visible).toBe(false)
+      scene.setLessonTarget(null)
+      expect(field.visible).toBe(false)
+    } finally { scene.dispose() }
+  })
+
+  it('keeps the illustrative forward S route clear of physical flags and crosses each proper side in order', () => {
+    const scene = createFlightScene()
+    try {
+      const flags = createSlalomFlags(scene.getReference('training-launch')!.positionM, 0)
+      const route = scene.scene.getObjectByName('slalom-illustrative-route') as THREE.Line<THREE.BufferGeometry>
+      const positions = route.geometry.getAttribute('position')
+      const crossings: string[] = []
+      const colliders = flags.flatMap(({ colliders }) => colliders)
+      for (let index = 1; index < positions.count; index += 1) {
+        const before = new THREE.Vector3().fromBufferAttribute(positions, index - 1)
+        const current = new THREE.Vector3().fromBufferAttribute(positions, index)
+        expect(findSweptObstacleHit(before, current, 0.3, colliders)).toBeNull()
+        // Ground takeoff can be vertical, but the route never returns to an earlier flag.
+        expect(current.z).toBeLessThanOrEqual(before.z + 0.001)
+        for (const flag of flags) {
+          const crossing = slalomFlagCrossing(before, current, flag)
+          // A vertex exactly on the plane is shared by two adjacent segments.
+          if (crossing && crossing.fraction > 0) {
+            expect(crossing.insidePassage).toBe(true)
+            crossings.push(flag.id)
+          }
+        }
+      }
+      expect(crossings).toEqual(SLALOM_FLAG_IDS)
+    } finally { scene.dispose() }
+  })
+
+  it('marks the actual next side and forward exit without moving aircraft or physical geometry', () => {
+    const scene = createFlightScene()
+    try {
+      scene.setLessonTarget('slalom')
+      const flags = createSlalomFlags(scene.getReference('training-launch')!.positionM, 0)
+      const accent = scene.scene.getObjectByName('slalom-stage-guidance')!
+      const stateBefore = scene.drone.matrixWorld.clone()
+      const physicalBefore = flags.map((flag) => scene.scene.getObjectByName(`${flag.id}-banner`)!.position.clone())
+      for (let index = 0; index < flags.length; index += 1) {
+        scene.setSlalomStage(index + 2)
+        expect(accent.position.toArray()).toEqual([flags[index].passPointM.x, 4, flags[index].positionM.z])
+        expect(scene.scene.getObjectByName(`${flags[index].id}-pass-guide`)!.visible).toBe(true)
+        if (index > 0) expect(scene.scene.getObjectByName(`${flags[index - 1].id}-pass-guide`)!.visible).toBe(false)
+      }
+      scene.setSlalomStage(8)
+      expect(accent.position.toArray()).toEqual([4, 4, -84])
+      scene.setSlalomStage(10)
+      const ring = scene.scene.getObjectByName('slalom-stage-reference') as THREE.LineLoop<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      expect(ring.material.color.getHex()).toBe(0xb8f36b)
+      scene.setSlalomStage(null)
+      expect(accent.visible).toBe(false)
+      expect(flags.every((flag, index) => scene.scene.getObjectByName(`${flag.id}-banner`)!.position.equals(physicalBefore[index]))).toBe(true)
+      expect(scene.drone.matrixWorld.equals(stateBefore)).toBe(true)
+    } finally { scene.dispose() }
+  })
+
+  it('disposes banner, digit, route, extended ground and guidance resources exactly once', () => {
+    const scene = createFlightScene()
+    const resources = new Set<THREE.BufferGeometry | THREE.Material>()
+    scene.scene.getObjectByName('slalom-field')!.traverse((object) => {
+      const visual = object as THREE.Mesh<THREE.BufferGeometry, THREE.Material | THREE.Material[]>
+      if (visual.geometry) resources.add(visual.geometry)
+      for (const resource of Array.isArray(visual.material) ? visual.material : visual.material ? [visual.material] : []) resources.add(resource)
+    })
+    const disposals = [...resources].map((resource) => vi.spyOn(resource, 'dispose'))
+    scene.dispose()
+    for (const dispose of disposals) expect(dispose).toHaveBeenCalledOnce()
+  })
+})
 
 describe('flight scene reference contract', () => {
   it('shows the takeoff height guide instead of the separate hover target without changing evaluator anchors', () => {
@@ -212,6 +326,8 @@ describe('flight scene reference contract', () => {
         'wide-gate-1',
         'wide-gate-2',
         'wide-gate-3',
+        ...SLALOM_FLAG_IDS,
+        'slalom-exit',
         'recovery-zone',
         'roll-zone',
         'flip-zone',

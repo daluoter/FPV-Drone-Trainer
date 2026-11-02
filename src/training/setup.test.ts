@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_LESSONS } from './lessons'
 import { prepareTrainingSetup } from './setup'
 import type { TrainingSetupRequest } from './types'
+import { createSlalomFlags } from '../world/slalomFlags'
 import { createGravityGate } from '../world/gravityGate'
 
 function requestFor(lessonId: string): TrainingSetupRequest {
@@ -66,4 +67,23 @@ describe('reference-relative training setup', () => {
     expect(prepareTrainingSetup(request, references.slice(0, 1))).toBe(request)
     expect(prepareTrainingSetup(request, references.slice(1))).toBe(request)
   })
+  it('installs all six L18 physical flags from the same shifted launch and raised ground', () => {
+    const request = requestFor('slalom')
+    const before = JSON.stringify(request)
+    const references = [
+      { id: 'training-launch', kind: 'pad', positionM: { x: 6, y: 5.05, z: -3 } },
+      { id: 'landing-surface', kind: 'zone', positionM: { x: 0, y: 5, z: 0 } },
+    ]
+    const prepared = prepareTrainingSetup(request, references)!
+    expect(prepared.setup.spawnPositionM).toEqual(references[0].positionM)
+    expect(prepared.setup.spawnOrientation).toEqual({ x: 0, y: 0, z: 0, w: 1 })
+    expect(prepared.setup.staticObstacles).toEqual(createSlalomFlags(references[0].positionM, 5).flatMap((flag) => flag.colliders))
+    expect(prepared.setup.staticObstacles).toHaveLength(6)
+    expect(prepared.setup.staticObstacles?.at(-1)).toMatchObject({ id: 'slalom-flag-6-banner', centerM: { x: 6, y: 9, z: -79 } })
+    expect(JSON.stringify(request)).toBe(before)
+    expect(prepareTrainingSetup(request, references.slice(0, 1))).toBe(request)
+    expect(prepareTrainingSetup(request, references.slice(1))).toBe(request)
+    expect(prepareTrainingSetup(requestFor('takeoff'), references)?.setup.staticObstacles).toBeUndefined()
+  })
+
 })

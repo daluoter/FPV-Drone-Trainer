@@ -22,6 +22,32 @@ function createRendererStub(): THREE.WebGLRenderer {
   } as unknown as THREE.WebGLRenderer
 }
 
+describe('forward-only slalom renderer guidance', () => {
+  it('retains the next alternating pass side after a supported scene rebuild and hides it in other lessons', () => {
+    const canvas = document.createElement('canvas')
+    const renderer = new FlightRenderer(canvas, { rendererFactory: createRendererStub })
+    try {
+      renderer.setLessonTarget('slalom')
+      renderer.setSlalomStage(3)
+      expect(renderer.scene.getObjectByName('slalom-stage-guidance')!.position.toArray()).toEqual([4, 4, -28])
+      const previous = renderer.flightScene
+      const disposed = vi.spyOn(previous, 'dispose')
+      renderer.reconfigureScene({ ...DEFAULT_DRONE_CONFIG,
+        ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 35, z: -3 } })
+      expect(disposed).toHaveBeenCalledOnce()
+      expect(renderer.scene.getObjectByName('slalom-field')!.visible).toBe(true)
+      expect(renderer.scene.getObjectByName('slalom-stage-guidance')!.position.toArray()).toEqual([10, 9, -31])
+      expect(renderer.flightScene.getReference('slalom-flag-2')!.positionM).toEqual({ x: 6, y: 9, z: -31 })
+      renderer.setSlalomStage(null)
+      renderer.reconfigureScene(DEFAULT_DRONE_CONFIG)
+      expect(renderer.scene.getObjectByName('slalom-stage-guidance')!.visible).toBe(false)
+      renderer.setLessonTarget('gravity-gate')
+      expect(renderer.scene.getObjectByName('slalom-field')!.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('gravity-gate-field')!.visible).toBe(true)
+    } finally { renderer.dispose() }
+  })
+})
+
 describe('interactive free camera renderer integration', () => {
   function viewport(): HTMLCanvasElement {
     const canvas = document.createElement('canvas')

@@ -1,3 +1,4 @@
+import { SLALOM_LESSON } from './slalom'
 import { GRAVITY_GATE_LESSON } from './gravityGate'
 import { LANDING_LESSON } from './landing'
 import { STRAIGHT_LINE_LESSON } from './straightLine'
@@ -144,6 +145,7 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
   POWER_LOOP_LESSON,
   BACKWARD_FLIGHT_LESSON,
   REVERSE_ORBIT_LESSON,
+  SLALOM_LESSON,
   GRAVITY_GATE_LESSON,
 ]
 

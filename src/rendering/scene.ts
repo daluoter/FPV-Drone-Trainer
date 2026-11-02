@@ -19,6 +19,7 @@ import { BACKWARD_FLIGHT_TARGET_HEIGHT_M } from '../training/backwardFlight'
 import { createReverseOrbitTarget, REVERSE_ORBIT_TARGET_HEIGHT_M, REVERSE_ORBIT_FLIGHT_HEIGHT_M, REVERSE_ORBIT_TARGET_RADIUS_M, REVERSE_ORBIT_MIN_RADIUS_M, REVERSE_ORBIT_MAX_RADIUS_M, REVERSE_ORBIT_MIN_ENTRY_HEIGHT_M, REVERSE_ORBIT_MAX_ENTRY_HEIGHT_M } from '../training/reverseOrbit'
 import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
 import { createGravityGate, gravityGateSideExit, type GravityGateSide, GRAVITY_GATE_OPENING_WIDTH_M, GRAVITY_GATE_OPENING_DEPTH_M, GRAVITY_GATE_OPENING_HEIGHT_M } from '../world/gravityGate'
+import { createSlalomFlags, SLALOM_TARGET_HEIGHT_M, SLALOM_FLAG_HEIGHT_M, SLALOM_FLAG_WIDTH_M, SLALOM_FLAG_DEPTH_M, SLALOM_EXIT_DISTANCE_M } from '../world/slalomFlags'
 import type { Vector3 } from '../math/vector'
 import type { ReplayGhostState } from '../replay'
 
@@ -80,6 +81,8 @@ export interface FlightScene {
   setGravityGateStage(stage: number | null): void
   /** Follow the recorded approach face; null restores the suggested front route. */
   setGravityGateSide(side: GravityGateSide | null): void
+  /** Highlight forward-only alternating flag visits without steering flight. */
+  setSlalomStage(stage: number | null): void
   /** Presentation-only bounded path trace; evaluators remain renderer-independent. */
   setTrainingPath(path: readonly Vector3[]): void
   setReplayPath(path: readonly Vector3[]): void
@@ -1676,9 +1679,153 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
       sizeM: { x: GRAVITY_GATE_OPENING_WIDTH_M, y: gravityGate.lowerExitMaxY - gravityGate.lowerExitMinY, z: 0 } },
   ]
 
+  // A straight row of six solid knife flags. Only the passing side alternates;
+  // no flag returns to an earlier Z position or asks the pilot to orbit it.
+  const slalomFlags = createSlalomFlags(field.launch, config.ground.heightM)
+  const slalomField = new THREE.Group()
+  slalomField.name = 'slalom-field'
+  slalomField.visible = false
+  const slalomFloor = new THREE.Mesh(new THREE.PlaneGeometry(30, 104), material(0x101b20, 0.95, 0))
+  slalomFloor.name = 'slalom-ground-extension'
+  slalomFloor.rotation.x = -Math.PI / 2
+  // Slightly below the global plane avoids coplanar flicker where they overlap.
+  slalomFloor.position.set(field.launch.x, config.ground.heightM - 0.001, field.launch.z - 44)
+  slalomFloor.userData = { collision: false, teachingReference: '六旗與前向出口下方的延伸地面；地面接觸仍由既有物理處理',
+    minX: field.launch.x - 15, maxX: field.launch.x + 15, minZ: field.launch.z - 96, maxZ: field.launch.z + 8 }
+  slalomField.add(slalomFloor)
+  const slalomGridPoints: THREE.Vector3[] = []
+  const stripMinX = field.launch.x - 15, stripMaxX = field.launch.x + 15
+  const stripMinZ = field.launch.z - 96, stripMaxZ = field.launch.z + 8
+  const gridSegment = (x0: number, z0: number, x1: number, z1: number): void => {
+    if (Math.hypot(x1 - x0, z1 - z0) <= 0) return
+    slalomGridPoints.push(new THREE.Vector3(x0, config.ground.heightM + 0.006, z0),
+      new THREE.Vector3(x1, config.ground.heightM + 0.006, z1))
+  }
+  for (let z = stripMinZ; z <= stripMaxZ; z += 2) {
+    if (z < -60 || z > 60) gridSegment(stripMinX, z, stripMaxX, z)
+    else {
+      if (stripMinX < -60) gridSegment(stripMinX, z, Math.min(-60, stripMaxX), z)
+      if (stripMaxX > 60) gridSegment(Math.max(60, stripMinX), z, stripMaxX, z)
+    }
+  }
+  for (let x = stripMinX + 1; x < stripMaxX; x += 2) {
+    if (x < -60 || x > 60) gridSegment(x, stripMinZ, x, stripMaxZ)
+    else {
+      if (stripMinZ < -60) gridSegment(x, stripMinZ, x, Math.min(-60, stripMaxZ))
+      if (stripMaxZ > 60) gridSegment(x, Math.max(60, stripMinZ), x, stripMaxZ)
+    }
+  }
+  const slalomGrid = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(slalomGridPoints),
+    new THREE.LineBasicMaterial({ color: 0x1e323b }))
+  slalomGrid.name = 'slalom-ground-extension-grid'
+  slalomField.add(slalomGrid)
+  const slalomReferences: FlightSceneReference[] = []
+  const slalomPassGuides: THREE.Group[] = []
+  const slalomNumberSegments = [
+    [[0.5, 1], [0.5, 0]],
+    [[0, 1], [1, 1], [1, 0.5], [0, 0.5], [0, 0], [1, 0]],
+    [[0, 1], [1, 1], [1, 0], [0, 0], [1, 0], [1, 0.5], [0, 0.5]],
+    [[0, 1], [0, 0.5], [1, 0.5], [1, 1], [1, 0]],
+    [[1, 1], [0, 1], [0, 0.5], [1, 0.5], [1, 0], [0, 0]],
+    [[1, 1], [0, 1], [0, 0], [1, 0], [1, 0.5], [0, 0.5]],
+  ]
+  for (const flag of slalomFlags) {
+    const color = flag.side === 'left' ? 0x45d7f7 : 0xffc978
+    const flagGroup = new THREE.Group()
+    flagGroup.name = flag.id
+    flagGroup.userData = { teachingReference: `${flag.label}，從${flag.side === 'left' ? '左' : '右'}側向前通過`,
+      index: flag.index, side: flag.side, collision: true }
+    const steel = material(color, 0.55, 0.18)
+    steel.emissive.set(color)
+    steel.emissiveIntensity = 0.16
+    for (const collider of flag.colliders) {
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(collider.halfExtentsM.x * 2,
+        collider.halfExtentsM.y * 2, collider.halfExtentsM.z * 2), steel)
+      beam.name = collider.id
+      beam.position.set(collider.centerM.x, collider.centerM.y, collider.centerM.z)
+      beam.userData = { physicalColliderId: collider.id }
+      flagGroup.add(beam)
+    }
+    // Original stroke digits remain legible without downloaded fonts or textures.
+    const digit = new THREE.Line(new THREE.BufferGeometry().setFromPoints(slalomNumberSegments[flag.index].map(([x, y]) =>
+      new THREE.Vector3(flag.positionM.x + (x - 0.5) * 0.4,
+        config.ground.heightM + SLALOM_FLAG_HEIGHT_M - 1.15 + y * 0.7, flag.positionM.z + SLALOM_FLAG_DEPTH_M / 2 + 0.015))),
+    new THREE.LineBasicMaterial({ color: 0xffffff }))
+    digit.name = `${flag.id}-number`
+    digit.userData = { number: flag.index + 1, collision: false }
+    flagGroup.add(digit)
+    slalomField.add(flagGroup)
+    slalomReferences.push({ id: flag.id, kind: 'marker', object: flagGroup, positionM: { ...flag.positionM },
+      sizeM: { x: SLALOM_FLAG_WIDTH_M, y: SLALOM_FLAG_HEIGHT_M, z: SLALOM_FLAG_DEPTH_M } })
+    const guide = new THREE.Group()
+    guide.name = `${flag.id}-pass-guide`
+    guide.position.set(flag.passPointM.x, flag.passPointM.y, flag.passPointM.z)
+    guide.userData = { teachingReference: '左右交替的建議通過位置；不要求貼環或精準定點', collision: false }
+    const ring = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 48 }, (_, i) =>
+      new THREE.Vector3(Math.cos(i / 48 * Math.PI * 2) * 0.9, Math.sin(i / 48 * Math.PI * 2) * 0.9, 0))),
+    new THREE.LineDashedMaterial({ color, transparent: true, opacity: 0.7, dashSize: 0.25, gapSize: 0.2, depthWrite: false }))
+    ring.name = `${flag.id}-pass-ring`
+    ring.computeLineDistances()
+    guide.add(ring)
+    slalomPassGuides.push(guide)
+    slalomField.add(guide)
+    const sideArrow = new THREE.ArrowHelper(new THREE.Vector3(flag.passSideSign, 0, 0),
+      new THREE.Vector3(flag.positionM.x + flag.passSideSign * 0.55, config.ground.heightM + 2.5, flag.positionM.z + 0.3),
+      2.3, color, 0.7, 0.5)
+    sideArrow.name = `${flag.id}-side-arrow`
+    sideArrow.userData = { collision: false }
+    slalomField.add(sideArrow)
+  }
+  const lastSlalomFlag = slalomFlags[slalomFlags.length - 1]
+  const slalomExitPoint = { ...lastSlalomFlag.passPointM, z: lastSlalomFlag.positionM.z - SLALOM_EXIT_DISTANCE_M }
+  const slalomExit = new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1),
+    new THREE.Vector3(slalomExitPoint.x, slalomExitPoint.y, slalomExitPoint.z), 5, 0xb8f36b, 0.9, 0.6)
+  slalomExit.name = 'slalom-exit'
+  slalomExit.userData = { teachingReference: '完成六旗後繼續前飛，再回正改出；不回頭', collision: false }
+  slalomField.add(slalomExit)
+  slalomReferences.push({ id: 'slalom-exit', kind: 'marker', object: slalomExit,
+    positionM: { ...slalomExitPoint }, sizeM: { x: 16, y: 6, z: 0 } })
+  const slalomRoutePoints = [
+    new THREE.Vector3(field.launch.x, config.ground.heightM + 0.1, field.launch.z),
+    new THREE.Vector3(field.launch.x, config.ground.heightM + SLALOM_TARGET_HEIGHT_M, field.launch.z),
+  ]
+  for (let index = 0; index < slalomFlags.length; index += 1) {
+    const from = index === 0 ? { x: field.launch.x, z: field.launch.z } : slalomFlags[index - 1].passPointM
+    const to = slalomFlags[index].passPointM
+    for (let step = 1; step <= 36; step += 1) {
+      const u = step / 36
+      const blend = (1 - Math.cos(u * Math.PI)) / 2
+      slalomRoutePoints.push(new THREE.Vector3(from.x + (to.x - from.x) * blend,
+        config.ground.heightM + SLALOM_TARGET_HEIGHT_M, from.z + (to.z - from.z) * u))
+    }
+  }
+  slalomRoutePoints.push(new THREE.Vector3(slalomExitPoint.x, slalomExitPoint.y, slalomExitPoint.z - 5))
+  const slalomRoute = new THREE.Line(new THREE.BufferGeometry().setFromPoints(slalomRoutePoints),
+    new THREE.LineDashedMaterial({ color: 0x9fb9ba, transparent: true, opacity: 0.58, dashSize: 0.75, gapSize: 0.5, depthWrite: false }))
+  slalomRoute.name = 'slalom-illustrative-route'
+  slalomRoute.userData = { collision: false, teachingReference: '一路向前左右交替切彎，僅供參考，不要求精準貼線' }
+  slalomRoute.computeLineDistances()
+  slalomField.add(slalomRoute)
+  const slalomCenterline = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(field.launch.x, config.ground.heightM + 0.035, field.launch.z),
+    new THREE.Vector3(field.launch.x, config.ground.heightM + 0.035, slalomExitPoint.z - 6),
+  ]), new THREE.LineDashedMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.35, dashSize: 1, gapSize: 0.8, depthWrite: false }))
+  slalomCenterline.name = 'slalom-forward-centerline'
+  slalomCenterline.computeLineDistances()
+  slalomField.add(slalomCenterline)
+  const slalomAccent = new THREE.Group()
+  slalomAccent.name = 'slalom-stage-guidance'
+  const slalomStageMaterial = new THREE.LineBasicMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.95, depthWrite: false })
+  const slalomStageRing = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 48 }, (_, i) =>
+    new THREE.Vector3(Math.cos(i / 48 * Math.PI * 2) * 1.3, Math.sin(i / 48 * Math.PI * 2) * 1.3, 0))), slalomStageMaterial)
+  slalomStageRing.name = 'slalom-stage-reference'
+  slalomAccent.add(slalomStageRing)
+  slalomField.add(slalomAccent)
+  scene.add(slalomField)
+
   const landingSurface: FlightSceneReference = { id: 'landing-surface', kind: 'zone', object: landingTarget, positionM: { ...field.landing }, sizeM: { x: LANDING_ZONE_RADIUS_M * 2, y: 0, z: LANDING_ZONE_RADIUS_M * 2 } }
   const launchReference: FlightSceneReference = { id: 'training-launch', kind: 'pad', object: takeoffPad, positionM: { ...field.launch } }
-  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, recoveryReference, rollReference, flipReference, loopReference, splitReference, orbitReference, backwardReference, reverseOrbitReference, ...gravityGateReferences]
+  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, ...slalomReferences, recoveryReference, rollReference, flipReference, loopReference, splitReference, orbitReference, backwardReference, reverseOrbitReference, ...gravityGateReferences]
   const referenceById = new Map(sceneReferences.map((reference) => [reference.id, reference]))
 
   const drone = createQuadVisual()
@@ -1766,7 +1913,8 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     backwardField.visible = lessonId === 'backward-flight'
     reverseOrbitField.visible = lessonId === 'reverse-orbit'
     gravityField.visible = lessonId === 'gravity-gate'
-    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'backward-flight', 'reverse-orbit', 'gravity-gate'].includes(lessonId ?? '')
+    slalomField.visible = lessonId === 'slalom'
+    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'backward-flight', 'reverse-orbit', 'gravity-gate', 'slalom'].includes(lessonId ?? '')
     for (const reference of referenceSet.contract) {
       reference.object.visible = !beginner
     }
@@ -1956,6 +2104,24 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   }
   setGravityGateSide('front')
 
+  const setSlalomStage = (stage: number | null): void => {
+    if (stage === null || !Number.isInteger(stage) || stage < 0 || stage > 10) {
+      slalomAccent.visible = false
+      slalomPassGuides.forEach((guide) => { guide.visible = false })
+      return
+    }
+    slalomAccent.visible = true
+    slalomStageMaterial.color.set(stage >= 10 ? 0xb8f36b : stage >= 8 ? 0xffc978 : 0x45d7f7)
+    const targetIndex = stage - 2
+    slalomPassGuides.forEach((guide, index) => { guide.visible = index >= Math.max(0, targetIndex) })
+    const point = stage <= 1 ? { ...field.launch, y: config.ground.heightM + (stage === 0 ? 0.15 : SLALOM_TARGET_HEIGHT_M) }
+      : stage <= 7 ? slalomFlags[targetIndex].passPointM
+        : stage === 8 ? slalomExitPoint : { ...slalomExitPoint, z: slalomExitPoint.z - 5 }
+    slalomAccent.position.set(point.x, point.y, point.z)
+  }
+
+  setSlalomStage(0)
+
   const setPath = (line: THREE.Line, path: readonly Vector3[], yOffset: number): void => {
     const maximumPoints = 1_200
     const stride = Math.max(1, Math.ceil(path.length / maximumPoints))
@@ -2011,6 +2177,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     setReverseOrbitStage,
     setGravityGateStage,
     setGravityGateSide,
+    setSlalomStage,
     setTrainingPath,
     setReplayPath,
     dispose: () => disposeFlightScene(scene),

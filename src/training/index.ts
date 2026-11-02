@@ -25,3 +25,5 @@ export * from './backwardFlight'
 export * from './reverseOrbit'
 
 export * from './gravityGate'
+
+export * from './slalom'

@@ -14,7 +14,7 @@ describe('beginner flight school', () => {
     expect(screen.getByLabelText('選擇課程')).toHaveValue('takeoff')
     const choices = within(screen.getByLabelText('選擇課程')).getAllByRole('option')
     expect(choices.map((option) => option.textContent?.split(' · ')[0])).toEqual([
-      'L01', 'L02', 'L03', 'L04', 'L05', 'L06', 'L07', 'L08', 'L09', 'L10', 'L11', 'L12', 'L13', 'L14', 'L15', 'L16', 'L17', 'L19',
+      'L01', 'L02', 'L03', 'L04', 'L05', 'L06', 'L07', 'L08', 'L09', 'L10', 'L11', 'L12', 'L13', 'L14', 'L15', 'L16', 'L17', 'L18', 'L19',
     ])
     expect(choices[0]).toHaveTextContent('起飛與定點懸停')
     expect(choices.some((option) => (option as HTMLOptionElement).value === 'hover')).toBe(false)
@@ -82,6 +82,28 @@ describe('beginner flight school', () => {
     expect(store.load(scope).progress.lessons['gravity-gate']).toMatchObject({ completed: true, attempts: 1,
       best: { sessionId: 'gravity-gate:straight-through', totalCheckpoints: 8 } })
     expect(store.loadCurrent({ ...scope, rulesVersion: 7 }).progress.lessons['gravity-gate']).toMatchObject({ completed: false, attempts: 0 })
+  })
+
+  it('opens new L18 without borrowing the already completed L17 result in the same rule scope', () => {
+    const scope = { rulesVersion: 6, physicsVersion: 1, presetId: 'beginner',
+      settingsFingerprint: fingerprintTrainingSettings(createTuningPreset('beginner')),
+      inputSource: 'controller', mode: 'practice', assistance: 'none' } as const
+    const store = new TrainingProgressStore(window.localStorage)
+    expect(store.recordResult({ lessonId: 'backward-flight', sessionId: 'backward:accepted-before-l18', outcome: 'SUCCESS',
+      score: 100, elapsedSeconds: 20, sampleCount: 1200, completedCheckpoints: 7, totalCheckpoints: 7,
+      startedAtSeconds: 0, completedAtSeconds: 20, metrics: { backwardPhase: 7 },
+      message: 'Completed backward flight', hint: null, attemptContext: scope }).saved).toBe(true)
+    const raw = window.localStorage.getItem(trainingAttemptContextKey(scope))
+    saveLearningPreferences({ ...DEFAULT_LEARNING_PREFERENCES, lastLessonId: 'slalom', introCompleted: true })
+    render(<App />)
+    expect(screen.getByLabelText('選擇課程')).toHaveValue('slalom')
+    expect(screen.getByRole('heading', { name: '刀旗 S 彎' })).toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: '本課步驟' })).getAllByRole('listitem')).toHaveLength(10)
+    expect(screen.getByRole('list', { name: '本課步驟' }).querySelectorAll('.is-complete')).toHaveLength(0)
+    expect(screen.getByText(/本次條件已練 0 次/)).toBeInTheDocument()
+    expect(window.localStorage.getItem(trainingAttemptContextKey(scope))).toBe(raw)
+    expect(store.load(scope).progress.lessons['backward-flight']).toMatchObject({ completed: true, attempts: 1 })
+    expect(store.load(scope).progress.lessons.slalom).toMatchObject({ completed: false, attempts: 0 })
   })
 
   it('keeps the same canvas while changing workspace and opens calibration on request', () => {

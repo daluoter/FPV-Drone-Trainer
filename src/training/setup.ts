@@ -1,3 +1,4 @@
+import { createSlalomFlags } from '../world/slalomFlags'
 import { createWideGates } from '../world/wideGates'
 import { createGravityGate } from '../world/gravityGate'
 import type { TrainingSceneReference, TrainingSetupRequest } from './types'
@@ -8,6 +9,13 @@ export function prepareTrainingSetup(
   references: readonly TrainingSceneReference[],
 ): TrainingSetupRequest | null {
   if (!request) return null
+  if (request.lessonId === 'slalom') {
+    const launch = references.find((reference) => reference.id === 'training-launch')
+    const surface = references.find((reference) => reference.id === 'landing-surface')
+    if (!launch || !surface) return request
+    return { ...request, setup: { ...request.setup, spawnPositionM: { ...launch.positionM },
+      staticObstacles: createSlalomFlags(launch.positionM, surface.positionM.y).flatMap((flag) => flag.colliders) } }
+  }
   if (request.lessonId === 'gravity-gate') {
     const launch = references.find((reference) => reference.id === 'training-launch')
     const surface = references.find((reference) => reference.id === 'landing-surface')

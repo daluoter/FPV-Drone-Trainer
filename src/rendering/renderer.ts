@@ -74,6 +74,7 @@ export class FlightRenderer {
   private orbitStage: number | null = 0
   private backwardFlightStage: number | null = 0
   private reverseOrbitStage: number | null = 0
+  private slalomStage: number | null = 0
   private gravityGateStage: number | null = 0
   private gravityGateSide: GravityGateSide | null = null
   public get flightScene(): FlightScene { return this.currentFlightScene }
@@ -281,6 +282,13 @@ export class FlightRenderer {
     this.flightScene.setGravityGateSide(side)
   }
 
+  /** Highlight the next forward-only flag without changing flight or collision geometry. */
+  public setSlalomStage(stage: number | null): void {
+    if (this.disposed) return
+    this.slalomStage = stage
+    this.flightScene.setSlalomStage(stage)
+  }
+
   /** Rebuild anchors only after the owner has explicitly reset and disarmed. */
   public reconfigureScene(config: DroneConfig): void {
     if (this.disposed) return
@@ -302,6 +310,7 @@ export class FlightRenderer {
     this.currentFlightScene.setReverseOrbitStage(this.reverseOrbitStage)
     this.currentFlightScene.setGravityGateSide(this.gravityGateSide)
     this.currentFlightScene.setGravityGateStage(this.gravityGateStage)
+    this.currentFlightScene.setSlalomStage(this.slalomStage)
     previous.dispose()
   }
 

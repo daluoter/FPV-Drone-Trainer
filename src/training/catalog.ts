@@ -1,3 +1,4 @@
+import { SLALOM_LEARNING_CONTENT } from './slalom'
 import { GRAVITY_GATE_LEARNING_CONTENT } from './gravityGate'
 import { ORBIT_LEARNING_CONTENT } from './orbit'
 import { BACKWARD_FLIGHT_LEARNING_CONTENT } from './backwardFlight'
@@ -82,6 +83,7 @@ const LEARNING_CONTENT: Readonly<Record<string, LessonLearningContent>> = {
   orbit: ORBIT_LEARNING_CONTENT,
   'backward-flight': BACKWARD_FLIGHT_LEARNING_CONTENT,
   'reverse-orbit': REVERSE_ORBIT_LEARNING_CONTENT,
+  slalom: SLALOM_LEARNING_CONTENT,
   'gravity-gate': GRAVITY_GATE_LEARNING_CONTENT,
 }
 

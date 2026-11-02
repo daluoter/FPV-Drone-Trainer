@@ -69,7 +69,7 @@ describe('training attempt provenance', () => {
     expect(() => trainingAttemptContextKey({ ...context(), inputSource: 'unknown' } as unknown as TrainingAttemptContext)).toThrow()
   })
 
-  it('versions L06 through L10 while retaining the earlier lesson baseline', () => {
+  it('retains established course rules while adding L18 in its own lesson scope', () => {
     expect(CURRENT_TRAINING_RULES_VERSION).toBe(4)
     expect(trainingRulesVersionForLesson('coordinated-turn')).toBe(5)
     expect(trainingRulesVersionForLesson('square-route')).toBe(5)
@@ -85,6 +85,7 @@ describe('training attempt provenance', () => {
     expect(trainingRulesVersionForLesson('orbit')).toBe(6)
     expect(trainingRulesVersionForLesson('backward-flight')).toBe(6)
     expect(trainingRulesVersionForLesson('reverse-orbit')).toBe(6)
+    expect(trainingRulesVersionForLesson('slalom')).toBe(6)
     expect(trainingRulesVersionForLesson('gravity-gate')).toBe(7)
     for (const lessonId of [null, 'takeoff', 'hover', 'straight-line', 'landing', 'direction-control']) {
       expect(trainingRulesVersionForLesson(lessonId)).toBe(4)

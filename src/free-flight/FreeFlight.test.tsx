@@ -238,6 +238,98 @@ describe('interactive free camera', () => {
 })
 
 describe('Free Flight native navigation confirmation', () => {
+  it('shows the next slalom side and current passage facts while preserving the first failure below the viewport', () => {
+    const props = { poller: createBrowserGamepadPoller(), profile: null, settings: createDefaultTuningSettings() }
+    const base = createTrainingMachineState({ initialLessonId: 'slalom' })
+    const { rerender } = render(<FreeFlight {...props} trainingState={base} />)
+    expect(screen.getByRole('group', { name: '刀旗 S 彎即時狀態' })).toHaveTextContent('即時刀旗 S 彎數值')
+    expect(screen.getByTestId('slalom-passed')).toHaveTextContent('0 / 6 旗')
+    expect(screen.getByTestId('slalom-next')).toHaveTextContent('第 1 旗 · 左側通過')
+    for (const id of ['slalom-distance', 'slalom-side-offset', 'slalom-speed']) expect(screen.getByTestId(id)).toHaveTextContent('—')
+    const observed: TrainingMachineState = { ...base, phase: 'ACTIVE', lastEvaluation: { status: 'continue', metrics: {
+      slalomPhase: 3, slalomFlagsPassed: 1, slalomTargetIndex: 1,
+      slalomNextFlagDistanceM: 7.3, slalomSideOffsetM: -1.2, slalomForwardSpeedMps: 5.4,
+    } } }
+    rerender(<FreeFlight {...props} trainingState={observed} />)
+    expect(screen.getByTestId('slalom-phase')).toHaveTextContent('3 / 10 步')
+    expect(screen.getByTestId('slalom-next')).toHaveTextContent('第 2 旗 · 右側通過')
+    expect(screen.getByTestId('slalom-passed')).toHaveTextContent('1 / 6 旗')
+    expect(screen.getByTestId('slalom-distance')).toHaveTextContent('7.3 m')
+    expect(screen.getByTestId('slalom-side-offset')).toHaveTextContent('-1.2 m')
+    expect(screen.getByTestId('slalom-speed')).toHaveTextContent('5.4 m/s')
+    const interrupted: TrainingMachineState = { ...observed, recoveryInProgress: true,
+      lastRecovery: { timestampSeconds: 8, message: '第 2 旗走錯側：當時指定側偏移 -1.2 m',
+        hint: '回第一旗前方重新開始完整旗列。', metrics: {} } }
+    rerender(<FreeFlight {...props} trainingState={interrupted} />)
+    const hint = screen.getByLabelText('目前練習提示')
+    expect(hint).toHaveTextContent('當時指定側偏移 -1.2 m')
+    expect(hint).toHaveTextContent('回第一旗前方')
+    expect(hint).toHaveClass('is-below-viewport')
+    expect(screen.getByRole('group', { name: 'Three.js Free Flight simulation viewport' }).contains(hint)).toBe(false)
+    rerender(<FreeFlight {...props} trainingState={{ ...base, lessonId: 'backward-flight' }} />)
+    expect(screen.queryByRole('group', { name: '刀旗 S 彎即時狀態' })).not.toBeInTheDocument()
+  })
+
+  it('plays ten independently observed slalom steps and six flags without moving live flight or saving demo results', () => {
+    window.localStorage.clear()
+    render(<App />)
+    const canvas = screen.getByLabelText('Free Flight 3D scene')
+    fireEvent.change(screen.getByLabelText('選擇課程'), { target: { value: 'slalom' } })
+    fireEvent.change(screen.getByLabelText('控制方式'), { target: { value: 'keyboard' } })
+    const hud = () => screen.getByRole('group', { name: '刀旗 S 彎即時狀態' })
+    expect(hud()).toHaveTextContent('即時')
+    const physicalFlags = frames.runtime!.simulation.getStaticObstacles()
+    expect(physicalFlags).toHaveLength(6)
+    const liveSteps = screen.getByRole('list', { name: '本課步驟' }).textContent
+    const stored = () => Object.fromEntries(Object.entries(window.localStorage).filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.')))
+    const before = stored()
+    const live = JSON.stringify(frames.runtime!.simulation.getState())
+    fireEvent.click(screen.getByRole('button', { name: 'L18 刀旗 S 彎示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    expect(screen.getByRole('button', { name: '0.5×' })).toHaveAttribute('aria-pressed', 'true')
+    const progress = screen.getByRole('region', { name: '示範進度' })
+    expect(progress).toHaveTextContent('L18 刀旗 S 彎')
+    const chapters = within(progress).getAllByRole('button')
+    expect(chapters).toHaveLength(10)
+    fireEvent.click(chapters[3])
+    expect(progress).toHaveTextContent('3 / 10 個示範步驟完成')
+    expect(screen.getByTestId('slalom-passed')).toHaveTextContent('1 / 6 旗')
+    expect(screen.getByTestId('slalom-next')).toHaveTextContent('第 2 旗 · 右側通過')
+    const playback = frames.runtime!.getReplayPlayback()!
+    const pausedTime = playback.getState().currentTimeSeconds
+    const held = hud().textContent
+    frame(400)
+    expect(hud().textContent).toBe(held)
+    expect(playback.getState().currentTimeSeconds).toBe(pausedTime)
+    expect(JSON.stringify(frames.runtime!.simulation.getState())).toBe(live)
+    expect(frames.runtime!.simulation.getStaticObstacles()).toEqual(physicalFlags)
+    fireEvent.change(screen.getByRole('slider'), { target: { value: playback.durationSeconds } })
+    expect(progress).toHaveTextContent('10 / 10 個示範步驟完成')
+    expect(screen.getByTestId('slalom-phase')).toHaveTextContent('10 / 10 步')
+    expect(screen.getByTestId('slalom-passed')).toHaveTextContent('6 / 6 旗')
+    expect(screen.getByTestId('slalom-next')).toHaveTextContent('六旗與改出全部完成')
+    fireEvent.click(chapters[4])
+    expect(progress).toHaveTextContent('4 / 10 個示範步驟完成')
+    expect(screen.getByTestId('slalom-passed')).toHaveTextContent('2 / 6 旗')
+    expect(screen.getByTestId('slalom-next')).toHaveTextContent('第 3 旗 · 左側通過')
+    fireEvent.change(screen.getByRole('slider'), { target: { value: 0 } })
+    expect(screen.getByTestId('slalom-passed')).toHaveTextContent('0 / 6 旗')
+    expect(screen.getByTestId('flight-altitude')).toHaveTextContent('0.0 m')
+    fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
+    expect(screen.getByRole('list', { name: '本課步驟' }).textContent).toBe(liveSteps)
+    expect(hud()).toHaveTextContent('即時')
+    expect(screen.getByTestId('slalom-distance')).toHaveTextContent('—')
+    expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
+    expect(frames.runtime!.simulation.getStaticObstacles()).toEqual(physicalFlags)
+    expect(stored()).toEqual(before)
+    fireEvent.click(screen.getByRole('button', { name: '自由飛行' }))
+    expect(frames.runtime!.simulation.getStaticObstacles()).toHaveLength(0)
+    expect(screen.queryByRole('group', { name: '刀旗 S 彎即時狀態' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '開始學飛' }))
+    expect(frames.runtime!.simulation.getStaticObstacles()).toEqual(physicalFlags)
+    expect(screen.getByLabelText('選擇課程')).toHaveValue('slalom')
+  })
+
   it('shows gravity-gate entry errors and retains the first retry facts below the viewport', () => {
     const props = { poller: createBrowserGamepadPoller(), profile: null, settings: createDefaultTuningSettings() }
     const base = createTrainingMachineState({ initialLessonId: 'gravity-gate' })
@@ -442,9 +534,10 @@ describe('Free Flight native navigation confirmation', () => {
     expect(frames.renderer!.scene.getObjectByName('reverse-orbit-crane')).toBeDefined()
     expect(frames.runtime!.simulation.getStaticObstacles()).toHaveLength(0)
     const demoButtons = within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')
-    expect(demoButtons).toHaveLength(21)
-    expect(demoButtons.at(-3)).toHaveTextContent('L16 倒刷鍋示範')
-    expect(demoButtons.at(-2)).toHaveTextContent('L17 後退飛行示範')
+    expect(demoButtons).toHaveLength(22)
+    expect(demoButtons.at(-4)).toHaveTextContent('L16 倒刷鍋示範')
+    expect(demoButtons.at(-3)).toHaveTextContent('L17 後退飛行示範')
+    expect(demoButtons.at(-2)).toHaveTextContent('L18 刀旗 S 彎示範')
     expect(demoButtons.at(-1)).toHaveTextContent('L19 重力門示範')
     const initialAltitude = screen.getByTestId('flight-altitude').textContent
     const liveSteps = screen.getByRole('list', { name: '本課步驟' }).textContent
@@ -547,7 +640,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(hud()).toHaveTextContent('即時')
     expect(frames.renderer!.scene.getObjectByName('backward-field')?.visible).toBe(true)
     expect(frames.runtime!.simulation.getStaticObstacles()).toHaveLength(0)
-    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(21)
+    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(22)
     const initialAltitude = screen.getByTestId('flight-altitude').textContent
     const liveSteps = screen.getByRole('list', { name: '本課步驟' }).textContent
     const stored = () => Object.fromEntries(Object.entries(window.localStorage).filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.')))
@@ -614,7 +707,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(screen.getByTestId('orbit-progress')).toHaveTextContent('0°')
     expect(screen.getByTestId('orbit-radius')).toHaveTextContent('—')
     expect(screen.getByTestId('orbit-heading')).toHaveTextContent('—')
-    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(21)
+    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(22)
     expect(frames.renderer!.scene.getObjectByName('orbit-field')?.visible).toBe(true)
     expect(frames.renderer!.scene.getObjectByName('orbit-reference-tower')).toBeDefined()
     expect(frames.renderer!.flightScene.getReference('orbit-poi')?.object.visible).toBe(false)

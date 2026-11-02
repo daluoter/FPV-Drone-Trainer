@@ -185,3 +185,6 @@ existing disarmed ghost runtime and never emits scored fixed-step samples.
 Ground-start training anchors and demo targets share pure field geometry;
 contact observation uses the physical solver's contact slop. Rules version 3
 separates revised route/landing acceptance from earlier results.
+
+
+L18's `slalomFlags` world geometry is shared by the renderer, disarmed setup, normal-RC demo author and pure forward-route evaluator. Only L18 installs the six solid flag colliders; scene guidance never moves or steers the live drone. Current-episode route evidence, frozen interruption observations, historic learner scores and independent demonstration progress remain separate domains. The course is documented in [L18_SLALOM.md](L18_SLALOM.md).

@@ -298,7 +298,7 @@ rules-6 completion. Current progress loads the per-lesson rule scope. Physics
 context stays version 1; settings, input source and practice/challenge remain
 separate comparison conditions.
 
-The 18 displayed demonstrations cover three L00 axis examples and L01–L15, including separate L11 前翻, L12 後翻, L13 大迴旋 and L14 破S recordings.
+The 22 displayed demonstrations cover three L00 axis examples and L01–L19, including the independent ten-step L18 刀旗 S 彎 recording. L18 uses a new `slalom` ID / rule-6 scope; existing lesson scopes remain unchanged.
 Their bounded recordings are generated through the real 240 Hz simulator and
 play through the independent ghost. The L01 demonstration explicitly teaches both takeoff and continuous hover.
 L14 has an eight-stage physics demonstration; L15 has a separate nine-stage, five-full-lap recording. L15’s heading/radius/lap-count/directed-progress instruments follow the same retained observations as its chapters.
@@ -374,3 +374,8 @@ frame. The UI opens exactly that recording, pauses and seeks through the existin
 ghost player. Later free flight or demonstrations cannot rebind those markers.
 This remains in-memory presentation; it grants no progress and is not a complete
 log of every recoverable excursion.
+
+
+## L18 forward alternating flag route
+
+L18 shares six immutable solid flag boxes between scene rendering, disarmed lesson setup, its actual-RC demonstration and evaluator. The flags lie on a forward row; crossings must advance along −Z in order, on alternating left/right sides within the visible passing space. The evaluator records current episode flag progress separately from historic checkpoint ticks, so local interruption cannot combine earlier flags with a new route. A first-cause snapshot explains wrong-side, missed-order, height, distant-bypass and backward-progress failures. Passing all six flags is followed by forward departure and brief airborne recovery, without a fixed bank angle, minimum passing speed or stop. The existing physics solver resolves whole-body flag collisions before scoring; unrelated lessons clear the field. See [the L18 guide](L18_SLALOM.md).
