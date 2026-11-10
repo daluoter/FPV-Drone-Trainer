@@ -882,3 +882,27 @@ L18 人工操控驗收仍待回覆；L16 依使用者最新指示繼續暫緩，
 修正驗證腳本等待條件後，針對性檢查重新通過上述七組；完整 smoke 也使用同一份最終 JS／CSS 通過 **66 組**。完整報告與 120 張截圖位於 `/tmp/fpv-l18-browser-full-final/run-gklvnfmj/`，命令日誌與退出紀錄為 `/tmp/fpv-l18-checks/browser-full-final.log`、`browser-full-final-exit.json`。涵蓋既有課程、L18 六旗實際左右交替與向前改出、十步獨立章節／半速／暫停／倒退、成績隔離與選課保存、三種鏡頭、地面起步與明確低油門解鎖、全螢幕、自由鏡頭及輸入／重設回歸。這 66 組與獨立七組針對性檢查分別保留，不合併計數。完整 smoke 成功後依腳本既定行為移除 trace；針對性成功及首輪失敗的 trace 另行保留。
 
 已目視核對手機儀表及六旗側面概觀：六旗沿同一列排列、指引一路向前左右交替，末旗與出口下方有連續地面；高度／XYZ、旗數與回放提示可辨識且不重疊。原創側面概觀保留於 `/tmp/fpv-l18-browser-overview/six-flags-overview.png`，只操作暫停回放的相機，未更動飛機或錄影。上述軟體與瀏覽器檢查不代替真人試飛；L18 人工驗收仍待回覆，L16 維持暫緩，L19 既有核准維持。本輪未執行 UAT 或正式 Pages 發布。
+
+
+## 飛行畫面全螢幕（2026.11.09.1）
+
+依使用者要求，將原本全螢幕顯示整個工作區的「全螢幕練習」，改為飛行視窗右上角的「全螢幕」。原生 Fullscreen API 的目標是既有飛行 viewport；左右欄、選課、示範工具列、下方回放與完整控制面板不包含在內。保留高度／XYZ、課程儀表、必要安全提示與精簡 Arm／Disarm／Reset；原有解鎖條件不變。當前 FPV／Chase／Free 鏡頭、同一張 canvas、飛行 runtime、課程與錄影沿用；練習中及回放中均可切換。示範觀看不寫真人成績，回放時不顯示真人控制。
+
+原生 API 不提供或拒絕時，改用固定定位的視窗滿版；Esc 與退出按鈕都可返回。滿版時限制 Tab 留在飛行視窗，返回及卸載會恢復頁面捲動與焦點。首輪瀏覽器驗證發現原生全螢幕的 Esc 已傳到 canvas，瀏覽器卻沒有自行退出；初次約 12.17 秒的失敗報告保留於 `/tmp/fpv-fullscreen-browser/run-tpy9pf_d/`，不列為通過。獨立觀察位於 `/tmp/fpv-native-escape-browser/run-xab2gnpa/`。修正為頁面接到 Esc 時明確退出所屬 viewport 的原生全螢幕，並新增回歸測試；窄畫面頂部文字也限制單行，保留按鈕空間。初版原生畫面已能滿版，失敗點僅為該次 Esc 退出。
+
+| 本輪最終檢查 | 結果 |
+| --- | --- |
+| 完整自動化測試 | PASS：`npm test -- --maxWorkers=2`，84 個檔案／1482 項；Vitest 106.29 秒、執行器 106.84 秒，退出碼 0、未逾時。 |
+| 完整 Lint | PASS：`npm run lint`，9.77 秒，退出碼 0、未逾時。 |
+| 嚴格型別與 Pages 子路徑建置 | PASS：`npm run build -- --base=/FPV-Drone-Trainer/`，10.71 秒、136 模組，退出碼 0、未逾時。 |
+| 正式產物全螢幕針對性瀏覽器檢查 | PASS：6 組，Chromium 154.0.8037.57、版本 2026.11.09.1；報告 35.56 秒、執行器 37.07 秒，退出碼 0、未逾時，瀏覽器及 console 錯誤均為空。 |
+| 正式產物完整瀏覽器回歸 | PASS：71 組，Chromium 154.0.8037.57、版本 2026.11.09.1；執行器 350.02 秒，退出碼 0、未逾時，瀏覽器錯誤為空。 |
+
+最終建置為 `index-B_mTjxzu.js`（1528.33 kB／gzip 399.70 kB）與 `index-D35FRwgk.css`（53.59 kB／gzip 10.69 kB）。完整命令日誌與退出紀錄保留於 `/tmp/fpv-viewport-checks/` 的 `final-test.log`／`final-test-exit.json`、`final-lint.log`／`final-lint-exit.json`、`final-build.log`／`final-build-exit.json`。較早的 1481 項測試、11.74 秒 Lint 及 `index-BUf6vZ0y.js`／`index-CEVzzPku.css` 建置為 Esc 修正前歷史，不作為最終產物證據。
+
+針對性瀏覽器報告、九張截圖與 trace 位於 `/tmp/fpv-fullscreen-browser/run-yfmpb9vn/`，命令日誌與退出紀錄為 `/tmp/fpv-viewport-checks/final-quick-browser.log`、`final-quick-browser-exit.json`。六組涵蓋原生 viewport 全螢幕／Esc／按鈕退出、既有 canvas 與安全條件、實際物理 L18 暫停示範在三種鏡頭下保留位置與十步進度、全螢幕內自由鏡頭操作、缺少或拒絕原生 API 的滿版備援與 Tab／焦點／捲動恢復、已準備課程的明確解鎖邊界，以及真正鍵盤起飛、Disarm／Reset 與成績隔離。桌面 1280×720、手機 375×720 與橫向 720×375 的 viewport、canvas 與 drawing buffer 均符合該尺寸；只放大飛行畫面，必要儀表與退出控制可讀且不重疊。已目視核對手機直向、橫向及滿版備援畫面。
+
+本項介面人工驗收仍待回覆，使用方式與核對項目見 [飛行畫面全螢幕](VIEWPORT_FULLSCREEN.md)。L18 人工試飛仍待回覆，L16 倒刷鍋繼續暫緩，L19 既有人工核准維持；本輪不修改課程判定或原始成績，也未執行 UAT 或正式 Pages 發布。完整 smoke 結果見下方獨立報告，不把六組針對性檢查與完整 smoke 合併計數。
+
+
+最終完整 smoke 使用同一份 `index-B_mTjxzu.js`／`index-D35FRwgk.css`，通過 **71 組**；報告與 129 張截圖位於 `/tmp/fpv-fullscreen-browser-full/run-42_3pm7v/`，命令日誌與退出紀錄為 `/tmp/fpv-viewport-checks/full-browser.log`、`full-browser-exit.json`。涵蓋既有課程示範與進度、十八項地面開始與低油門明確解鎖、六組飛行畫面全螢幕檢查、實際鍵盤起飛與控制、三種相機、自由鏡頭、回放／成績隔離及重新整理。成功時依腳本既定行為移除完整 smoke trace；針對性成功與首輪失敗 trace 仍分別保留。六組針對性與七十一組完整 smoke 各有獨立報告，不合併數量；以上仍不代替本項介面人工核對、實體遙控器或飛手校準。

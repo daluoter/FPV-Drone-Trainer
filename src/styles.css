@@ -2808,10 +2808,7 @@ h1 em {
 .school-toolbar > span { color: var(--muted); }
 .school-flight { margin-top: 8px; padding-top: 12px; }
 .school-learning-sidebar { min-width: 0; }
-.school-flight:fullscreen { box-sizing: border-box; margin: 0; padding: 16px 22px; width: 100%; height: 100%; overflow: auto; background: var(--background, #0a1017); }
-.school-flight:fullscreen .free-flight-viewport { height: clamp(280px, 54vh, 720px); }
-.school-flight:fullscreen .school-course-panel, .school-flight:fullscreen .intro-lesson { max-height: calc(100vh - 160px); }
-.school-fullscreen { flex-shrink: 0; }
+.school-fullscreen { flex-shrink: 0; pointer-events: auto; }
 .school-flight .free-flight-heading { margin-bottom: 10px; }
 .school-flight .free-flight-heading h2 { font-size: 18px; margin: 3px 0; }
 .school-flight .free-flight-heading p:not(.panel-kicker) { font-size: 12px; margin: 4px 0; }
@@ -2828,7 +2825,22 @@ h1 em {
 .school-flight:not(.has-lessons) .free-flight-layout { grid-template-columns: minmax(320px, 1fr) 200px; }
 .school-flight .free-flight-viewport { min-height: 220px; height: clamp(240px, 34vh, 450px); }
 .school-flight .flight-canvas { height: 100%; min-height: 0; }
-.school-flight .flight-viewport-overlay { display: flex; gap: 8px; line-height: 1.5; }
+.school-flight .flight-viewport-overlay { display: flex; gap: 8px; line-height: 1.5; top: 8px; align-items: center; min-height: 24px; }
+.flight-viewport-overlay > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flight-viewport-actions { display: flex; flex-shrink: 0; align-items: center; gap: 12px; }
+.flight-viewport-actions .school-fullscreen { box-sizing: border-box; min-height: 24px; padding: 3px 8px; font-size: 10px; line-height: 16px; letter-spacing: 0; }
+.flight-fullscreen-notice { position: absolute; z-index: 4; right: 14px; bottom: 106px; max-width: min(400px, calc(100% - 28px)); margin: 0; padding: 8px 10px; border: 1px solid var(--line-strong); background: rgba(8, 18, 22, .92); color: var(--warning); font-size: 12px; }
+.flight-fullscreen-controls { position: absolute; z-index: 3; right: 14px; bottom: 12px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.school-flight .free-flight-viewport.is-flight-fullscreen { position: fixed; z-index: 1000; inset: 0; box-sizing: border-box; width: 100vw; max-width: none; height: 100vh; height: 100dvh; min-height: 0; margin: 0; border: 0; background: #0b141a; }
+.free-flight-viewport:fullscreen::backdrop { background: #0b141a; }
+.free-flight-viewport.is-flight-fullscreen .flight-instruments { top: 48px; bottom: auto; align-items: flex-start; }
+.free-flight-viewport.is-flight-fullscreen .flight-position-hud { top: 48px; }
+.free-flight-viewport.is-flight-fullscreen .flight-safe-overlay { top: auto; bottom: 60px; }
+@media (max-width: 620px) {
+  .flight-viewport-actions { gap: 6px; }
+  .flight-viewport-actions > span { font-size: 8px; letter-spacing: 0; }
+  .free-flight-viewport.is-flight-fullscreen .flight-instruments { right: 12px; left: 12px; }
+}
 .school-flight .flight-controls { padding: 10px; gap: 12px; }
 .school-flight .flight-controls label, .school-flight .flight-control-group > span { font-size: 11px; }
 .flight-canvas.is-free-camera { cursor: grab; touch-action: none; }

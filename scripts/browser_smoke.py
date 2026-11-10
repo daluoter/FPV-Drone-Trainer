@@ -60,6 +60,209 @@ def training_progress(page) -> dict:
     )
 
 
+def exercise_viewport_fullscreen(page, artifact_dir: Path, checks: list[str], report: dict, screenshot: bool = True) -> None:
+    """Exercise the actual viewport, input and recording across display changes."""
+    flight = page.locator("#free-flight")
+    training = page.locator("#training")
+    lesson = page.locator("#school-lesson")
+    source = flight.locator("#flight-input-source")
+    viewport = flight.locator(".free-flight-viewport")
+    canvas = flight.locator("canvas")
+    button = viewport.locator(".school-fullscreen")
+    position = flight.get_by_role("group", name="飛行位置", exact=True)
+    timeline = flight.locator("#flight-replay-timeline")
+    original_canvas = canvas.element_handle()
+    original_lesson = lesson.input_value()
+    source.select_option("keyboard")
+    saved = training_progress(page)
+    report["viewport_fullscreen"] = {"layouts": {}, "native_modes": []}
+
+    def same_canvas() -> None:
+        if not original_canvas or not original_canvas.evaluate("element => element === document.querySelector('#free-flight canvas')"):
+            raise AssertionError("Changing fullscreen mode replaced the shared flight canvas.")
+
+    def enter(label: str, require_native: bool = True) -> dict:
+        expect(button).to_have_accessible_name("飛行畫面全螢幕")
+        expect(button).to_be_enabled()
+        button.click()
+        expect(button).to_have_attribute("aria-pressed", "true")
+        expect(button).to_have_accessible_name("離開全螢幕")
+        expect(viewport).to_have_class(re.compile(r"\bis-flight-fullscreen\b"))
+        bounds = viewport.bounding_box()
+        cb = canvas.bounding_box()
+        size = page.evaluate("({width: innerWidth, height: innerHeight})")
+        if not bounds or not cb or any(abs(bounds[axis]) > 2 for axis in ("x", "y")) or abs(bounds["width"] - size["width"]) > 2 or abs(bounds["height"] - size["height"]) > 2:
+            raise AssertionError(f"{label}: flight viewport does not fill the display: {bounds}, {size}")
+        if abs(cb["width"] - bounds["width"]) > 2 or abs(cb["height"] - bounds["height"]) > 2:
+            raise AssertionError(f"{label}: canvas does not fill its fullscreen viewport: {cb}, {bounds}")
+        page.wait_for_function("""() => {
+          const canvas = document.querySelector('#free-flight canvas');
+          return Math.abs(canvas.width / canvas.height - innerWidth / innerHeight) < .005;
+        }""")
+        drawing_buffer = canvas.evaluate("element => ({width: element.width, height: element.height})")
+        native = viewport.evaluate("element => document.fullscreenElement === element")
+        if require_native and page.evaluate("document.fullscreenEnabled") and not native:
+            raise AssertionError(f"{label}: native fullscreen is supported but the viewport fell back unexpectedly.")
+        if page.evaluate("Boolean(document.fullscreenElement)") and not native:
+            raise AssertionError("Fullscreen targeted the workspace instead of the flight viewport.")
+        for x, y in ((2, 2), (size["width"] - 3, size["height"] - 3), (size["width"] / 2, size["height"] / 2)):
+            if not viewport.evaluate("(element, p) => element.contains(document.elementFromPoint(p[0], p[1]))", [x, y]):
+                raise AssertionError(f"{label}: another page panel covers the fullscreen flight view.")
+        expect(position).to_be_visible()
+        same_canvas()
+        return {"viewport": bounds, "canvas": cb, "drawing_buffer": drawing_buffer, "native": native}
+
+    def leave(escape: bool = False) -> None:
+        if escape:
+            page.keyboard.press("Escape")
+        else:
+            button.click()
+        expect(button).to_have_attribute("aria-pressed", "false")
+        expect(button).to_have_accessible_name("飛行畫面全螢幕")
+        expect(viewport).not_to_have_class(re.compile(r"\bis-flight-fullscreen\b"))
+        page.wait_for_function("!document.fullscreenElement")
+        same_canvas()
+
+    # Native entry starts safely while preserving the ordinary, supported state.
+    before = position.inner_text()
+    report["viewport_fullscreen"]["layouts"]["desktop-live"] = enter("desktop live")
+    expect(viewport.get_by_role("button", name="全螢幕解鎖 Arm", exact=True)).to_be_enabled()
+    expect(viewport.get_by_role("button", name="全螢幕上鎖 Disarm", exact=True)).to_be_disabled()
+    if position.inner_text() != before:
+        raise AssertionError("Opening the grounded flight view changed the aircraft position.")
+    if screenshot:
+        page.screenshot(path=str(artifact_dir / "fullscreen-live-desktop.png"))
+    leave(escape=True)
+    if training_progress(page) != saved:
+        raise AssertionError("Changing display mode wrote a learning result.")
+    checks.append("flight-only fullscreen targets the viewport, fills the canvas and preserves grounded state, safety gates and results")
+
+    # Paused real-physics teaching playback is the most sensitive identity check.
+    lesson.select_option("slalom")
+    flight.get_by_role("button", name="L18 刀旗 S 彎示範", exact=True).click()
+    flight.get_by_role("button", name="Pause", exact=True).click()
+    timeline.press("End")
+    expect(page.get_by_role("region", name="示範進度", exact=True)).to_contain_text("10 / 10 個示範步驟完成")
+    expect(flight.get_by_test_id("slalom-passed")).to_have_text("6 / 6 旗")
+    held = position.inner_text()
+    held_time = float(timeline.input_value())
+    for name in ("FPV", "Chase", "Free / debug"):
+        flight.get_by_role("button", name=name, exact=True).click()
+        value = enter(name)
+        report["viewport_fullscreen"]["native_modes"].append({"camera": name, **value})
+        expect(viewport.get_by_role("button", name="全螢幕解鎖 Arm", exact=True)).to_have_count(0)
+        if name == "Free / debug":
+            initial_camera = canvas.get_attribute("data-free-camera-position")
+            canvas.click(position={"x": value["canvas"]["width"] * .7, "y": value["canvas"]["height"] * .6})
+            page.keyboard.press("PageUp")
+            page.wait_for_function("initial => document.querySelector('#free-flight canvas').dataset.freeCameraPosition !== initial", arg=initial_camera)
+        if position.inner_text() != held or abs(float(timeline.input_value()) - held_time) > .02:
+            raise AssertionError(f"Fullscreen {name} changed paused teaching position or timeline.")
+        if screenshot:
+            page.screenshot(path=str(artifact_dir / f"fullscreen-demo-{name.split()[0].lower()}.png"))
+        leave()
+    if training_progress(page) != saved:
+        raise AssertionError("Fullscreen teaching inspection wrote a learner result.")
+    checks.append("paused physical demonstration keeps its aircraft, ten-step progress, timeline and results through fullscreen FPV, Chase and interactive Free camera")
+    flight.get_by_role("button", name="FPV", exact=True).click()
+    flight.get_by_role("button", name="結束示範", exact=True).click()
+
+    # Browser API absence/rejection should still provide a usable full-window view.
+    for api_mode in ("missing", "rejected"):
+        page.evaluate("""mode => {
+          const element = document.querySelector('#free-flight .free-flight-viewport');
+          window.__fullscreenRequestOwn = Object.getOwnPropertyDescriptor(element, 'requestFullscreen');
+          Object.defineProperty(element, 'requestFullscreen', {configurable: true,
+            value: mode === 'missing' ? undefined : () => Promise.reject(new Error('test rejection'))});
+        }""", api_mode)
+        button.scroll_into_view_if_needed()
+        before_overflow = page.evaluate("document.body.style.overflow")
+        try:
+            value = enter(f"fallback {api_mode}", require_native=False)
+            if value["native"]:
+                raise AssertionError("A simulated unavailable fullscreen API unexpectedly entered native mode.")
+            expect(viewport.get_by_role("status")).to_contain_text("視窗滿版")
+            page.keyboard.press("Shift+Tab")
+            if not viewport.evaluate("element => element.contains(document.activeElement)"):
+                raise AssertionError("Fallback Tab focus escaped into a covered page panel.")
+            if screenshot:
+                page.screenshot(path=str(artifact_dir / f"fullscreen-fallback-{api_mode}.png"))
+            leave(escape=True)
+            if page.evaluate("document.body.style.overflow") != before_overflow:
+                raise AssertionError("Fallback exit did not restore the document's original overflow style.")
+            if not button.evaluate("element => document.activeElement === element"):
+                raise AssertionError("Fallback Escape did not return focus to the fullscreen entry button.")
+        finally:
+            page.evaluate("""() => {
+              const element = document.querySelector('#free-flight .free-flight-viewport');
+              if (window.__fullscreenRequestOwn) Object.defineProperty(element, 'requestFullscreen', window.__fullscreenRequestOwn);
+              else delete element.requestFullscreen;
+              delete window.__fullscreenRequestOwn;
+            }""")
+    checks.append("missing and rejected native fullscreen APIs use a full-window fallback with Escape exit, focus and scrolling restoration")
+
+    for width, height in ((375, 720), (720, 375)):
+        page.set_viewport_size({"width": width, "height": height})
+        value = enter(f"{width}x{height}")
+        report["viewport_fullscreen"]["layouts"][f"{width}x{height}"] = value
+        hb = position.bounding_box()
+        bb = button.bounding_box()
+        for box, label in ((hb, "altitude/XYZ"), (bb, "fullscreen exit")):
+            if not box or box["x"] < 0 or box["y"] < 0 or box["x"] + box["width"] > width + 2 or box["y"] + box["height"] > height + 2:
+                raise AssertionError(f"Fullscreen {label} escapes the display at {width}x{height}: {box}")
+        if hb and bb:
+            overlap_x = min(hb["x"] + hb["width"], bb["x"] + bb["width"]) - max(hb["x"], bb["x"])
+            overlap_y = min(hb["y"] + hb["height"], bb["y"] + bb["height"]) - max(hb["y"], bb["y"])
+            if overlap_x > .1 and overlap_y > .1:
+                raise AssertionError(f"Fullscreen altitude/XYZ covers the exit at {width}x{height}.")
+        if screenshot:
+            page.screenshot(path=str(artifact_dir / f"fullscreen-{width}x{height}.png"))
+        leave()
+    page.set_viewport_size({"width": 1280, "height": 720})
+    checks.append("flight-only fullscreen fills portrait and landscape displays while keeping altitude/XYZ and the exit control inside and separate")
+
+    # Display changes remain available during a prepared course and actual flight.
+    lesson.select_option("basic-recovery")
+    training.get_by_role("button", name="開始課程", exact=True).click()
+    expect(training.locator(".school-phase")).to_have_text("等待解鎖", timeout=10_000)
+    enter("prepared course")
+    expect(viewport.get_by_role("button", name="全螢幕解鎖 Arm", exact=True)).to_be_enabled()
+    leave()
+    training.get_by_role("button", name="停止練習", exact=True).click()
+    expect(training.locator(".school-phase")).to_have_text("準備選課")
+    checks.append("prepared lessons can enter flight-only fullscreen without bypassing their explicit Arm boundary")
+
+    # Use Free Flight so intentional input validation never creates a lesson score.
+    page.get_by_role("button", name="自由飛行", exact=True).click()
+    source.select_option("keyboard")
+    flight.get_by_role("button", name="Reset", exact=True).click()
+    saved_free = training_progress(page)
+    flight.get_by_role("button", name="Arm", exact=True).click()
+    enter("armed keyboard flight")
+    expect(viewport.get_by_role("button", name="全螢幕上鎖 Disarm", exact=True)).to_be_enabled()
+    page.keyboard.down("r")
+    try:
+        page.wait_for_function("parseFloat(document.querySelector('[data-testid=flight-altitude]')?.textContent || '0') >= 1", timeout=10_000)
+    finally:
+        page.keyboard.up("r")
+    if screenshot:
+        page.screenshot(path=str(artifact_dir / "fullscreen-keyboard-flight.png"))
+    viewport.get_by_role("button", name="全螢幕上鎖 Disarm", exact=True).click()
+    expect(viewport.get_by_role("button", name="全螢幕上鎖 Disarm", exact=True)).to_be_disabled()
+    viewport.get_by_role("button", name="全螢幕重設 Reset", exact=True).click()
+    expect(flight.get_by_test_id("flight-altitude")).to_have_text("0.0 m")
+    leave()
+    if training_progress(page) != saved_free:
+        raise AssertionError("Fullscreen free-flight input wrote a lesson result.")
+    checks.append("armed keyboard flight continues in fullscreen with functional compact Disarm/Reset and no lesson score writes")
+    page.get_by_role("navigation", name="練習模式", exact=True).get_by_role("button", name=re.compile(r"^(開始學飛|繼續練習)$")).click()
+    lesson.select_option(original_lesson)
+    flight.get_by_role("button", name="FPV", exact=True).click()
+    expect(flight.get_by_role("button", name="Arm", exact=True)).to_be_enabled()
+    expect(flight.get_by_role("button", name="Disarm", exact=True)).to_be_disabled()
+    report["fullscreen"] = "viewport-only native and fallback entry/exit, playback, cameras and real input passed"
+
+
 def exercise_slalom_course(page, artifact_dir: Path, checks: list[str], report: dict, screenshot: bool = True) -> None:
     """Verify L18 using public controls and recorded observations only."""
     flight = page.locator("#free-flight")
@@ -302,7 +505,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if response is None or response.status != 200:
                 raise AssertionError("The production entry page did not return HTTP 200.")
             expect(page).to_have_title("FPV Drone Trainer")
-            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.11.02.1")
+            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.11.09.1")
             report["release"] = page.get_by_test_id("app-release").inner_text()
 
             asset_urls = page.locator("script[src], link[rel='stylesheet'][href]").evaluate_all(
@@ -2465,23 +2668,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             lesson.select_option("basic-recovery")
             checks.append("L02/L03/L04/L05/L06/L07/L08/L09/L10/L11/L12/L13/L14/L15/L16/L17/L18/L19 actual ground start, safe low-throttle arm and visible stage guidance")
 
-            fullscreen = flight.locator(".school-fullscreen")
-            fullscreen.click()
-            page.wait_for_function(
-                "Boolean(document.fullscreenElement) || document.body.innerText.includes('瀏覽器未提供全螢幕')"
-            )
-            if page.evaluate("Boolean(document.fullscreenElement)"):
-                expect(fullscreen).to_have_text("離開全螢幕")
-                fullscreen.click()
-                page.wait_for_function("!document.fullscreenElement")
-                expect(fullscreen).to_have_text("全螢幕練習")
-                report["fullscreen"] = "entered and exited"
-            else:
-                expect(flight.get_by_text("瀏覽器未提供全螢幕；仍可在目前畫面練習。", exact=True)).to_be_visible()
-                report["fullscreen"] = "unsupported with actionable fallback"
-            expect(disarm).to_be_disabled()
-            expect(arm).to_be_enabled()
-            checks.append("fullscreen entry/exit or graceful browser fallback")
+            exercise_viewport_fullscreen(page, artifact_dir, checks, report, screenshot)
 
             def free_camera_state() -> dict:
                 state = canvas.evaluate("""element => ({

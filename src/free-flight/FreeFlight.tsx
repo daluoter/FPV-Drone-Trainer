@@ -138,8 +138,11 @@ export default function FreeFlight({
   onFixedStep,
   onTelemetry,
 }: FreeFlightProps) {
-  const workspaceRef = useRef<HTMLElement | null>(null)
-  const [fullscreen, setFullscreen] = useState(false)
+  const viewportRef = useRef<HTMLDivElement | null>(null)
+  const fullscreenButtonRef = useRef<HTMLButtonElement | null>(null)
+  const [fullscreenMode, setFullscreenMode] = useState<'native' | 'window' | null>(null)
+  const fullscreen = fullscreenMode !== null
+  const [fullscreenPending, setFullscreenPending] = useState(false)
   const [fullscreenError, setFullscreenError] = useState<string | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const appliedSettingsRef = useRef(settings)
@@ -606,18 +609,75 @@ export default function FreeFlight({
     if (demonstrationRequest) startDemonstration(demonstrationRequest.kind)
   }, [demonstrationRequest])
   useEffect(() => {
-    const syncFullscreen = (): void => setFullscreen(document.fullscreenElement === workspaceRef.current)
+    const syncFullscreen = (): void => {
+      setFullscreenMode((mode) => document.fullscreenElement === viewportRef.current ? 'native' : mode === 'native' ? null : mode)
+    }
     document.addEventListener('fullscreenchange', syncFullscreen)
     return () => document.removeEventListener('fullscreenchange', syncFullscreen)
   }, [])
+  useEffect(() => {
+    if (!fullscreen) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    // Moving the existing viewport never replaces the canvas or flight runtime.
+    canvasRef.current?.focus({ preventScroll: true })
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        if (fullscreenMode === 'window') {
+          event.preventDefault()
+          setFullscreenMode(null)
+          setFullscreenError(null)
+        } else if (document.fullscreenElement === viewportRef.current) {
+          // Also handle browsers that deliver Escape to the page instead of
+          // consuming it as their native fullscreen exit shortcut.
+          void document.exitFullscreen().catch(() => {
+            if (document.fullscreenElement === viewportRef.current) setFullscreenError('無法離開全螢幕，請按右上角「離開全螢幕」返回。')
+          })
+        }
+      }
+      if (event.key !== 'Tab') return
+      const controls = Array.from(viewportRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), [tabindex="0"]') ?? [])
+      if (!controls.length) return
+      const first = controls[0], last = controls[controls.length - 1]
+      if (!controls.includes(document.activeElement as HTMLElement) || event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        const target = event.shiftKey ? last : first
+        target.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', onKeyDown)
+      fullscreenButtonRef.current?.focus({ preventScroll: true })
+    }
+  }, [fullscreen, fullscreenMode])
   const toggleFullscreen = async (): Promise<void> => {
-    if (telemetry?.armed || trainingSettingsLocked || telemetry?.replay.active) return
+    if (fullscreenPending) return
+    const viewport = viewportRef.current
+    if (!viewport) return
+    setFullscreenPending(true)
     try {
-      if (document.fullscreenElement) await document.exitFullscreen()
-      else if (workspaceRef.current?.requestFullscreen) await workspaceRef.current.requestFullscreen()
-      else throw new Error('unsupported')
       setFullscreenError(null)
-    } catch { setFullscreenError('瀏覽器未提供全螢幕；仍可在目前畫面練習。') }
+      if (fullscreen) {
+        if (document.fullscreenElement === viewport) await document.exitFullscreen()
+        setFullscreenMode(null)
+      } else {
+        try {
+          if (!viewport.requestFullscreen) throw new Error('unsupported')
+          await viewport.requestFullscreen()
+          if (document.fullscreenElement !== viewport) throw new Error('not entered')
+          setFullscreenMode('native')
+        } catch {
+          setFullscreenMode('window')
+          setFullscreenError('瀏覽器未提供原生全螢幕，已改用視窗滿版；按 Esc 或「離開全螢幕」返回。')
+        }
+      }
+    } catch { setFullscreenError('無法離開全螢幕，請按 Esc 返回。') }
+    finally { setFullscreenPending(false) }
   }
   const replayGhost = telemetry?.replay.active ? runtimeRef.current?.getReplayPlayback?.()?.getGhostState() ?? null : null
   const playbackInput = telemetry?.replay.active ? replayGhost?.normalizedInput ?? null : telemetry?.normalizedInput
@@ -680,14 +740,13 @@ export default function FreeFlight({
               : currentObjective && trainingState.lastEvaluation?.recovery !== 'restart' ? <><strong>{currentObjective.title}</strong><span>{trainingState.lessonId === 'direction-control' || trainingState.lessonId === 'coordinated-turn' || trainingState.lessonId === 'square-route' || trainingState.lessonId === 'figure-eight' || trainingState.lessonId === 'wide-gate' || trainingState.lessonId === 'basic-recovery' || trainingState.lessonId === 'full-roll' || isFlipLesson(trainingState.lessonId) || trainingState.lessonId === 'power-loop' || trainingState.lessonId === 'split-s' || trainingState.lessonId === 'orbit' || trainingState.lessonId === 'reverse-orbit' || trainingState.lessonId === 'backward-flight' || trainingState.lessonId === 'gravity-gate' || trainingState.lessonId === 'slalom' || !trainingState.lastEvaluation?.hint ? currentObjective.detail : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</span></> : trainingHint(trainingState.lessonId, trainingState.lastEvaluation)}</div>
 
   return (
-    <section ref={workspaceRef} className={`free-flight-section school-flight ${lessonPanel ? 'has-lessons' : ''}`} id="free-flight" aria-labelledby="free-flight-title">
+    <section className={`free-flight-section school-flight ${lessonPanel ? 'has-lessons' : ''}`} id="free-flight" aria-labelledby="free-flight-title">
       <div className="free-flight-heading">
         <div>
           <p className="panel-kicker">練習工作區 · Acro</p>
           <h2 id="free-flight-title">看懂動作，再親手試一次。</h2>
           <p>Arm 解鎖開始飛行，Disarm 停止馬達；課程倒數後等待你準備完成。示範與回放不會累積成績。</p>
         </div>
-        <button className="lab-button lab-button-small school-fullscreen" type="button" disabled={trainingSettingsLocked || Boolean(telemetry?.armed || telemetry?.replay.active)} onClick={() => void toggleFullscreen()}>{fullscreen ? '離開全螢幕' : '全螢幕練習'}</button>
         <div className={`flight-state-badge ${renderingState === 'ready' && telemetry?.armed ? 'flight-state-armed' : ''}`}>
           <span aria-hidden="true" /> {fallbackTelemetryLabel(telemetry, renderingState)}
         </div>
@@ -701,7 +760,6 @@ export default function FreeFlight({
         })}
         <span>左桿：油門／偏航 · 右桿：橫滾／俯仰</span>
       </div>
-      {fullscreenError && <p role="status">{fullscreenError}</p>}
       {demoError && <p role="alert">{demoError}</p>}
       <div className="free-flight-layout">
         {lessonPanel && <aside className="school-lesson-slot">{lessonPanel}</aside>}
@@ -711,13 +769,17 @@ export default function FreeFlight({
             <button className="lab-button lab-button-primary" type="button" onClick={exitReplay}>{demonstration ? '結束示範' : '結束回放'}</button>
             <span>結束後回到練習，仍需自行解鎖。</span>
           </div>}
-          <div className={`free-flight-viewport${showMotionHud ? ' has-recovery-hud' : ''}${showOrbitHud ? ' has-orbit-hud' : ''}${showReverseOrbitHud ? ' has-reverse-orbit-hud' : ''}${showBackwardHud ? ' has-backward-hud' : ''}${showGravityGateHud ? ' has-gravity-gate-hud' : ''}${showSlalomHud ? ' has-slalom-hud' : ''}`} role="group" aria-label="Three.js Free Flight simulation viewport">
+          <div ref={viewportRef} className={`free-flight-viewport${fullscreen ? ' is-flight-fullscreen' : ''}${showMotionHud ? ' has-recovery-hud' : ''}${showOrbitHud ? ' has-orbit-hud' : ''}${showReverseOrbitHud ? ' has-reverse-orbit-hud' : ''}${showBackwardHud ? ' has-backward-hud' : ''}${showGravityGateHud ? ' has-gravity-gate-hud' : ''}${showSlalomHud ? ' has-slalom-hud' : ''}`} role="group" aria-label="Three.js Free Flight simulation viewport">
             <canvas key={rendererRetryKey} ref={canvasRef} className={`flight-canvas${cameraMode === 'free' ? ' is-free-camera' : ''}`} aria-label="Free Flight 3D scene"
               tabIndex={cameraMode === 'free' ? 0 : -1} aria-describedby={cameraMode === 'free' ? 'free-camera-help' : undefined} />
-            <div className="flight-viewport-overlay" aria-hidden="true">
-              <span>{telemetry?.replay.active ? 'PLAYBACK GHOST' : 'LIVE SIM'} / {telemetry?.cameraMode?.toUpperCase() ?? 'FPV'}</span>
-              <span>{format(telemetry?.metrics.fps, 0)} FPS · {format(telemetry?.metrics.simHz, 0)} SIM HZ</span>
+            <div className="flight-viewport-overlay">
+              <span aria-hidden="true">{telemetry?.replay.active ? 'PLAYBACK GHOST' : 'LIVE SIM'} / {telemetry?.cameraMode?.toUpperCase() ?? 'FPV'}</span>
+              <div className="flight-viewport-actions">
+                <span aria-hidden="true">{format(telemetry?.metrics.fps, 0)} FPS · {format(telemetry?.metrics.simHz, 0)} SIM HZ</span>
+                <button ref={fullscreenButtonRef} className="lab-button lab-button-small school-fullscreen" type="button" aria-label={fullscreen ? '離開全螢幕' : '飛行畫面全螢幕'} aria-pressed={fullscreen} disabled={fullscreenPending} onClick={() => void toggleFullscreen()}>{fullscreen ? '離開全螢幕' : '全螢幕'}</button>
+              </div>
             </div>
+            {fullscreenError && <p className="flight-fullscreen-notice" role="status">{fullscreenError}</p>}
             <div className={showMotionHud ? 'flight-instruments' : undefined}>
               <div className="flight-position-hud" role="group" aria-label="飛行位置">
               <div className="flight-altitude"><span>{telemetry?.replay.active ? '回放高度' : '高度'} <small>地面上方</small></span><strong data-testid="flight-altitude">{positionValue(position.altitudeAboveGroundM)}</strong></div>
@@ -840,7 +902,12 @@ export default function FreeFlight({
               ? demonstrationProgress.complete ? `示範完成 ${demonstrationProgress.completedSteps}／${demonstrationProgress.totalSteps} 步 · 觀看不計成績`
                 : `示範第 ${(demonstrationProgress.currentStepIndex ?? 0) + 1}／${demonstrationProgress.totalSteps} 步：${demonstrationProgress.currentStepTitle}`
               : demonstration ? demonstration.title : '飛行回放'} · 真人飛行已停止</div>}
-            {!dockInstruments && trainingHintPanel}
+            {!fullscreen && !dockInstruments && trainingHintPanel}
+            {fullscreen && !telemetry?.replay.active && <div className="flight-fullscreen-controls" role="group" aria-label="全螢幕飛行控制">
+              <button className="lab-button lab-button-primary lab-button-small" type="button" aria-label="全螢幕解鎖 Arm" onClick={arm} disabled={Boolean(trainingArmBlocked || renderingState !== 'ready' || telemetry?.armed || telemetry?.state.crashed)}>Arm</button>
+              <button className="lab-button lab-button-small" type="button" aria-label="全螢幕上鎖 Disarm" onClick={disarm} disabled={!telemetry?.armed}>Disarm</button>
+              <button className="lab-button lab-button-small" type="button" aria-label="全螢幕重設 Reset" onClick={reset}>{telemetry?.state.crashed ? 'Reset crashed drone' : 'Reset'}</button>
+            </div>}
           </div>
           {dockInstruments && trainingHintPanel}
           <div className="flight-controls" aria-label="Flight controls">

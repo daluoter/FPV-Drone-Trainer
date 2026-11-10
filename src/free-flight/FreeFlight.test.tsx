@@ -237,6 +237,221 @@ describe('interactive free camera', () => {
   })
 })
 
+/** Model native fullscreen events; keep the real runtime and renderer seam. */
+function nativeFullscreenHarness(viewport: HTMLElement) {
+  const elementDescriptor = Object.getOwnPropertyDescriptor(document, 'fullscreenElement')
+  const exitDescriptor = Object.getOwnPropertyDescriptor(document, 'exitFullscreen')
+  let active: Element | null = null
+  const update = (element: Element | null): void => {
+    active = element
+    document.dispatchEvent(new Event('fullscreenchange'))
+  }
+  const request = vi.fn(async () => update(viewport))
+  const exit = vi.fn(async () => update(null))
+  Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => active })
+  Object.defineProperty(document, 'exitFullscreen', { configurable: true, value: exit })
+  Object.defineProperty(viewport, 'requestFullscreen', { configurable: true, value: request })
+  return { request, exit, update, restore: () => {
+    if (elementDescriptor) Object.defineProperty(document, 'fullscreenElement', elementDescriptor)
+    else Reflect.deleteProperty(document, 'fullscreenElement')
+    if (exitDescriptor) Object.defineProperty(document, 'exitFullscreen', exitDescriptor)
+    else Reflect.deleteProperty(document, 'exitFullscreen')
+  } }
+}
+
+describe('flight viewport fullscreen', () => {
+  it('exits native fullscreen when Escape is delivered to the flight viewport', async () => {
+    render(<FreeFlight poller={createBrowserGamepadPoller()} profile={null} settings={createDefaultTuningSettings()} />)
+    const viewport = screen.getByRole('group', { name: 'Three.js Free Flight simulation viewport' })
+    const native = nativeFullscreenHarness(viewport)
+    try {
+      await act(async () => { fireEvent.click(within(viewport).getByRole('button', { name: '飛行畫面全螢幕' })) })
+      await act(async () => { fireEvent.keyDown(screen.getByLabelText('Free Flight 3D scene'), { key: 'Escape' }) })
+      expect(native.exit).toHaveBeenCalledOnce()
+      expect(document.fullscreenElement).toBeNull()
+      expect(viewport).not.toHaveClass('is-flight-fullscreen')
+      expect(within(viewport).getByRole('button', { name: '飛行畫面全螢幕' })).toHaveAttribute('aria-pressed', 'false')
+    } finally { native.restore() }
+  })
+
+  it('requests native fullscreen for only the viewport and exits through the same in-view button without replacing flight state', async () => {
+    window.localStorage.clear()
+    render(<App />)
+    frame(0)
+    const viewport = screen.getByRole('group', { name: 'Three.js Free Flight simulation viewport' })
+    const canvas = screen.getByLabelText('Free Flight 3D scene')
+    const button = within(viewport).getByRole('button', { name: '飛行畫面全螢幕' })
+    const runtime = frames.runtime!
+    const renderer = frames.renderer!
+    const state = JSON.stringify(runtime.simulation.getState())
+    const saved = Object.fromEntries(Object.entries(window.localStorage))
+    const native = nativeFullscreenHarness(viewport)
+    try {
+      expect(button).toHaveAttribute('aria-pressed', 'false')
+      await act(async () => { fireEvent.click(button) })
+      expect(native.request).toHaveBeenCalledOnce()
+      expect(document.fullscreenElement).toBe(viewport)
+      expect(viewport).toHaveClass('is-flight-fullscreen')
+      expect(within(viewport).getByRole('button', { name: '離開全螢幕' })).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
+      expect(frames.runtime).toBe(runtime)
+      expect(frames.renderer).toBe(renderer)
+      expect(JSON.stringify(runtime.simulation.getState())).toBe(state)
+      expect(Object.fromEntries(Object.entries(window.localStorage))).toEqual(saved)
+      expect(runtime.getTelemetry().armed).toBe(false)
+      await act(async () => { fireEvent.click(within(viewport).getByRole('button', { name: '離開全螢幕' })) })
+      expect(native.exit).toHaveBeenCalledOnce()
+      expect(document.fullscreenElement).toBeNull()
+      expect(button).toHaveAttribute('aria-pressed', 'false')
+      expect(button).toHaveAccessibleName('飛行畫面全螢幕')
+      expect(viewport).not.toHaveClass('is-flight-fullscreen')
+      expect(JSON.stringify(runtime.simulation.getState())).toBe(state)
+    } finally { native.restore() }
+  })
+
+  it('restores the viewport controls after a native browser exit without requiring the app exit button', async () => {
+    render(<FreeFlight poller={createBrowserGamepadPoller()} profile={null} settings={createDefaultTuningSettings()} />)
+    const viewport = screen.getByRole('group', { name: 'Three.js Free Flight simulation viewport' })
+    const native = nativeFullscreenHarness(viewport)
+    try {
+      await act(async () => { fireEvent.click(within(viewport).getByRole('button', { name: '飛行畫面全螢幕' })) })
+      expect(viewport).toHaveClass('is-flight-fullscreen')
+      act(() => native.update(null))
+      expect(within(viewport).getByRole('button', { name: '飛行畫面全螢幕' })).toHaveAttribute('aria-pressed', 'false')
+      expect(viewport).not.toHaveClass('is-flight-fullscreen')
+      expect(screen.queryByRole('button', { name: '全螢幕解鎖 Arm' })).not.toBeInTheDocument()
+      expect(native.exit).not.toHaveBeenCalled()
+      expect(frames.runtime!.getTelemetry().armed).toBe(false)
+    } finally { native.restore() }
+  })
+
+  it.each(['unsupported', 'rejected'] as const)('provides an escapable viewport-only fallback when native fullscreen is %s', async (mode) => {
+    render(<FreeFlight poller={createBrowserGamepadPoller()} profile={null} settings={createDefaultTuningSettings()} />)
+    const viewport = screen.getByRole('group', { name: 'Three.js Free Flight simulation viewport' })
+    const native = nativeFullscreenHarness(viewport)
+    const request = mode === 'rejected' ? vi.fn(async () => { throw new Error('Permission denied') }) : undefined
+    Object.defineProperty(viewport, 'requestFullscreen', { configurable: true, value: request })
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'scroll'
+    try {
+      const runtime = frames.runtime!
+      const canvas = screen.getByLabelText('Free Flight 3D scene')
+      await act(async () => { fireEvent.click(within(viewport).getByRole('button', { name: '飛行畫面全螢幕' })) })
+      if (request) expect(request).toHaveBeenCalledOnce()
+      expect(document.fullscreenElement).toBeNull()
+      expect(viewport).toHaveClass('is-flight-fullscreen')
+      const exit = within(viewport).getByRole('button', { name: '離開全螢幕' })
+      expect(exit).toHaveAttribute('aria-pressed', 'true')
+      expect(document.body.style.overflow).toBe('hidden')
+      expect(document.activeElement).toBe(canvas)
+      const reverseTab = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true })
+      fireEvent(canvas, reverseTab)
+      expect(reverseTab.defaultPrevented).toBe(true)
+      expect(document.activeElement).toBe(within(viewport).getByRole('button', { name: '全螢幕重設 Reset' }))
+      const forwardTab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+      fireEvent(document.activeElement!, forwardTab)
+      expect(forwardTab.defaultPrevented).toBe(true)
+      expect(document.activeElement).toBe(exit)
+      expect(within(viewport).getByRole('status')).toHaveTextContent('瀏覽器未提供原生全螢幕，已改用視窗滿版')
+      expect(within(viewport).getByRole('group', { name: '飛行位置' })).toBeInTheDocument()
+      fireEvent.keyDown(exit, { key: 'Escape' })
+      expect(viewport).not.toHaveClass('is-flight-fullscreen')
+      expect(within(viewport).getByRole('button', { name: '飛行畫面全螢幕' })).toHaveAttribute('aria-pressed', 'false')
+      expect(native.exit).not.toHaveBeenCalled()
+      expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
+      expect(frames.runtime).toBe(runtime)
+      expect(runtime.getTelemetry().armed).toBe(false)
+      expect(runtime.keyboard.getInput()).toEqual({ roll: 0, pitch: 0, yaw: 0, throttle: 0 })
+      expect(document.body.style.overflow).toBe('scroll')
+      expect(document.activeElement).toBe(exit)
+    } finally { native.restore(); document.body.style.overflow = previousOverflow }
+  })
+
+  it('restores page scrolling and removes the fullscreen key handler when its flight viewport unmounts', async () => {
+    const { unmount } = render(<FreeFlight poller={createBrowserGamepadPoller()} profile={null} settings={createDefaultTuningSettings()} />)
+    const viewport = screen.getByRole('group', { name: 'Three.js Free Flight simulation viewport' })
+    const native = nativeFullscreenHarness(viewport)
+    Object.defineProperty(viewport, 'requestFullscreen', { configurable: true, value: undefined })
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'scroll'
+    try {
+      await act(async () => { fireEvent.click(within(viewport).getByRole('button', { name: '飛行畫面全螢幕' })) })
+      expect(document.body.style.overflow).toBe('hidden')
+      unmount()
+      expect(document.body.style.overflow).toBe('scroll')
+      const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      fireEvent(document, escape)
+      expect(escape.defaultPrevented).toBe(false)
+      expect(native.exit).not.toHaveBeenCalled()
+    } finally { native.restore(); document.body.style.overflow = previousOverflow }
+  })
+
+  it('remains available during an armed locked course while compact controls retain disarm, arm gates and lesson reset', async () => {
+    const onTrainingReset = vi.fn()
+    const props = { poller: createBrowserGamepadPoller(), profile: null, settings: createDefaultTuningSettings(), onTrainingReset }
+    const { rerender } = render(<FreeFlight {...props} />)
+    fireEvent.change(screen.getByLabelText('控制方式'), { target: { value: 'keyboard' } })
+    frame(0)
+    fireEvent.click(screen.getByRole('button', { name: /^Arm$/ }))
+    expect(frames.runtime!.getTelemetry().armed).toBe(true)
+    rerender(<FreeFlight {...props} trainingSettingsLocked />)
+    const viewport = screen.getByRole('group', { name: 'Three.js Free Flight simulation viewport' })
+    const native = nativeFullscreenHarness(viewport)
+    try {
+      expect(within(viewport).getByRole('button', { name: '飛行畫面全螢幕' })).toBeEnabled()
+      await act(async () => { fireEvent.click(within(viewport).getByRole('button', { name: '飛行畫面全螢幕' })) })
+      expect(frames.runtime!.getTelemetry().armed).toBe(true)
+      expect(within(viewport).getByRole('button', { name: '全螢幕解鎖 Arm' })).toBeDisabled()
+      const canvas = within(viewport).getByLabelText('Free Flight 3D scene')
+      fireEvent.keyDown(canvas, { key: 'w' })
+      expect(frames.runtime!.keyboard.getInput().pitch).toBe(1)
+      fireEvent.keyUp(canvas, { key: 'w' })
+      expect(frames.runtime!.keyboard.getInput().pitch).toBe(0)
+      fireEvent.click(within(viewport).getByRole('button', { name: '全螢幕上鎖 Disarm' }))
+      expect(frames.runtime!.getTelemetry().armed).toBe(false)
+      rerender(<FreeFlight {...props} trainingSettingsLocked trainingArmBlocked />)
+      expect(within(viewport).getByRole('button', { name: '全螢幕解鎖 Arm' })).toBeDisabled()
+      fireEvent.click(within(viewport).getByRole('button', { name: '全螢幕重設 Reset' }))
+      expect(onTrainingReset).toHaveBeenCalledOnce()
+      expect(frames.runtime!.getTelemetry().armed).toBe(false)
+    } finally { native.restore() }
+  })
+
+  it('can display a paused demonstration fullscreen without changing replay time, live state, camera or saved learning results', async () => {
+    window.localStorage.clear()
+    render(<App />)
+    frame(0)
+    fireEvent.click(screen.getByRole('button', { name: 'L18 刀旗 S 彎示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    fireEvent.change(screen.getByRole('slider'), { target: { value: 13.8 } })
+    fireEvent.click(screen.getByRole('button', { name: 'Chase' }))
+    const runtime = frames.runtime!
+    const playback = runtime.getReplayPlayback()!
+    const replay = playback.getState()
+    const live = JSON.stringify(runtime.simulation.getState())
+    const progress = screen.getByRole('region', { name: '示範進度' }).textContent
+    const saved = Object.fromEntries(Object.entries(window.localStorage))
+    const canvas = screen.getByLabelText('Free Flight 3D scene')
+    const viewport = screen.getByRole('group', { name: 'Three.js Free Flight simulation viewport' })
+    const native = nativeFullscreenHarness(viewport)
+    try {
+      expect(within(viewport).getByRole('button', { name: '飛行畫面全螢幕' })).toBeEnabled()
+      await act(async () => { fireEvent.click(within(viewport).getByRole('button', { name: '飛行畫面全螢幕' })) })
+      expect(screen.queryByRole('button', { name: '全螢幕解鎖 Arm' })).not.toBeInTheDocument()
+      expect(playback.getState()).toEqual(replay)
+      expect(runtime.getTelemetry().cameraMode).toBe('chase')
+      await act(async () => { fireEvent.click(within(viewport).getByRole('button', { name: '離開全螢幕' })) })
+      expect(playback.getState()).toEqual(replay)
+      expect(screen.getByRole('region', { name: '示範進度' }).textContent).toBe(progress)
+      expect(JSON.stringify(runtime.simulation.getState())).toBe(live)
+      expect(Object.fromEntries(Object.entries(window.localStorage))).toEqual(saved)
+      expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
+      expect(frames.runtime).toBe(runtime)
+      expect(runtime.getTelemetry().armed).toBe(false)
+    } finally { native.restore() }
+  })
+})
+
 describe('Free Flight native navigation confirmation', () => {
   it('shows the next slalom side and current passage facts while preserving the first failure below the viewport', () => {
     const props = { poller: createBrowserGamepadPoller(), profile: null, settings: createDefaultTuningSettings() }
