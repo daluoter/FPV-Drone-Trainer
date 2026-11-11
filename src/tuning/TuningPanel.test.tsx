@@ -14,12 +14,12 @@ describe('bounded tuning panel', () => {
     const onApply = vi.fn((next: TuningSettings): TuningPersistenceResult => { void next; return saved() })
     render(<TuningPanel settings={settings} onApply={onApply} />)
 
-    fireEvent.change(screen.getByRole('spinbutton', { name: 'ROLL center rate' }), { target: { value: '120' } })
-    fireEvent.click(screen.getByRole('button', { name: /apply \+ reset/i }))
+    fireEvent.change(screen.getByRole('spinbutton', { name: '橫滾 中心靈敏度' }), { target: { value: '120' } })
+    fireEvent.click(screen.getByRole('button', { name: '套用並重設飛行' }))
 
     expect(onApply).toHaveBeenCalledTimes(1)
     expect(onApply.mock.calls[0]?.[0].controller.rates.axes.roll.centerRateDegPerSec).toBe(120)
-    expect(screen.getByRole('status')).toHaveTextContent(/saved and queued/i)
+    expect(screen.getByRole('status')).toHaveTextContent('設定已儲存')
   })
 
   it('resets all tuning fields to bounded defaults instead of mutating a live runtime', () => {
@@ -40,7 +40,7 @@ describe('bounded tuning panel', () => {
     const onApply = vi.fn((next: TuningSettings): TuningPersistenceResult => { void next; return saved() })
     render(<TuningPanel settings={edited} onApply={onApply} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /reset defaults/i }))
+    fireEvent.click(screen.getByRole('button', { name: '恢復預設設定' }))
 
     expect(onApply).toHaveBeenCalledTimes(1)
     expect(onApply.mock.calls[0]?.[0].controller.rates.axes.roll.centerRateDegPerSec).toBe(70)

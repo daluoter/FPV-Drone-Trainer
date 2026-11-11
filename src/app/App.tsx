@@ -49,7 +49,7 @@ export default function App() {
   const [customSettings, setCustomSettings] = useState(initialTuningLoad.settings)
   const [tuningSettings, setTuningSettings] = useState(() => initialTuningLoad.loaded ? initialTuningLoad.settings : createTuningPreset('beginner'))
   const [tuningNotice] = useState<string | null>(() => initialTuningLoad.errors.length > 0
-    ? 'Saved tuning was unavailable or incompatible; bounded defaults are active.'
+    ? '已保存的調參設定無法讀取或版本不相容，目前使用預設設定。'
     : null)
   const [flightProfile, setFlightProfile] = useState<ControllerLabFlightHandoff['profile']>(null)
   const progressStore = useMemo(() => new TrainingProgressStore(), [])
@@ -222,7 +222,7 @@ export default function App() {
     if (trainingSettingsLocked) {
       return {
         saved: false,
-        errors: ['Tuning changes are disabled while a lesson is counting down or active. Reset or end the lesson first.'],
+        errors: ['課程倒數或練習期間無法調整參數，請先重設或結束課程。'],
       }
     }
     const result = tuningStore.save(next)

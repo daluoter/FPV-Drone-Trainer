@@ -95,7 +95,7 @@ describe('ControllerLab connection and live polling interactions', () => {
     render(<ControllerLab />)
     await act(async () => { vi.advanceTimersByTime(120) })
 
-    expect(screen.getByText(/右桿後拉，PITCH 應為正值（抬頭）；前推應為負值（低頭）/)).toBeInTheDocument()
+    expect(screen.getByText(/右桿後拉，俯仰應為正值（抬頭）；前推應為負值（低頭）/)).toBeInTheDocument()
     expect(Object.fromEntries(Object.entries(window.localStorage).map(([key, raw]) => [key, JSON.parse(raw)]))).toEqual(saved)
   })
 
@@ -106,16 +106,16 @@ describe('ControllerLab connection and live polling interactions', () => {
       vi.advanceTimersByTime(120)
     })
 
-    expect(screen.getByRole('heading', { name: /neutral stability/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /run 3-second neutral test/i })).toBeInTheDocument()
-    expect(screen.getByText(/historical pass; rerun/i)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /回中穩定性/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /開始 3 秒回中測試/ })).toBeInTheDocument()
+    expect(screen.getByText(/先前測試曾通過；請針對目前連線重新執行定時測試/)).toBeInTheDocument()
 
     pads = []
     await act(async () => {
       pollNextFrame()
       vi.advanceTimersByTime(120)
     })
-    expect(screen.getByText(/disconnected/i)).toBeInTheDocument()
+    expect(screen.getByText(/已斷線/)).toBeInTheDocument()
 
     pads = [gamepad({ timestamp: 32 })]
     await act(async () => {
@@ -124,8 +124,8 @@ describe('ControllerLab connection and live polling interactions', () => {
       pollNextFrame()
       vi.advanceTimersByTime(120)
     })
-    expect(screen.getByRole('heading', { name: /neutral stability/i })).toBeInTheDocument()
-    expect(screen.getByText(/historical pass; rerun/i)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /回中穩定性/ })).toBeInTheDocument()
+    expect(screen.getByText(/先前測試曾通過；請針對目前連線重新執行定時測試/)).toBeInTheDocument()
   })
 
   it('aborts neutral capture on disconnect and displays live filtered output', async () => {
@@ -135,14 +135,14 @@ describe('ControllerLab connection and live polling interactions', () => {
       vi.advanceTimersByTime(120)
     })
 
-    const neutralButton = screen.getByRole('button', { name: /run 3-second neutral test/i })
+    const neutralButton = screen.getByRole('button', { name: /開始 3 秒回中測試/ })
     await act(async () => {
       neutralButton.click()
       pads = []
       pollNextFrame()
       vi.advanceTimersByTime(60)
     })
-    expect(screen.getByRole('alert')).toHaveTextContent(/disconnected during capture/i)
+    expect(screen.getByRole('alert')).toHaveTextContent(/測試時控制器已斷線/)
 
     pads = [gamepad({ timestamp: 32 })]
     await act(async () => {
@@ -156,7 +156,7 @@ describe('ControllerLab connection and live polling interactions', () => {
       pollNextFrame()
       vi.advanceTimersByTime(120)
     })
-    const rollRow = screen.getByRole('row', { name: /ROLL/i })
+    const rollRow = screen.getByRole('row', { name: /橫滾/ })
     const cells = rollRow.querySelectorAll('td')
     expect(cells[3]?.textContent).not.toBe(cells[4]?.textContent)
   })

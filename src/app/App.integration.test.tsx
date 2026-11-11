@@ -494,7 +494,7 @@ describe('integrated training/runtime UI boundaries', () => {
     if (!runtime) throw new Error('Mock runtime was not created')
 
     fireEvent.click(within(training).getByRole('button', { name: '開始課程' }))
-    expect(screen.getByRole('button', { name: /apply \+ reset/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '套用並重設飛行' })).toBeDisabled()
     expect(screen.getByRole('button', { name: /^Arm$/ })).toBeDisabled()
     act(() => emitCountdown(runtime))
     fireEvent.click(screen.getByRole('button', { name: /^Arm$/ }))
@@ -510,7 +510,7 @@ describe('integrated training/runtime UI boundaries', () => {
     fireEvent.change(within(training).getByLabelText('選擇課程'), { target: { value: 'coordinated-turn' } })
     expect(within(training).getByRole('heading', { level: 3, name: '協調轉彎' })).toBeInTheDocument()
     fireEvent.click(within(training).getByRole('button', { name: '開始課程' }))
-    expect(screen.getByRole('button', { name: /apply \+ reset/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '套用並重設飛行' })).toBeDisabled()
     expect(screen.getByRole('button', { name: /^Arm$/ })).toBeDisabled()
     act(() => emitCountdown(runtime))
     fireEvent.click(screen.getByRole('button', { name: /^Arm$/ }))
@@ -535,7 +535,7 @@ describe('integrated training/runtime UI boundaries', () => {
     expect(screen.getByText('PLAYBACK / playing ghost')).toBeInTheDocument()
     expect(persistedAttempts('coordinated-turn')).toBe(1)
 
-    const apply = screen.getByRole('button', { name: /apply \+ reset/i })
+    const apply = screen.getByRole('button', { name: '套用並重設飛行' })
     expect(apply).toBeDisabled()
     expect(runtime.reconfigureCalls).toBe(0)
     fireEvent.click(screen.getByRole('button', { name: '結束回放' }))

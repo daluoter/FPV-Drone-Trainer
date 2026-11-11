@@ -115,7 +115,7 @@ describe('beginner flight school', () => {
     fireEvent.click(screen.getByRole('button', { name: '開始學飛' }))
     expect(screen.getByLabelText('選擇課程')).toHaveValue('takeoff')
     fireEvent.click(screen.getByRole('button', { name: '設備與校正' }))
-    expect(screen.getByRole('heading', { name: /make the transmitter boring/i })).toBeVisible()
+    expect(screen.getByRole('heading', { name: '先校正遙控器，再開始飛行。' })).toBeVisible()
   })
 
   it('resumes a saved lesson and knowledge badge without claiming flight mastery', () => {
