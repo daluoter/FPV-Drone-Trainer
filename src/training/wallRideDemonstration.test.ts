@@ -6,7 +6,7 @@ import { GROUND_CONTACT_SLOP_M } from '../simulation/dynamics'
 import { findSweptObstacleHit } from '../simulation/obstacles'
 import type { TuningSettings } from '../tuning/config'
 import { createTuningPreset } from '../tuning/presets'
-import { createWallRide, WALL_RIDE_DISTANCE_M, WALL_RIDE_REFERENCE_IDS, WALL_RIDE_SECONDS } from '../world/wallRide'
+import { createWallRide, WALL_RIDE_DISTANCE_M, WALL_RIDE_REFERENCE_IDS, WALL_RIDE_SECONDS, WALL_RIDE_TARGET_HEIGHT_M } from '../world/wallRide'
 import { createDemonstrationProgress, demonstrationProgressAt } from './demonstrationProgress'
 import { createTeachingDemonstration, teachingWallRidePhaseAt } from './demonstrations'
 import { createTrainingFieldAnchors } from './field'
@@ -53,7 +53,7 @@ describe('actual non-contact wall-ride teaching recording', () => {
     const demo = createTeachingDemonstration(settings, 'wall-ride')
     const { launch } = createTrainingFieldAnchors(settings.drone)
     const wall = createWallRide(launch, settings.drone.ground.heightM)
-    expect(demo).toMatchObject({ kind: 'wall-ride', lessonId: 'wall-ride', rulesVersion: 6, physicsVersion: 1, source: 'simulated' })
+    expect(demo).toMatchObject({ kind: 'wall-ride', lessonId: 'wall-ride', rulesVersion: 7, physicsVersion: 1, source: 'simulated' })
     expect(demo.title).toContain('L20 騎牆')
     expect(demo.recording.samples[0].positionM).toEqual(launch)
     expect(demo.recording).toMatchObject({ capacity: 4_000, decimation: 4, droppedSamples: 0 })
@@ -66,11 +66,15 @@ describe('actual non-contact wall-ride teaching recording', () => {
     expect(demo.cues.every((cue) => retainedTimes.has(cue.timeSeconds))).toBe(true)
     expect(demo.cues.at(-1)).toMatchObject({ timeSeconds: demo.recording.durationSeconds, wallRidePhase: 8,
       targetReferenceId: 'wall-ride-exit' })
+    const rideCompletedAt = demo.cues.find((cue) => cue.wallRidePhase === 6)!.timeSeconds
     const banked = demo.recording.samples.filter((pose) => {
       const up = rotateVectorByQuaternion(pose.orientation, { x: 0, y: 1, z: 0 })
-      return -up.x >= Math.cos(45 * Math.PI / 180) && pose.positionM.z <= wall.nearZM
+      return -up.x >= Math.cos(45 * Math.PI / 180) && pose.positionM.z <= wall.nearZM && pose.timestampSeconds <= rideCompletedAt
     })
-    expect(banked.length).toBeGreaterThan(20)
+    expect(banked.length).toBeGreaterThan(100)
+    expect(banked[0].positionM.y - settings.drone.ground.heightM).toBeGreaterThan(WALL_RIDE_TARGET_HEIGHT_M - 1)
+    const afterBank = demo.recording.samples.filter((pose) => pose.timestampSeconds >= banked[0].timestampSeconds)
+    expect(Math.min(...afterBank.map((pose) => pose.positionM.y - settings.drone.ground.heightM))).toBeGreaterThan(10)
     expect(banked[0].positionM.z - banked.at(-1)!.positionM.z).toBeGreaterThanOrEqual(WALL_RIDE_DISTANCE_M)
     expect(banked.at(-1)!.timestampSeconds - banked[0].timestampSeconds).toBeGreaterThanOrEqual(WALL_RIDE_SECONDS)
     expect(banked[0].positionM.y - banked.at(-1)!.positionM.y).toBeGreaterThan(1)

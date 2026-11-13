@@ -85,16 +85,17 @@ describe('non-contact wall ride field', () => {
     const scene = createFlightScene()
     try {
       scene.setLessonTarget('wall-ride')
+      const geometry = createWallRide(scene.getReference('training-launch')!.positionM, 0)
       const wall = scene.scene.getObjectByName('wall-ride-wall')!
       const wallPosition = wall.position.clone()
       const aircraftPosition = scene.drone.position.clone()
       const aircraftOrientation = scene.drone.quaternion.clone()
       const accent = scene.scene.getObjectByName('wall-ride-stage-guidance')!
       scene.setWallRideStage(4)
-      expect(accent.position.toArray()).toEqual([7, 14, -18])
+      expect(accent.position.toArray()).toEqual([geometry.rideStartM.x, geometry.rideStartM.y, geometry.rideStartM.z])
       expect(scene.scene.getObjectByName('wall-ride-belly-direction')!.visible).toBe(true)
       scene.setWallRideStage(6)
-      expect(accent.position.toArray()).toEqual([2, 10, -38])
+      expect(accent.position.toArray()).toEqual([geometry.exitM.x, geometry.exitM.y, geometry.exitM.z])
       expect(scene.scene.getObjectByName('wall-ride-belly-direction')!.visible).toBe(false)
       scene.setWallRideStage(8)
       const ring = scene.scene.getObjectByName('wall-ride-stage-reference') as THREE.LineLoop<THREE.BufferGeometry, THREE.LineBasicMaterial>

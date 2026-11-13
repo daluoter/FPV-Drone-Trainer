@@ -265,6 +265,20 @@ def exercise_viewport_fullscreen(page, artifact_dir: Path, checks: list[str], re
 
 def exercise_wall_ride_course(page, artifact_dir: Path, checks: list[str], report: dict, screenshot: bool = True) -> None:
     """Observe the physical L20 flight and its independent playback through public controls."""
+    wall_source = (PROJECT_ROOT / "src/world/wallRide.ts").read_text()
+
+    def wall_parameter(name: str) -> float:
+        match = re.search(rf"^export const {re.escape(name)} = (\d+(?:\.\d+)?)$", wall_source, re.MULTILINE)
+        if not match:
+            raise AssertionError(f"Missing numeric L20 field parameter: {name}")
+        return float(match.group(1))
+
+    target_height = wall_parameter("WALL_RIDE_TARGET_HEIGHT_M")
+    target_distance = wall_parameter("WALL_RIDE_DISTANCE_M")
+    target_seconds = wall_parameter("WALL_RIDE_SECONDS")
+    max_height = wall_parameter("WALL_RIDE_MAX_HEIGHT_M")
+    if target_height < 40 or target_distance < 16 or target_seconds < 2:
+        raise AssertionError("L20 must retain its raised entry and longer real wall-travel requirements.")
     flight = page.locator("#free-flight")
     training = page.locator("#training")
     lesson = page.locator("#school-lesson")
@@ -325,26 +339,33 @@ def exercise_wall_ride_course(page, artifact_dir: Path, checks: list[str], repor
     checks.append("L20 supported-ground recording, explicit live arm lock, half-speed and eight independent teaching steps")
 
     belly = chapter(5, 5)
-    if not (.8 <= belly["gap_m"] <= 5.05 and 0 <= belly["belly_angle_degrees"] <= 45.1 and 3 <= belly["height_m"] <= 24.1):
+    belly_time = float(timeline.input_value())
+    if not (.8 <= belly["gap_m"] <= 5.05 and 0 <= belly["belly_angle_degrees"] <= 45.1
+            and target_height - 2 <= belly["height_m"] <= max_height + .1):
         raise AssertionError(f"L20 belly-facing chapter lacks the actual non-contact wall posture: {belly}")
     if screenshot:
         viewport.screenshot(path=str(artifact_dir / "l20-belly-facing-fpv.png"))
     ride = chapter(6, 6)
-    if not (.8 <= ride["gap_m"] <= 5.05 and ride["belly_angle_degrees"] <= 45.1 and ride["distance_m"] >= 5.95 and ride["seconds"] >= .295):
+    ride_time = float(timeline.input_value())
+    if not (.8 <= ride["gap_m"] <= 5.05 and ride["belly_angle_degrees"] <= 45.1
+            and ride["distance_m"] >= target_distance - .05 and ride["seconds"] >= target_seconds - .005):
         raise AssertionError(f"L20 wall-travel chapter lacks continuous non-contact posture and distance/time proof: {ride}")
-    if belly["z_m"] - ride["z_m"] < 5.5 or ride["forward_speed_mps"] <= 0:
+    if (belly["z_m"] - ride["z_m"] < target_distance - .5 or ride["forward_speed_mps"] <= 0
+            or ride_time - belly_time < target_seconds - .03 or ride["height_m"] < 5):
         raise AssertionError(f"L20 motion did not progress forward along the real wall: {belly}, {ride}")
     if screenshot:
         viewport.screenshot(path=str(artifact_dir / "l20-along-wall-fpv.png"))
     leaving = chapter(7, 7)
-    if leaving["gap_m"] < 5.45 or leaving["gap_m"] <= ride["gap_m"] or leaving["distance_m"] < 5.95:
+    if (leaving["gap_m"] < 5.45 or leaving["gap_m"] <= ride["gap_m"]
+            or leaving["distance_m"] < target_distance - .05 or leaving["height_m"] < 5):
         raise AssertionError(f"L20 departure did not really gain clearance from the wall: {leaving}")
     timeline.press("End")
     expect(progress).to_contain_text("8 / 8 個示範步驟完成")
     expect(flight.get_by_test_id("wall-ride-phase")).to_have_text("8 / 8 步")
     end = measured()
     duration = float(timeline.input_value())
-    if end["gap_m"] < 5.45 or end["distance_m"] < 5.95 or end["seconds"] < .295 or end["height_m"] < 1 or not (5 < duration <= 100):
+    if (end["gap_m"] < 5.45 or end["distance_m"] < target_distance - .05 or end["seconds"] < target_seconds - .005
+            or end["height_m"] < 5 or not (5 < duration <= 100)):
         raise AssertionError(f"L20 completion lacks retained real wall-travel, departure and airborne recovery: {end}, duration {duration}")
     held_position = position.inner_text()
     page.wait_for_timeout(180)
@@ -352,10 +373,10 @@ def exercise_wall_ride_course(page, artifact_dir: Path, checks: list[str], repor
         raise AssertionError("L20 paused completion changed its aircraft, observations or playback time.")
     if screenshot:
         viewport.screenshot(path=str(artifact_dir / "l20-complete-fpv.png"))
-    checks.append("L20 actual belly-to-wall posture, six metres of forward non-contact travel, outward departure and eight-step airborne completion")
+    checks.append("L20 raised belly-to-wall entry, at least sixteen metres and two real seconds of forward non-contact travel, outward departure and airborne recovery clearance")
 
     restored_belly = chapter(5, 5)
-    if restored_belly != belly or restored_belly["distance_m"] >= 5.95:
+    if restored_belly != belly or restored_belly["distance_m"] >= target_distance - .05:
         raise AssertionError("L20 backward seek retained later travel or departure proof.")
     held_time = float(timeline.input_value())
     held_position = position.inner_text()
@@ -453,14 +474,17 @@ def exercise_wall_ride_course(page, artifact_dir: Path, checks: list[str], repor
     expect(training.locator(".school-phase")).to_have_text("練習進行中")
     page.wait_for_timeout(250)
     expect(flight.locator(".flight-state-badge")).not_to_contain_text("CRASHED")
-    expect(flight.get_by_test_id("wall-ride-distance")).to_have_text("0.0 / 6 m")
+    expect(flight.get_by_test_id("wall-ride-distance")).to_have_text(f"0.0 / {target_distance:g} m")
+    expect(flight.get_by_test_id("wall-ride-seconds")).to_have_text(f"0.00 / {target_seconds:g} s")
     if screenshot:
         viewport.screenshot(path=str(artifact_dir / "l20-live-ground.png"))
     training.get_by_role("button", name="停止練習", exact=True).click()
     expect(training.locator(".school-phase")).to_have_text("準備選課")
     developer.uncheck()
     report["wall_ride_course"] = {"home": home, "belly": belly, "ride": ride, "leaving": leaving, "end": end,
-        "duration_seconds": duration, "live_ground_position": coords}
+        "duration_seconds": duration, "live_ground_position": coords, "belly_time_seconds": belly_time,
+        "ride_time_seconds": ride_time, "target_height_m": target_height, "target_distance_m": target_distance,
+        "target_seconds": target_seconds}
     checks.append("L20 live practice uses actual supported ground, explicit Arm and safe zero-throttle preparation")
 
 
@@ -706,7 +730,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if response is None or response.status != 200:
                 raise AssertionError("The production entry page did not return HTTP 200.")
             expect(page).to_have_title("FPV Drone Trainer")
-            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.11.13.1")
+            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.11.13.2")
             report["release"] = page.get_by_test_id("app-release").inner_text()
 
             asset_urls = page.locator("script[src], link[rel='stylesheet'][href]").evaluate_all(

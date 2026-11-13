@@ -378,7 +378,7 @@ describe('integrated training/runtime UI boundaries', () => {
         .map(([, raw]) => JSON.parse(raw) as { context?: { rulesVersion?: number }; progress?: { lessons?: Record<string, { attempts?: number }> } })
         .filter((saved) => (saved.progress?.lessons?.['wall-ride']?.attempts ?? 0) > 0)
         .map((saved) => saved.context?.rulesVersion)
-      expect(savedRules).toEqual([6])
+      expect(savedRules).toEqual([7])
       expect(persistedAttempts('slalom')).toBe(0)
       expect(persistedAttempts('gravity-gate')).toBe(0)
     }

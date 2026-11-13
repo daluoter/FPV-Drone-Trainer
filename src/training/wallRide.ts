@@ -36,7 +36,7 @@ function hint(metrics: Readonly<Record<string, number>>): string {
   if (metrics.wallRidePhase === 2) return '靠近右側牆面前端的藍色進場區，保留間隙並沿牆向前飛。'
   if (metrics.wallRidePhase === 3) return '沿牆建立實際前進路線；先向前移動 2 m，再側傾進入騎牆。'
   if (metrics.wallRidePhase === 4) return '讓機腹朝向右側牆面；姿態、距牆與實際向前路線共同判定，不要求固定 90°。'
-  if (metrics.wallRidePhase === 5) return '保持間隙，機腹朝牆連續向前掠飛至少 6 m／0.3 秒；容許下沉，不必精準等高。'
+  if (metrics.wallRidePhase === 5) return `保持間隙，機腹朝牆連續向前掠飛至少 ${WALL_RIDE_DISTANCE_M} m／${WALL_RIDE_SECONDS} 秒；容許下沉，不必精準等高。`
   if (metrics.wallRidePhase === 6) return '騎牆路段已完成；回正並向牆外飛離，擴大距牆間隙。'
   return '已離牆；修回正飛，減緩升降與旋轉，確認 0.2 秒即可，不必停住或降落。'
 }
@@ -209,11 +209,11 @@ export const WALL_RIDE_LESSON: LessonDefinition = {
   setup: { requiresDisarmed: true, resetSimulation: true, sceneReferenceIds: ['training-launch', 'landing-surface', ...WALL_RIDE_REFERENCE_IDS], spawnOrientation: { x: 0, y: 0, z: 0, w: 1 } },
   checkpoints: [
     { id: 'wall-ride-ground', title: '地面開始', description: '起飛區接地，低油門明確解鎖。' },
-    { id: 'wall-ride-liftoff', title: '自行起飛', description: '自行取得高度，建議約 14 m。' },
+    { id: 'wall-ride-liftoff', title: '自行起飛', description: `自行取得高度，建議約 ${WALL_RIDE_TARGET_HEIGHT_M} m，保留較長側傾段的下沉及改出空間。` },
     { id: 'wall-ride-approach', title: '靠近牆面前端', description: '由藍色進場區靠近，保留間隙。' },
     { id: 'wall-ride-forward-entry', title: '建立沿牆前進', description: '進場後實際向前移動至少 2 m，不用停住。' },
-    { id: 'wall-ride-belly-facing', title: '側傾讓機腹朝牆', description: '機腹朝右側牆面，準備短暫掠飛。' },
-    { id: 'wall-ride-along-wall', title: '保留間隙沿牆前進', description: '連續沿牆至少 6 m、0.3 秒，不碰牆。' },
+    { id: 'wall-ride-belly-facing', title: '側傾讓機腹朝牆', description: '機腹朝右側牆面，準備沿牆持續飛行。' },
+    { id: 'wall-ride-along-wall', title: '保留間隙沿牆前進', description: `連續沿牆至少 ${WALL_RIDE_DISTANCE_M} m、${WALL_RIDE_SECONDS} 秒，不碰牆。` },
     { id: 'wall-ride-leave', title: '向外離開牆面', description: '擴大距牆間隙，離開騎牆路段。' },
     { id: 'wall-ride-recovered', title: '回正並恢復控制', description: '修回正飛，減緩升降與旋轉確認 0.2 秒。' },
   ],
@@ -221,11 +221,11 @@ export const WALL_RIDE_LESSON: LessonDefinition = {
   failure: { title: '騎牆尚未完成', description: '碰牆或墜毀需重設，一般路段中斷可回前端重新進場。', criteria: ['不以原地側傾代替沿牆飛行', '不能把正飛平行牆面當作騎牆', '不能拼接中斷前後距離與時間'] },
   scoring: { maxScore: 100, minimumPassingScore: 70, minimumActiveSeconds: 0,
     metricLabels: ['wallRideGapM', 'wallRideBellyAngleDegrees', 'wallRideDistanceM', 'wallRideSeconds', 'wallRideForwardSpeedMps', 'altitudeM'] },
-  hints: ['先自行起飛至約 14 m，在右側牆前端帶速進場，機腹朝牆並保留 0.8～5 m 間隙，沿牆前飛至少 6 m 後回正離牆。'], evaluator: wallRideEvaluator,
+  hints: [`先自行起飛至約 ${WALL_RIDE_TARGET_HEIGHT_M} m，在右側牆前端帶速進場，機腹朝牆並保留 ${WALL_RIDE_MIN_GAP_M}～${WALL_RIDE_MAX_GAP_M} m 間隙，沿牆前飛至少 ${WALL_RIDE_DISTANCE_M} m／${WALL_RIDE_SECONDS} 秒後回正離牆。`], evaluator: wallRideEvaluator,
 }
 export const WALL_RIDE_LEARNING_CONTENT: LessonLearningContent = {
   code: 'L20', title: '騎牆', level: '近障礙花飛', prerequisiteIds: ['direction-control', 'basic-recovery', 'full-roll', 'orbit'],
   objectives: ['理解機腹與牆面相對方向，以及短暫下沉與改出空間。', '在實體牆旁完成非接觸的沿牆飛行。'],
-  steps: ['從地面自行起飛至約 14 m，先看清右側牆面、藍色進場及外側改出空間。', '靠近牆面前端，先沿牆建立前進動量，再側傾使機腹朝牆。', '保留 0.8～5 m 間隙，在離地 3～24 m 內沿牆連續飛過至少 6 m／0.3 秒；機腹與朝牆方向偏差 45° 內即可，不要求固定側立 90°。', '回正並向外離牆，再減緩升降與旋轉，不要求停住或降落。'],
+  steps: [`從地面自行起飛至約 ${WALL_RIDE_TARGET_HEIGHT_M} m，保留較長騎牆段的下沉空間，先看清右側牆面、藍色進場及外側改出空間。`, '靠近牆面前端，先沿牆建立前進動量，再側傾使機腹朝牆。', `保留 ${WALL_RIDE_MIN_GAP_M}～${WALL_RIDE_MAX_GAP_M} m 間隙，在離地 ${WALL_RIDE_MIN_HEIGHT_M}～${WALL_RIDE_MAX_HEIGHT_M} m 內沿牆連續飛過至少 ${WALL_RIDE_DISTANCE_M} m／${WALL_RIDE_SECONDS} 秒；機腹與朝牆方向偏差 ${WALL_RIDE_MAX_BELLY_ANGLE_DEGREES}° 內即可，不要求固定側立 90°。`, '回正並向外離牆，再減緩升降與旋轉，不要求停住或降落。'],
   commonMistakes: ['保持正飛沿牆直飛，沒有讓機腹朝向牆面。', '只把機頭轉向牆，或原地側傾卻沒有沿牆移動。', '太貼牆，讓機體或槳碰到牆面。', '側傾後忽略高度，過晚回正改出。'],
 }

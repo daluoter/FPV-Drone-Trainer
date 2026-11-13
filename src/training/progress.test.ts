@@ -8,9 +8,10 @@ import {
   validateTrainingProgress,
 } from './progress'
 import type { TrainingResult, TrainingStorageLike } from './types'
-import { fingerprintTrainingSettings, trainingAttemptContextKey, type TrainingAttemptContext } from './attempt'
+import { fingerprintTrainingSettings, trainingAttemptContextKey, trainingRulesVersionForLesson, type TrainingAttemptContext } from './attempt'
 import { lessonLearningContent } from './catalog'
 import { LEARNING_LESSONS } from './lessons'
+import { WALL_RIDE_DISTANCE_M, WALL_RIDE_SECONDS } from '../world/wallRide'
 
 class MemoryStorage implements TrainingStorageLike {
   private readonly values = new Map<string, string>()
@@ -63,11 +64,12 @@ function context(overrides: Partial<TrainingAttemptContext> = {}): TrainingAttem
 describe('training progress persistence', () => {
   it.each<{ lessonId: string; code: string; checkpointCount: number; successMetrics: Readonly<Record<string, number>> }>([
     { lessonId: 'slalom', code: 'L18', checkpointCount: 10, successMetrics: { slalomPhase: 10, slalomFlagsPassed: 6 } },
-    { lessonId: 'wall-ride', code: 'L20', checkpointCount: 8, successMetrics: { wallRidePhase: 8, wallRideDistanceM: 6 } },
+    { lessonId: 'wall-ride', code: 'L20', checkpointCount: 8,
+      successMetrics: { wallRidePhase: 8, wallRideDistanceM: WALL_RIDE_DISTANCE_M, wallRideSeconds: WALL_RIDE_SECONDS } },
   ])('adds $code independently while preserving established rules, raw history and attempt conditions', ({ lessonId, checkpointCount, successMetrics }) => {
     const storage = new MemoryStorage()
     const store = new TrainingProgressStore(storage)
-    const current = context({ rulesVersion: 6, mode: 'practice' })
+    const current = context({ rulesVersion: trainingRulesVersionForLesson(lessonId), mode: 'practice' })
     const historicalScopes = [
       { scope: { ...current, rulesVersion: 4 } as const, lessonId: 'takeoff' },
       { scope: { ...current, rulesVersion: 5 } as const, lessonId: 'wide-gate' },
@@ -77,9 +79,10 @@ describe('training progress persistence', () => {
       expect(store.recordResult(result({ lessonId, sessionId: `${lessonId}:accepted`, attemptContext: scope })).saved).toBe(true)
     }
     for (const lessonId of ['reverse-orbit', 'backward-flight']) {
-      expect(store.recordResult(result({ lessonId, sessionId: `${lessonId}:existing`, attemptContext: current })).saved).toBe(true)
+      expect(store.recordResult(result({ lessonId, sessionId: `${lessonId}:existing`, attemptContext: { ...current, rulesVersion: 6 } })).saved).toBe(true)
     }
-    const historicalRaw = historicalScopes.map(({ scope }) => ({ key: trainingAttemptContextKey(scope),
+    const historicalRaw = historicalScopes.filter(({ scope }) => trainingAttemptContextKey(scope) !== trainingAttemptContextKey(current))
+      .map(({ scope }) => ({ key: trainingAttemptContextKey(scope),
       raw: storage.getItem(trainingAttemptContextKey(scope)) }))
     const currentKey = trainingAttemptContextKey(current)
     const originalCurrentRaw = storage.getItem(currentKey)
@@ -98,7 +101,7 @@ describe('training progress persistence', () => {
       completedCheckpoints: checkpointCount, totalCheckpoints: checkpointCount,
       metrics: successMetrics })).saved).toBe(true)
     // The app may request another course's current rule version. Loading still
-    // selects each new lesson's own rule-6 result and L19's unchanged rule-7 result.
+    // selects L18's rule-6 and extended L20's rule-7 results independently.
     const reloaded = new TrainingProgressStore(storage).loadCurrent({ ...current, rulesVersion: 7 })
     expect(reloaded.errors).toEqual([])
     expect(reloaded.progress.lessons[lessonId]).toMatchObject({ completed: true, attempts: 2,
@@ -115,6 +118,51 @@ describe('training progress persistence', () => {
       { ...current, presetId: 'standard' as const },
       { ...current, settingsFingerprint: fingerprintTrainingSettings({ rates: 450, camera: 20 }) },
     ]) expect(new TrainingProgressStore(storage).loadCurrent(variant).progress.lessons[lessonId]).toEqual(empty)
+  })
+
+  it('keeps short rule-6 L20 completion historical while the longer rule-7 wall ride starts separately', () => {
+    const storage = new MemoryStorage()
+    const store = new TrainingProgressStore(storage)
+    const previous = context({ rulesVersion: 6, mode: 'practice' })
+    const revised = { ...previous, rulesVersion: 7 } as const
+    expect(store.recordResult(result({ lessonId: 'wall-ride', sessionId: 'wall-ride:short', attemptContext: previous,
+      completedCheckpoints: 8, totalCheckpoints: 8, metrics: { wallRidePhase: 8, wallRideDistanceM: 6, wallRideSeconds: 0.8 } })).saved).toBe(true)
+    expect(store.recordResult(result({ lessonId: 'slalom', sessionId: 'slalom:accepted', attemptContext: previous })).saved).toBe(true)
+    expect(store.recordResult(result({ lessonId: 'gravity-gate', sessionId: 'gravity-gate:accepted', attemptContext: revised })).saved).toBe(true)
+    const previousKey = trainingAttemptContextKey(previous)
+    const revisedKey = trainingAttemptContextKey(revised)
+    const previousRaw = storage.getItem(previousKey)
+    const revisedRaw = storage.getItem(revisedKey)
+    const historical = store.load(previous).progress.lessons['wall-ride']
+    const empty = { recent: null, best: null, completed: false, attempts: 0 }
+    const current = new TrainingProgressStore(storage).loadCurrent(previous)
+    expect(current.errors).toEqual([])
+    expect(current.progress.lessons['wall-ride']).toEqual(empty)
+    expect(current.progress.lessons.slalom).toMatchObject({ completed: true, best: { sessionId: 'slalom:accepted' } })
+    expect(current.progress.lessons['gravity-gate']).toMatchObject({ completed: true, best: { sessionId: 'gravity-gate:accepted' } })
+    expect(storage.getItem(previousKey)).toBe(previousRaw)
+    expect(storage.getItem(revisedKey)).toBe(revisedRaw)
+
+    expect(store.recordResult(result({ lessonId: 'wall-ride', sessionId: 'wall-ride:long-retry', attemptContext: revised,
+      outcome: 'FAILED', score: 0, completedCheckpoints: 5, totalCheckpoints: 8 })).saved).toBe(true)
+    expect(store.loadCurrent(revised).progress.lessons['wall-ride']).toMatchObject({ completed: false, attempts: 1, best: null })
+    expect(store.recordResult(result({ lessonId: 'wall-ride', sessionId: 'wall-ride:long-passed', attemptContext: revised,
+      completedCheckpoints: 8, totalCheckpoints: 8,
+      metrics: { wallRidePhase: 8, wallRideDistanceM: WALL_RIDE_DISTANCE_M, wallRideSeconds: WALL_RIDE_SECONDS } })).saved).toBe(true)
+    const reloaded = new TrainingProgressStore(storage).loadCurrent(previous)
+    expect(reloaded.errors).toEqual([])
+    expect(reloaded.progress.lessons['wall-ride']).toMatchObject({ completed: true, attempts: 2,
+      recent: { sessionId: 'wall-ride:long-passed' }, best: { sessionId: 'wall-ride:long-passed' } })
+    expect(reloaded.progress.lessons.slalom).toEqual(current.progress.lessons.slalom)
+    expect(reloaded.progress.lessons['gravity-gate']).toEqual(current.progress.lessons['gravity-gate'])
+    expect(new TrainingProgressStore(storage).load(previous).progress.lessons['wall-ride']).toEqual(historical)
+    expect(storage.getItem(previousKey)).toBe(previousRaw)
+    for (const variant of [
+      { ...revised, mode: 'challenge' as const },
+      { ...revised, inputSource: 'keyboard' as const },
+      { ...revised, presetId: 'standard' as const },
+      { ...revised, settingsFingerprint: fingerprintTrainingSettings({ rates: 450, camera: 20 }) },
+    ]) expect(new TrainingProgressStore(storage).loadCurrent(variant).progress.lessons['wall-ride']).toEqual(empty)
   })
 
   it('keeps rule-6 L19 records historical while rule-7 gravity-gate progress starts separately', () => {

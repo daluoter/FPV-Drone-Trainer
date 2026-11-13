@@ -11,6 +11,7 @@ import type { FlightRuntime, FlightRuntimeOptions } from '../runtime'
 import { createTrainingMachineState } from '../training/machine'
 import { measureBasicRecoveryMotion } from '../training/basicRecovery'
 import type { TrainingMachineState, TrainingResult } from '../training/types'
+import { WALL_RIDE_DISTANCE_M, WALL_RIDE_SECONDS, WALL_RIDE_TARGET_HEIGHT_M } from '../world/wallRide'
 
 const frames = vi.hoisted(() => ({ now: 0, next: null as ((time: number) => void) | null, runtime: null as FlightRuntime | null, renderer: null as FlightRenderer | null }))
 vi.mock('../runtime', async (importOriginal) => {
@@ -461,7 +462,8 @@ describe('Free Flight native navigation confirmation', () => {
     expect(screen.getByTestId('wall-ride-phase')).toHaveTextContent('0 / 8 步')
     expect(screen.getByTestId('wall-ride-gap')).toHaveTextContent('—')
     expect(screen.getByTestId('wall-ride-belly-angle')).toHaveTextContent('—')
-    expect(screen.getByTestId('wall-ride-distance')).toHaveTextContent('0.0 / 6 m')
+    expect(screen.getByTestId('wall-ride-distance')).toHaveTextContent(`0.0 / ${WALL_RIDE_DISTANCE_M} m`)
+    expect(screen.getByTestId('wall-ride-seconds')).toHaveTextContent(`0.00 / ${WALL_RIDE_SECONDS} s`)
     const observed: TrainingMachineState = { ...base, phase: 'ACTIVE', lastEvaluation: { status: 'continue', metrics: {
       wallRidePhase: 5, wallRideGapM: 2.4, wallRideBellyAngleDegrees: 18,
       wallRideDistanceM: 3.2, wallRideSeconds: 0.22, wallRideForwardSpeedMps: 8.4,
@@ -470,8 +472,8 @@ describe('Free Flight native navigation confirmation', () => {
     expect(screen.getByTestId('wall-ride-phase')).toHaveTextContent('5 / 8 步')
     expect(screen.getByTestId('wall-ride-gap')).toHaveTextContent('2.4 m')
     expect(screen.getByTestId('wall-ride-belly-angle')).toHaveTextContent('18°')
-    expect(screen.getByTestId('wall-ride-distance')).toHaveTextContent('3.2 / 6 m')
-    expect(screen.getByTestId('wall-ride-seconds')).toHaveTextContent('0.22 / 0.3 s')
+    expect(screen.getByTestId('wall-ride-distance')).toHaveTextContent(`3.2 / ${WALL_RIDE_DISTANCE_M} m`)
+    expect(screen.getByTestId('wall-ride-seconds')).toHaveTextContent(`0.22 / ${WALL_RIDE_SECONDS} s`)
     expect(screen.getByTestId('wall-ride-speed')).toHaveTextContent('8.4 m/s')
     rerender(<FreeFlight {...props} trainingState={{ ...observed, recoveryInProgress: true,
       lastRecovery: { timestampSeconds: 8, message: '機腹沒有朝牆：當時對牆角 82°、間隙 2.4 m',
@@ -509,8 +511,8 @@ describe('Free Flight native navigation confirmation', () => {
     fireEvent.change(screen.getByRole('slider'), { target: { value: playback.durationSeconds } })
     expect(progress).toHaveTextContent('8 / 8 個示範步驟完成')
     expect(screen.getByTestId('wall-ride-phase')).toHaveTextContent('8 / 8 步')
-    expect(Number.parseFloat(screen.getByTestId('wall-ride-distance').textContent!)).toBeGreaterThanOrEqual(6)
-    expect(Number.parseFloat(screen.getByTestId('wall-ride-seconds').textContent!)).toBeGreaterThanOrEqual(0.3)
+    expect(Number.parseFloat(screen.getByTestId('wall-ride-distance').textContent!)).toBeGreaterThanOrEqual(WALL_RIDE_DISTANCE_M)
+    expect(Number.parseFloat(screen.getByTestId('wall-ride-seconds').textContent!)).toBeGreaterThanOrEqual(WALL_RIDE_SECONDS)
     expect(Number.parseFloat(screen.getByTestId('wall-ride-gap').textContent!)).toBeGreaterThanOrEqual(5.5)
     const held = hud().textContent
     const pausedTime = playback.getState().currentTimeSeconds
@@ -523,12 +525,16 @@ describe('Free Flight native navigation confirmation', () => {
     expect(hud().textContent).toBe(held)
     expect(JSON.stringify(frames.runtime!.simulation.getState())).toBe(live)
     expect(frames.runtime!.simulation.getStaticObstacles()).toEqual(physicalWall)
+    fireEvent.click(chapters[5])
+    expect(progress).toHaveTextContent('5 / 8 個示範步驟完成')
+    expect(Number.parseFloat(screen.getByTestId('flight-altitude').textContent!)).toBeGreaterThan(WALL_RIDE_TARGET_HEIGHT_M - 2)
+    expect(Number.parseFloat(screen.getByTestId('wall-ride-distance').textContent!)).toBeLessThan(WALL_RIDE_DISTANCE_M)
     fireEvent.click(chapters[4])
     expect(progress).toHaveTextContent('4 / 8 個示範步驟完成')
     expect(Number.parseFloat(screen.getByTestId('wall-ride-distance').textContent!)).toBe(0)
     fireEvent.change(screen.getByRole('slider'), { target: { value: 0 } })
     expect(screen.getByTestId('flight-altitude')).toHaveTextContent('0.0 m')
-    expect(screen.getByTestId('wall-ride-distance')).toHaveTextContent('0.0 / 6 m')
+    expect(screen.getByTestId('wall-ride-distance')).toHaveTextContent(`0.0 / ${WALL_RIDE_DISTANCE_M} m`)
     fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
     expect(screen.getByRole('list', { name: '本課步驟' }).textContent).toBe(liveSteps)
     expect(hud()).toHaveTextContent('即時騎牆數值')

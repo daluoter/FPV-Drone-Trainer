@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createInitialDroneState, DEFAULT_DRONE_CONFIG, DRONE_GROUND_CLEARANCE_M, droneGroundSupport } from '../drone'
 import { integrateBodyAngularVelocity, quaternionFromRotationVector, type Quaternion } from '../math/quaternion'
 import type { Vector3 } from '../math/vector'
-import { createWallRide, WALL_RIDE_REFERENCE_IDS } from '../world/wallRide'
+import { createWallRide, WALL_RIDE_REFERENCE_IDS, WALL_RIDE_DISTANCE_M, WALL_RIDE_SECONDS, WALL_RIDE_TARGET_HEIGHT_M, WALL_RIDE_MAX_HEIGHT_M } from '../world/wallRide'
 import { createTrainingFieldAnchors } from './field'
 import { TrainingSession } from './machine'
 import { WALL_RIDE_LEARNING_CONTENT, WALL_RIDE_LESSON, WALL_RIDE_PHASE_IDS, wallRideEvaluator } from './wallRide'
@@ -95,7 +95,7 @@ class Observer {
 }
 function airborne(config = DEFAULT_DRONE_CONFIG): Observer {
   const observer = new Observer(config)
-  observer.safe(); observer.axisTo('y', config.ground.heightM + 14); observer.safe()
+  observer.safe(); observer.axisTo('y', config.ground.heightM + WALL_RIDE_TARGET_HEIGHT_M); observer.safe()
   expect(observer.evaluation?.metrics).toMatchObject({ wallRidePhase: 2, wallRideEpisodeValid: 1 })
   return observer
 }
@@ -109,7 +109,7 @@ function entered(config = DEFAULT_DRONE_CONFIG): Observer {
 function ridden(config = DEFAULT_DRONE_CONFIG): Observer {
   const observer = entered(config)
   observer.bankTo(75)
-  observer.axisTo('z', createTrainingFieldAnchors(config).launch.z - 21, 8)
+  observer.axisTo('z', createTrainingFieldAnchors(config).launch.z - 14 - WALL_RIDE_DISTANCE_M - 1, 8)
   expect(observer.evaluation?.metrics).toMatchObject({ wallRideRideComplete: 1, wallRidePhase: 6 })
   return observer
 }
@@ -135,8 +135,22 @@ describe('L20 observable non-contact wall ride', () => {
     expect(observer.evaluation?.status).toBe('success')
     expect(observer.evaluation?.metrics).toMatchObject({ wallRidePhase: 8, wallRideEpisodeValid: 1,
       wallRideRideComplete: 1, wallRideLeft: 1, wallRideRecovered: 1 })
-    expect(observer.evaluation?.metrics?.wallRideDistanceM).toBeGreaterThanOrEqual(6)
+    expect(observer.evaluation?.metrics?.wallRideDistanceM).toBeGreaterThanOrEqual(WALL_RIDE_DISTANCE_M - 1e-8)
     expect(Object.keys(observer.checkpointStates)).toEqual(WALL_RIDE_PHASE_IDS)
+  })
+
+  it('keeps the former short pass incomplete until the longer distance and duration are both observed', () => {
+    const observer = entered()
+    observer.bankTo(75)
+    observer.axisTo('z', -21, 8)
+    expect(observer.evaluation?.metrics?.wallRideDistanceM).toBeGreaterThanOrEqual(6)
+    expect(observer.evaluation?.metrics?.wallRideSeconds).toBeGreaterThan(0.3)
+    expect(observer.evaluation?.metrics?.wallRideRideComplete).toBe(0)
+    expect(observer.evaluation?.status).toBe('continue')
+    observer.axisTo('z', -14 - WALL_RIDE_DISTANCE_M - 1, 8)
+    expect(observer.evaluation?.metrics?.wallRideDistanceM).toBeGreaterThanOrEqual(WALL_RIDE_DISTANCE_M - 1e-8)
+    expect(observer.evaluation?.metrics?.wallRideSeconds).toBeGreaterThanOrEqual(WALL_RIDE_SECONDS)
+    expect(observer.evaluation?.metrics?.wallRideRideComplete).toBe(1)
   })
 
   it('produces a real eight-checkpoint session from the accepted observation sequence', () => {
@@ -151,7 +165,7 @@ describe('L20 observable non-contact wall ride', () => {
     const config = { ...DEFAULT_DRONE_CONFIG, ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 7 }, spawnPositionM: { x: 5, y: 40, z: -3 } }
     const observer = recovered(config)
     expect(observer.evaluation?.status).toBe('success')
-    expect(observer.evaluation?.metrics?.altitudeM).toBeCloseTo(14, 6)
+    expect(observer.evaluation?.metrics?.altitudeM).toBeCloseTo(WALL_RIDE_TARGET_HEIGHT_M, 6)
     expect(observer.evaluation?.metrics?.wallRideGapM).toBeCloseTo(8, 6)
   })
 
@@ -174,16 +188,16 @@ describe('L20 observable non-contact wall ride', () => {
   })
 
   it('does not award along-wall distance for an in-place side bank even after sufficient elapsed time', () => {
-    const observer = entered(); observer.bankTo(75); observer.repeat(30)
+    const observer = entered(); observer.bankTo(75); observer.repeat(Math.ceil(WALL_RIDE_SECONDS / STEP) + 10)
     expect(observer.evaluation?.metrics).toMatchObject({ wallRideBellyFaced: 1, wallRideDistanceM: 0, wallRideRideComplete: 0 })
-    expect(observer.evaluation?.metrics?.wallRideSeconds).toBeGreaterThan(0.3)
+    expect(observer.evaluation?.metrics?.wallRideSeconds).toBeGreaterThan(WALL_RIDE_SECONDS)
     expect(observer.evaluation?.status).toBe('continue')
   })
 
   it.each([
     { name: 'too close', axis: 'x' as const, destination: 9.3, reason: 5 },
     { name: 'too far', axis: 'x' as const, destination: 3, reason: 6 },
-    { name: 'over the accepted height', axis: 'y' as const, destination: 25, reason: 7 },
+    { name: 'over the accepted height', axis: 'y' as const, destination: WALL_RIDE_MAX_HEIGHT_M + 1, reason: 7 },
     { name: 'under the accepted height', axis: 'y' as const, destination: 2, reason: 7 },
   ])('freezes the first measured cause when the pass becomes $name', ({ axis, destination, reason }) => {
     const observer = entered(); observer.bankTo(75); observer.axisTo('z', -17, 8)
@@ -207,7 +221,7 @@ describe('L20 observable non-contact wall ride', () => {
       [id]: { id, completed: true, completedAtSeconds: 1, metrics: {} } }
     observer.repeat(8)
     expect(observer.evaluation?.status).toBe('continue')
-    observer.axisTo('z', -9, 5); observer.axisTo('x', 6); observer.axisTo('z', -20, 8)
+    observer.axisTo('z', -9, 5); observer.axisTo('x', 6); observer.axisTo('z', -14 - WALL_RIDE_DISTANCE_M - 1, 8)
     expect(observer.evaluation?.metrics).toMatchObject({ wallRideEpisodeValid: 1, wallRideInterrupted: 0, wallRideRideComplete: 1 })
     observer.axisTo('x', 2); observer.bankTo(0); observer.repeat(8)
     expect(observer.evaluation?.status).toBe('success')
@@ -220,13 +234,14 @@ describe('L20 observable non-contact wall ride', () => {
     const previous = observer.trace.at(-1)!
     const proof = { ...observer.evaluation!, metrics: { ...observer.evaluation!.metrics,
       wallRideDistanceM: 0, wallRideSeconds: 0, wallRideRideStartZM: previous.state.positionM.z, wallRideQualifying: 1 } }
-    const velocity = { x: 0, y: 0, z: -140 }
+    const distance = WALL_RIDE_DISTANCE_M + 1
+    const velocity = { x: 0, y: 0, z: -distance / STEP }
     const fast: TrainingSample = { ...sample, state: { ...sample.state, velocityMps: velocity,
-      positionM: { ...sample.state.positionM, z: previous.state.positionM.z - 7 } } }
+      positionM: { ...sample.state.positionM, z: previous.state.positionM.z - distance } } }
     const before = { ...previous, state: { ...previous.state, velocityMps: velocity } }
     const result = observer.evaluate(fast, { previousSample: before, previousFlightSample: before, previousEvaluation: proof })
     expect(result.status).toBe('continue')
-    expect(result.metrics?.wallRideDistanceM).toBe(7)
+    expect(result.metrics?.wallRideDistanceM).toBe(distance)
     expect(result.metrics?.wallRideSeconds).toBeCloseTo(STEP)
     expect(result.metrics?.wallRideRideComplete).toBe(0)
   })

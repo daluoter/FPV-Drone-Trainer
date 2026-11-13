@@ -1,5 +1,6 @@
 import { SPLIT_S_TARGET_HEIGHT_M } from '../training/splitS'
 import { POWER_LOOP_TARGET_HEIGHT_M } from '../training/powerLoop'
+import { createWallRide } from '../world/wallRide'
 import * as THREE from 'three'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -29,15 +30,17 @@ describe('non-contact wall ride renderer guidance', () => {
     try {
       renderer.setLessonTarget('wall-ride')
       renderer.setWallRideStage(4)
-      expect(renderer.scene.getObjectByName('wall-ride-stage-guidance')!.position.toArray()).toEqual([7, 14, -18])
+      const initialStart = createWallRide(renderer.flightScene.getReference('training-launch')!.positionM, 0).rideStartM
+      expect(renderer.scene.getObjectByName('wall-ride-stage-guidance')!.position.toArray()).toEqual([initialStart.x, initialStart.y, initialStart.z])
       const oldScene = renderer.flightScene
       const disposed = vi.spyOn(oldScene, 'dispose')
       renderer.reconfigureScene({ ...DEFAULT_DRONE_CONFIG,
         ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 35, z: -3 } })
       expect(disposed).toHaveBeenCalledOnce()
       expect(renderer.scene.getObjectByName('wall-ride-field')!.visible).toBe(true)
-      expect(renderer.scene.getObjectByName('wall-ride-stage-guidance')!.position.toArray()).toEqual([13, 19, -21])
-      expect(renderer.flightScene.getReference('wall-ride-start')!.positionM).toEqual({ x: 13, y: 19, z: -21 })
+      const shiftedStart = createWallRide(renderer.flightScene.getReference('training-launch')!.positionM, 5).rideStartM
+      expect(renderer.scene.getObjectByName('wall-ride-stage-guidance')!.position.toArray()).toEqual([shiftedStart.x, shiftedStart.y, shiftedStart.z])
+      expect(renderer.flightScene.getReference('wall-ride-start')!.positionM).toEqual(shiftedStart)
       renderer.setWallRideStage(null)
       renderer.reconfigureScene(DEFAULT_DRONE_CONFIG)
       expect(renderer.scene.getObjectByName('wall-ride-stage-guidance')!.visible).toBe(false)

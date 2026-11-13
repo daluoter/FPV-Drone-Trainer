@@ -76,11 +76,12 @@ describe('reference-relative training setup', () => {
       { id: 'landing-surface', kind: 'zone', positionM: { x: 0, y: 5, z: 0 } },
     ]
     const prepared = prepareTrainingSetup(request, references)!
+    const wall = createWallRide(references[0].positionM, 5)
     expect(prepared.setup.spawnPositionM).toEqual(references[0].positionM)
     expect(prepared.setup.spawnOrientation).toEqual({ x: 0, y: 0, z: 0, w: 1 })
-    expect(prepared.setup.staticObstacles).toEqual(createWallRide(references[0].positionM, 5).colliders)
+    expect(prepared.setup.staticObstacles).toEqual(wall.colliders)
     expect(prepared.setup.staticObstacles).toHaveLength(1)
-    expect(prepared.setup.staticObstacles?.[0]).toMatchObject({ id: 'wall-ride-wall', centerM: { x: 16.5, y: 19, z: -35 } })
+    expect(prepared.setup.staticObstacles?.[0]).toMatchObject({ id: 'wall-ride-wall', centerM: wall.centerM })
     expect(JSON.stringify(request)).toBe(before)
     expect(prepareTrainingSetup(request, references.slice(0, 1))).toBe(request)
     expect(prepareTrainingSetup(request, references.slice(1))).toBe(request)

@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { wallRideCollisionCause, wallRideInterruptionReason, wallRideObjective, wallRideResultFeedback, wallRideRouteGuide, wallRideTrainingHint } from './wallRideFeedback'
 import type { TrainingResult } from './types'
+import { WALL_RIDE_DISTANCE_M, WALL_RIDE_SECONDS, WALL_RIDE_TARGET_HEIGHT_M, WALL_RIDE_MIN_HEIGHT_M, WALL_RIDE_MAX_HEIGHT_M } from '../world/wallRide'
 
 const proof = { wallRidePhase: 8, wallRideEpisodeValid: 1, wallRideApproached: 1, wallRideForwardEntered: 1,
   wallRideBellyFaced: 1, wallRideRideComplete: 1, wallRideLeft: 1, wallRideRecovered: 1,
-  wallRideDistanceM: 6.5, wallRideSeconds: 0.7, wallRideRecoveryQualifying: 1, wallRideRecoveryDwellSeconds: 0.2 }
+  wallRideDistanceM: WALL_RIDE_DISTANCE_M + 0.5, wallRideSeconds: WALL_RIDE_SECONDS + 0.4, wallRideRecoveryQualifying: 1, wallRideRecoveryDwellSeconds: 0.2 }
 const scope = '本次為新手預設、USB 遙控器與引導練習的獨立紀錄。'
 function result(overrides: Partial<TrainingResult> = {}): TrainingResult {
   return { lessonId: 'wall-ride', sessionId: 'wall-ride:feedback', outcome: 'FAILED', score: 0,
@@ -15,8 +16,10 @@ function result(overrides: Partial<TrainingResult> = {}): TrainingResult {
 describe('L20 non-contact wall ride guidance', () => {
   it('describes a visible non-contact route, actual along-wall travel and permissive recovery', () => {
     const guide = wallRideRouteGuide()
-    expect(guide).toMatch(/地面自行起飛至約 14 m.*機腹朝向牆面.*至少 6 m.*0.3 秒.*離牆/)
-    expect(guide).toContain('0.8～5 m、離地 3～24 m')
+    expect(guide).toContain(`地面自行起飛至約 ${WALL_RIDE_TARGET_HEIGHT_M} m`)
+    expect(guide).toContain(`至少 ${WALL_RIDE_DISTANCE_M} m，連續維持 ${WALL_RIDE_SECONDS} 秒`)
+    expect(guide).toContain('機腹朝向牆面')
+    expect(guide).toContain(`0.8～5 m、離地 ${WALL_RIDE_MIN_HEIGHT_M}～${WALL_RIDE_MAX_HEIGHT_M} m`)
     expect(guide).toContain('牆體有實際碰撞，應保留間隙')
     expect(guide).toContain('不要求固定側立 90°、精準速度、停住或降落')
     expect(guide).toContain('引導練習不限時')
@@ -44,8 +47,8 @@ describe('L20 non-contact wall ride guidance', () => {
     expect(wallRideResultFeedback(success, scope)).toMatchObject({ observedGap: null, scopeNote: scope })
     expect(wallRideObjective(proof).title).toContain('恢復完成')
     const incomplete: Readonly<Record<string, number>>[] = [
-      { wallRideEpisodeValid: 0 }, { wallRideInterrupted: 1 }, { wallRideDistanceM: 5.9 },
-      { wallRideSeconds: 0.2 }, { wallRideLeft: 0 }, { wallRideRecoveryDwellSeconds: 0.1 },
+      { wallRideEpisodeValid: 0 }, { wallRideInterrupted: 1 }, { wallRideDistanceM: WALL_RIDE_DISTANCE_M - 0.1 },
+      { wallRideSeconds: WALL_RIDE_SECONDS - 0.1 }, { wallRideLeft: 0 }, { wallRideRecoveryDwellSeconds: 0.1 },
       { wallRideDistanceM: Number.POSITIVE_INFINITY },
     ]
     for (const patch of incomplete) {
@@ -72,8 +75,8 @@ describe('L20 non-contact wall ride guidance', () => {
 
   it('distinguishes along-wall progress, outward departure and recovery without a stop requirement', () => {
     const riding = wallRideObjective({ wallRidePhase: 5, wallRideDistanceM: 4.7, wallRideSeconds: 0.8, wallRideGapM: 2.4 })
-    expect(riding.detail).toContain('4.7 m／6 m')
-    expect(riding.detail).toContain('0.8 s／0.3 s')
+    expect(riding.detail).toContain(`4.7 m／${WALL_RIDE_DISTANCE_M} m`)
+    expect(riding.detail).toContain(`0.8 s／${WALL_RIDE_SECONDS} s`)
     expect(riding.detail).toContain('2.4 m')
     expect(wallRideObjective({ wallRidePhase: 6, wallRideGapM: 4.8 }).title).toContain('向外離牆')
     const recovery = wallRideObjective({ wallRidePhase: 7 })

@@ -19,11 +19,11 @@ const CAPACITY = 4_000
 const BANK_DEGREES = 75
 const CAPTIONS = [
   '從地面自行起飛；騎牆示範使用實際搖桿、相同飛控及實體牆面，觀看不計真人成績。',
-  '第 2 步：自行起飛至約 14 m，先保留側傾下沉與回正改出的空間。',
+  '第 2 步：自行起飛至約 60 m，先保留側傾下沉與回正改出的空間。',
   '第 3 步：靠近右側牆的進場區，保持間隙，先看清沿牆前進的方向。',
   '第 4 步：先建立真正沿牆向前的動量，再開始側傾；不需要停住或懸停。',
   '第 5 步：側傾使機腹朝向牆面；牆面在 FPV 中像地面，靠實際動量沿牆飛行。',
-  '第 6 步：保留間隙沿牆飛過至少 6 m；此時推力的向上分量較少，示範會自然下沉，不吸附牆面或自動定高。',
+  '第 6 步：保留間隙沿牆飛過至少 16 m，維持至少 2 秒；此時推力的向上分量較少，示範會自然下沉，不吸附牆面或自動定高。',
   '第 7 步：貼牆段已完成，修回正飛並往遠離牆面的方向改出，維持非接觸間隙。',
   '第 8 步：已離開牆面，減緩旋轉及升降、恢復空中控制；可以繼續向前，不必停住或降落。',
   '騎牆八步完成：從地面起飛、帶速進場，機腹朝牆並保留間隙沿牆飛過，再回正離牆。',
@@ -117,20 +117,20 @@ export function recordWallRideDemonstration(
       && Math.abs(position.z - launch.z) < 0.25 && Math.hypot(velocity.x, velocity.z) < 0.4) travelAt = time
     if (travelAt !== null && bankAt === null && position.z <= wall.nearZM) bankAt = time
     if (bankAt !== null && bankEnd === null) {
-      if (time - bankAt > 2) throw new RangeError('目前設定未能在保留間隙的側傾段完成騎牆，請採用新手或一般預設。')
+      if (time - bankAt > 4) throw new RangeError('目前設定未能在保留間隙的側傾段完成騎牆，請採用新手或一般預設。')
       // Coast through the bank on established forward momentum. Reducing
       // collective lets gravity act normally while thrust points away from the
       // wall. This does not manufacture support, adhesion or a fixed height.
       const desired = multiplyQuaternions(quaternionFromRotationVector({ x: -5 * Math.PI / 180, y: 0, z: 0 }),
         quaternionFromRotationVector({ x: 0, y: 0, z: BANK_DEGREES * Math.PI / 180 }))
-      return attitudeInput(desired, settings.drone.massKg * settings.drone.gravityMps2 * 0.4 / maximumThrust)
+      return attitudeInput(desired, settings.drone.massKg * settings.drone.gravityMps2 * 0.12 / maximumThrust)
     }
-    const targetAltitude = bankEnd === null ? altitude : ground + 11
+    const targetAltitude = bankEnd === null ? altitude : ground + WALL_RIDE_TARGET_HEIGHT_M - 20
     const targetX = bankEnd !== null ? wall.exitM.x : positionAt === null ? launch.x : wall.entryM.x
     const ramp = travelAt === null ? 0 : clamp((time - travelAt) / RAMP_SECONDS, 0, 1)
     const speed = FORWARD_SPEED_MPS * ramp * ramp * (3 - 2 * ramp)
     const targetVx = bankEnd !== null ? clamp((targetX - position.x) * 1.2, -4, 4)
-      : travelAt !== null && progress >= 7 ? 2.5 : clamp((targetX - position.x) * 1.2, -3, 3)
+      : travelAt !== null && progress >= 7 ? 1 : clamp((targetX - position.x) * 1.2, -3, 3)
     const targetVz = travelAt === null ? clamp((launch.z - position.z) * 1.2, -3, 3) : bankEnd === null ? -speed : -4
     const accelerationX = clamp((targetVx - velocity.x) * 3, -12, 12)
     const accelerationZ = clamp((targetVz - velocity.z) * 3, -8, 8)
