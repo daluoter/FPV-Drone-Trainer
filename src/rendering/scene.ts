@@ -20,6 +20,7 @@ import { createReverseOrbitTarget, REVERSE_ORBIT_TARGET_HEIGHT_M, REVERSE_ORBIT_
 import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
 import { createGravityGate, gravityGateSideExit, type GravityGateSide, GRAVITY_GATE_OPENING_WIDTH_M, GRAVITY_GATE_OPENING_DEPTH_M, GRAVITY_GATE_OPENING_HEIGHT_M } from '../world/gravityGate'
 import { createSlalomFlags, SLALOM_TARGET_HEIGHT_M, SLALOM_FLAG_HEIGHT_M, SLALOM_FLAG_WIDTH_M, SLALOM_FLAG_DEPTH_M, SLALOM_EXIT_DISTANCE_M } from '../world/slalomFlags'
+import { createWallRide, WALL_RIDE_REFERENCE_IDS, WALL_RIDE_MIN_HEIGHT_M, WALL_RIDE_MAX_HEIGHT_M } from '../world/wallRide'
 import type { Vector3 } from '../math/vector'
 import type { ReplayGhostState } from '../replay'
 
@@ -83,6 +84,8 @@ export interface FlightScene {
   setGravityGateSide(side: GravityGateSide | null): void
   /** Highlight forward-only alternating flag visits without steering flight. */
   setSlalomStage(stage: number | null): void
+  /** Highlight near-wall approach, non-contact travel and departure without steering. */
+  setWallRideStage(stage: number | null): void
   /** Presentation-only bounded path trace; evaluators remain renderer-independent. */
   setTrainingPath(path: readonly Vector3[]): void
   setReplayPath(path: readonly Vector3[]): void
@@ -1823,9 +1826,111 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   slalomField.add(slalomAccent)
   scene.add(slalomField)
 
+  // The same immutable solid box is used by training setup and physics.
+  // Face paint is flat presentation geometry; it never widens the obstacle.
+  const wallRide = createWallRide(field.launch, config.ground.heightM)
+  const wallRideField = new THREE.Group()
+  wallRideField.name = 'wall-ride-field'
+  wallRideField.visible = false
+  const wallRideSteel = material(0x31545c, 0.86, 0.08)
+  wallRideSteel.emissive.set(0x143238)
+  wallRideSteel.emissiveIntensity = 0.3
+  for (const collider of wallRide.colliders) {
+    const solid = new THREE.Mesh(new THREE.BoxGeometry(collider.halfExtentsM.x * 2,
+      collider.halfExtentsM.y * 2, collider.halfExtentsM.z * 2), wallRideSteel)
+    solid.name = collider.id
+    solid.position.set(collider.centerM.x, collider.centerM.y, collider.centerM.z)
+    solid.userData = { physicalColliderId: collider.id, collision: true, teachingReference: '騎牆實體牆面，須保留間隙，碰牆仍算碰撞' }
+    wallRideField.add(solid)
+  }
+  const wallRideFacePoints: THREE.Vector3[] = []
+  const faceX = wallRide.faceXM - 0.008
+  for (let height = 0; height <= wallRide.heightM; height += 4) {
+    wallRideFacePoints.push(new THREE.Vector3(faceX, config.ground.heightM + height, wallRide.nearZM),
+      new THREE.Vector3(faceX, config.ground.heightM + height, wallRide.farZM))
+  }
+  for (let z = wallRide.nearZM; z >= wallRide.farZM; z -= 4) {
+    wallRideFacePoints.push(new THREE.Vector3(faceX, config.ground.heightM, z),
+      new THREE.Vector3(faceX, config.ground.heightM + wallRide.heightM, z))
+  }
+  const wallRidePanels = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(wallRideFacePoints),
+    new THREE.LineBasicMaterial({ color: 0x739a9e, transparent: true, opacity: 0.8 }))
+  wallRidePanels.name = 'wall-ride-face-grid'
+  wallRidePanels.userData = { collision: false, teachingReference: '牆面格線與水平線協助觀察沿牆位移及側傾' }
+  wallRideField.add(wallRidePanels)
+  for (const [height, color, name] of [
+    [WALL_RIDE_MIN_HEIGHT_M, 0x45d7f7, 'lower'],
+    [wallRide.rideStartM.y - config.ground.heightM, 0xffc978, 'suggested'],
+    [WALL_RIDE_MAX_HEIGHT_M, 0x45d7f7, 'upper'],
+  ] as const) {
+    const stripe = new THREE.Mesh(new THREE.PlaneGeometry(wallRide.lengthM, 0.1),
+      new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, depthWrite: false }))
+    stripe.name = `wall-ride-${name}-height-stripe`
+    stripe.rotation.y = -Math.PI / 2
+    stripe.position.set(wallRide.faceXM - 0.012, config.ground.heightM + height, wallRide.centerM.z)
+    stripe.userData = { collision: false }
+    wallRideField.add(stripe)
+  }
+  const wallRidePoints = [wallRide.entryM, wallRide.rideStartM, wallRide.rideEndM, wallRide.exitM]
+  const wallRideColors = [0x45d7f7, 0xffc978, 0xffc978, 0xb8f36b]
+  const wallRideReferences: FlightSceneReference[] = []
+  const wallRideGuides: THREE.Group[] = []
+  for (const [index, id] of WALL_RIDE_REFERENCE_IDS.entries()) {
+    const point = wallRidePoints[index]
+    const guide = new THREE.Group()
+    guide.name = id
+    guide.position.set(point.x, point.y, point.z)
+    guide.userData = { collision: false, teachingReference: ['帶速靠近牆面', '機腹朝牆，保留間隙', '沿牆實際移動', '回正並向外離牆'][index] }
+    const ring = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 48 }, (_, i) =>
+      new THREE.Vector3(Math.cos(i / 48 * Math.PI * 2) * 1.2, Math.sin(i / 48 * Math.PI * 2) * 1.2, 0))),
+    new THREE.LineDashedMaterial({ color: wallRideColors[index], transparent: true, opacity: 0.7, dashSize: 0.3, gapSize: 0.18, depthWrite: false }))
+    ring.computeLineDistances()
+    guide.add(ring)
+    wallRideGuides.push(guide)
+    wallRideField.add(guide)
+    wallRideReferences.push({ id, kind: 'marker', object: guide, positionM: { ...point }, sizeM: { x: 2.4, y: 2.4, z: 0 } })
+  }
+  const wallRideBellyArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0),
+    new THREE.Vector3(wallRide.rideStartM.x, wallRide.rideStartM.y, wallRide.rideStartM.z), 2.1, 0xffc978, 0.5, 0.35)
+  wallRideBellyArrow.name = 'wall-ride-belly-direction'
+  wallRideBellyArrow.userData = { collision: false, teachingReference: '此箭頭表示機腹朝牆方向，並非推力方向；保留間隙' }
+  wallRideField.add(wallRideBellyArrow)
+  const wallRideTravelArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1),
+    new THREE.Vector3(wallRide.rideStartM.x, wallRide.rideStartM.y - 1.5, wallRide.rideStartM.z), 5, 0x45d7f7, 0.8, 0.5)
+  wallRideTravelArrow.name = 'wall-ride-forward-direction'
+  wallRideTravelArrow.userData = { collision: false, teachingReference: '沿牆向前的實際飛行方向' }
+  wallRideField.add(wallRideTravelArrow)
+  const wallRideExitDirection = new THREE.Vector3(-1, 0, -0.6).normalize()
+  const wallRideExitArrow = new THREE.ArrowHelper(wallRideExitDirection,
+    new THREE.Vector3(wallRide.exitM.x, wallRide.exitM.y, wallRide.exitM.z), 4, 0xb8f36b, 0.8, 0.5)
+  wallRideExitArrow.name = 'wall-ride-away-direction'
+  wallRideExitArrow.userData = { collision: false, teachingReference: '回正後向遠離牆面的方向改出' }
+  wallRideField.add(wallRideExitArrow)
+  const wallRideRoutePoints = [
+    new THREE.Vector3(field.launch.x, config.ground.heightM + 0.15, field.launch.z),
+    new THREE.Vector3(field.launch.x, wallRide.entryM.y, field.launch.z),
+    ...wallRidePoints.map((point) => new THREE.Vector3(point.x, point.y, point.z)),
+    new THREE.Vector3(wallRide.exitM.x - 2, wallRide.exitM.y, wallRide.exitM.z - 4),
+  ]
+  const wallRideRoute = new THREE.Line(new THREE.BufferGeometry().setFromPoints(wallRideRoutePoints),
+    new THREE.LineDashedMaterial({ color: 0x9fb9ba, transparent: true, opacity: 0.65, dashSize: 0.65, gapSize: 0.4, depthWrite: false }))
+  wallRideRoute.name = 'wall-ride-illustrative-route'
+  wallRideRoute.userData = { collision: false, teachingReference: '起飛、進場、沿牆與離牆的參考路線；不要求精準貼線，也不會吸附機體' }
+  wallRideRoute.computeLineDistances()
+  wallRideField.add(wallRideRoute)
+  const wallRideAccent = new THREE.Group()
+  wallRideAccent.name = 'wall-ride-stage-guidance'
+  const wallRideStageMaterial = new THREE.LineBasicMaterial({ color: 0x45d7f7, transparent: true, opacity: 0.95, depthWrite: false })
+  const wallRideStageRing = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 48 }, (_, i) =>
+    new THREE.Vector3(Math.cos(i / 48 * Math.PI * 2) * 1.45, Math.sin(i / 48 * Math.PI * 2) * 1.45, 0))), wallRideStageMaterial)
+  wallRideStageRing.name = 'wall-ride-stage-reference'
+  wallRideAccent.add(wallRideStageRing)
+  wallRideField.add(wallRideAccent)
+  scene.add(wallRideField)
+
   const landingSurface: FlightSceneReference = { id: 'landing-surface', kind: 'zone', object: landingTarget, positionM: { ...field.landing }, sizeM: { x: LANDING_ZONE_RADIUS_M * 2, y: 0, z: LANDING_ZONE_RADIUS_M * 2 } }
   const launchReference: FlightSceneReference = { id: 'training-launch', kind: 'pad', object: takeoffPad, positionM: { ...field.launch } }
-  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, ...slalomReferences, recoveryReference, rollReference, flipReference, loopReference, splitReference, orbitReference, backwardReference, reverseOrbitReference, ...gravityGateReferences]
+  const sceneReferences = [padReference, ...referenceSet.contract, landingSurface, launchReference, ...routeReferences, ...directionReferences, ...turnReferences, ...squareReferences, ...figureEightReferences, ...wideGateReferences, ...slalomReferences, ...wallRideReferences, recoveryReference, rollReference, flipReference, loopReference, splitReference, orbitReference, backwardReference, reverseOrbitReference, ...gravityGateReferences]
   const referenceById = new Map(sceneReferences.map((reference) => [reference.id, reference]))
 
   const drone = createQuadVisual()
@@ -1914,7 +2019,8 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     reverseOrbitField.visible = lessonId === 'reverse-orbit'
     gravityField.visible = lessonId === 'gravity-gate'
     slalomField.visible = lessonId === 'slalom'
-    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'backward-flight', 'reverse-orbit', 'gravity-gate', 'slalom'].includes(lessonId ?? '')
+    wallRideField.visible = lessonId === 'wall-ride'
+    const beginner = ['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'backward-flight', 'reverse-orbit', 'gravity-gate', 'slalom', 'wall-ride'].includes(lessonId ?? '')
     for (const reference of referenceSet.contract) {
       reference.object.visible = !beginner
     }
@@ -2121,6 +2227,24 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
   }
 
   setSlalomStage(0)
+  const setWallRideStage = (stage: number | null): void => {
+    if (stage === null || !Number.isInteger(stage) || stage < 0 || stage > 8) {
+      wallRideAccent.visible = false
+      wallRideBellyArrow.visible = false
+      wallRideGuides.forEach((guide) => { guide.visible = false })
+      return
+    }
+    wallRideAccent.visible = true
+    wallRideStageMaterial.color.set(stage >= 8 ? 0xb8f36b : stage >= 4 ? 0xffc978 : 0x45d7f7)
+    const targetIndex = stage <= 2 ? 0 : stage <= 4 ? 1 : stage === 5 ? 2 : 3
+    wallRideGuides.forEach((guide, index) => { guide.visible = index >= targetIndex })
+    wallRideBellyArrow.visible = stage >= 3 && stage <= 5
+    const point = stage <= 1 ? { ...field.launch, y: stage === 0 ? config.ground.heightM + 0.15 : wallRide.entryM.y }
+      : stage <= 7 ? wallRidePoints[targetIndex] : { ...wallRide.exitM, x: wallRide.exitM.x - 2, z: wallRide.exitM.z - 4 }
+    wallRideAccent.position.set(point.x, point.y, point.z)
+  }
+
+  setWallRideStage(0)
 
   const setPath = (line: THREE.Line, path: readonly Vector3[], yOffset: number): void => {
     const maximumPoints = 1_200
@@ -2178,6 +2302,7 @@ export function createFlightScene(config: DroneConfig = DEFAULT_DRONE_CONFIG): F
     setGravityGateStage,
     setGravityGateSide,
     setSlalomStage,
+    setWallRideStage,
     setTrainingPath,
     setReplayPath,
     dispose: () => disposeFlightScene(scene),

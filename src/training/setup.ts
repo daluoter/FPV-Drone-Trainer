@@ -1,3 +1,4 @@
+import { createWallRide } from '../world/wallRide'
 import { createSlalomFlags } from '../world/slalomFlags'
 import { createWideGates } from '../world/wideGates'
 import { createGravityGate } from '../world/gravityGate'
@@ -9,6 +10,13 @@ export function prepareTrainingSetup(
   references: readonly TrainingSceneReference[],
 ): TrainingSetupRequest | null {
   if (!request) return null
+  if (request.lessonId === 'wall-ride') {
+    const launch = references.find((reference) => reference.id === 'training-launch')
+    const surface = references.find((reference) => reference.id === 'landing-surface')
+    if (!launch || !surface) return request
+    return { ...request, setup: { ...request.setup, spawnPositionM: { ...launch.positionM },
+      staticObstacles: createWallRide(launch.positionM, surface.positionM.y).colliders } }
+  }
   if (request.lessonId === 'slalom') {
     const launch = references.find((reference) => reference.id === 'training-launch')
     const surface = references.find((reference) => reference.id === 'landing-surface')

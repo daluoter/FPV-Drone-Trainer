@@ -1,3 +1,4 @@
+import { WALL_RIDE_LEARNING_CONTENT } from './wallRide'
 import { SLALOM_LEARNING_CONTENT } from './slalom'
 import { GRAVITY_GATE_LEARNING_CONTENT } from './gravityGate'
 import { ORBIT_LEARNING_CONTENT } from './orbit'
@@ -85,6 +86,7 @@ const LEARNING_CONTENT: Readonly<Record<string, LessonLearningContent>> = {
   'reverse-orbit': REVERSE_ORBIT_LEARNING_CONTENT,
   slalom: SLALOM_LEARNING_CONTENT,
   'gravity-gate': GRAVITY_GATE_LEARNING_CONTENT,
+  'wall-ride': WALL_RIDE_LEARNING_CONTENT,
 }
 
 export function lessonLearningContent(lessonId: string): LessonLearningContent | null {

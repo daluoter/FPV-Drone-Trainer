@@ -1,3 +1,4 @@
+import { WALL_RIDE_LESSON } from './wallRide'
 import { SLALOM_LESSON } from './slalom'
 import { GRAVITY_GATE_LESSON } from './gravityGate'
 import { LANDING_LESSON } from './landing'
@@ -147,6 +148,7 @@ export const DEFAULT_LESSONS: readonly LessonDefinition[] = [
   REVERSE_ORBIT_LESSON,
   SLALOM_LESSON,
   GRAVITY_GATE_LESSON,
+  WALL_RIDE_LESSON,
 ]
 
 /** Legacy hover and combined-flip definitions remain available only for history. */

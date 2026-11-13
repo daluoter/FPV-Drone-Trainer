@@ -22,6 +22,32 @@ function createRendererStub(): THREE.WebGLRenderer {
   } as unknown as THREE.WebGLRenderer
 }
 
+describe('non-contact wall ride renderer guidance', () => {
+  it('preserves stage and hidden guidance across supported wall/anchor rebuilds without replacing current flight state', () => {
+    const canvas = document.createElement('canvas')
+    const renderer = new FlightRenderer(canvas, { rendererFactory: createRendererStub })
+    try {
+      renderer.setLessonTarget('wall-ride')
+      renderer.setWallRideStage(4)
+      expect(renderer.scene.getObjectByName('wall-ride-stage-guidance')!.position.toArray()).toEqual([7, 14, -18])
+      const oldScene = renderer.flightScene
+      const disposed = vi.spyOn(oldScene, 'dispose')
+      renderer.reconfigureScene({ ...DEFAULT_DRONE_CONFIG,
+        ground: { ...DEFAULT_DRONE_CONFIG.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 35, z: -3 } })
+      expect(disposed).toHaveBeenCalledOnce()
+      expect(renderer.scene.getObjectByName('wall-ride-field')!.visible).toBe(true)
+      expect(renderer.scene.getObjectByName('wall-ride-stage-guidance')!.position.toArray()).toEqual([13, 19, -21])
+      expect(renderer.flightScene.getReference('wall-ride-start')!.positionM).toEqual({ x: 13, y: 19, z: -21 })
+      renderer.setWallRideStage(null)
+      renderer.reconfigureScene(DEFAULT_DRONE_CONFIG)
+      expect(renderer.scene.getObjectByName('wall-ride-stage-guidance')!.visible).toBe(false)
+      renderer.setLessonTarget('slalom')
+      expect(renderer.scene.getObjectByName('wall-ride-field')!.visible).toBe(false)
+      expect(renderer.scene.getObjectByName('slalom-field')!.visible).toBe(true)
+    } finally { renderer.dispose() }
+  })
+})
+
 describe('forward-only slalom renderer guidance', () => {
   it('retains the next alternating pass side after a supported scene rebuild and hides it in other lessons', () => {
     const canvas = document.createElement('canvas')

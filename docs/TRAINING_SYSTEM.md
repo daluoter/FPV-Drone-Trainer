@@ -298,7 +298,7 @@ rules-6 completion. Current progress loads the per-lesson rule scope. Physics
 context stays version 1; settings, input source and practice/challenge remain
 separate comparison conditions.
 
-The 22 displayed demonstrations cover three L00 axis examples and L01–L19, including the independent ten-step L18 刀旗 S 彎 recording. L18 uses a new `slalom` ID / rule-6 scope; existing lesson scopes remain unchanged.
+The 23 displayed demonstrations cover three L00 axis examples and L01–L20, including the independent ten-step L18 刀旗 S 彎 recording. L18 uses a new `slalom` ID / rule-6 scope; existing lesson scopes remain unchanged.
 Their bounded recordings are generated through the real 240 Hz simulator and
 play through the independent ghost. The L01 demonstration explicitly teaches both takeoff and continuous hover.
 L14 has an eight-stage physics demonstration; L15 has a separate nine-stage, five-full-lap recording. L15’s heading/radius/lap-count/directed-progress instruments follow the same retained observations as its chapters.
@@ -379,3 +379,12 @@ log of every recoverable excursion.
 ## L18 forward alternating flag route
 
 L18 shares six immutable solid flag boxes between scene rendering, disarmed lesson setup, its actual-RC demonstration and evaluator. The flags lie on a forward row; crossings must advance along −Z in order, on alternating left/right sides within the visible passing space. The evaluator records current episode flag progress separately from historic checkpoint ticks, so local interruption cannot combine earlier flags with a new route. A first-cause snapshot explains wrong-side, missed-order, height, distant-bypass and backward-progress failures. Passing all six flags is followed by forward departure and brief airborne recovery, without a fixed bank angle, minimum passing speed or stop. The existing physics solver resolves whole-body flag collisions before scoring; unrelated lessons clear the field. See [the L18 guide](L18_SLALOM.md).
+
+
+## L20 non-contact wall ride
+
+L20 uses the new `wall-ride` ID with rule 6 and eight independent ground/entry/ride/departure/recovery milestones. Its immutable `wallRide` world geometry supplies the same solid wall to scene rendering, disarmed lesson setup, the real-RC demonstration author and the pure evaluator. Only the selected wall-ride environment installs that collider; other courses and Free Flight clear it. Guidance changes presentation only.
+
+The evaluator observes genuine ground takeoff, forward entry, the belly's angle toward the learner-side wall, centre gap and continuous net forward displacement/time. A single current episode must prove all required motion. On a local interruption, its first-cause measurements remain frozen while old checkpoint ticks remain educational history; a fresh route must be established from before the wall's near edge. Ordinary upright travel, in-place rolling, looking at the wall or jumping position cannot supply the ride proof. Actual outward travel and brief upright recovery follow; no fixed stick sequence, wall adhesion, automatic height hold, stop or landing is required.
+
+Live, demonstration and recorded-result instruments retain separate observations. The half-speed actual-physics demonstration shares the normal dynamics and collider, resets once on the ground, and advances its own eight-step timeline from evaluator samples. Seeking backward restores the earlier state and cannot write learner progress. Existing lesson rule versions and saved results remain unchanged. Manual scope and provisional tolerances are documented in [L20_WALL_RIDE.md](L20_WALL_RIDE.md).

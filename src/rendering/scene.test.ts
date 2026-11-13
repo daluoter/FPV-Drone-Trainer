@@ -10,6 +10,7 @@ import { createWideGates, WIDE_GATE_FRAME_DEPTH_M } from '../world/wideGates'
 import { createGravityGate, gravityGateSideExit, gravityGateExitCrossing, gravityGateLowerCrossing, gravityGateTopCrossing } from '../world/gravityGate'
 import { createSlalomFlags, slalomFlagCrossing, SLALOM_FLAG_IDS } from '../world/slalomFlags'
 import { findSweptObstacleHit } from '../simulation/obstacles'
+import { createWallRide, WALL_RIDE_REFERENCE_IDS } from '../world/wallRide'
 import { SPLIT_S_MIN_HEIGHT_M, SPLIT_S_TARGET_HEIGHT_M } from '../training/splitS'
 import { POWER_LOOP_TARGET_HEIGHT_M } from '../training/powerLoop'
 import { createOrbitTarget, ORBIT_TARGET_HEIGHT_M, ORBIT_TARGET_RADIUS_M, ORBIT_MAX_RADIUS_M } from '../training/orbit'
@@ -19,6 +20,107 @@ import { createCameraRig, updateCameraRig } from './camera'
 import { createTuningPreset } from '../tuning/presets'
 
 import { createFlightScene } from './scene'
+
+describe('non-contact wall ride field', () => {
+  it('shows the exact shared solid wall and stable guide anchors on translated ground only for its lesson', () => {
+    const defaults = createDefaultDroneConfig()
+    const config = { ...defaults, ground: { ...defaults.ground, heightM: 5 }, spawnPositionM: { x: 6, y: 35, z: -3 } }
+    const scene = createFlightScene(config)
+    try {
+      const wall = createWallRide(scene.getReference('training-launch')!.positionM, 5)
+      const field = scene.scene.getObjectByName('wall-ride-field')!
+      expect(field.visible).toBe(false)
+      scene.setLessonTarget('wall-ride')
+      expect(field.visible).toBe(true)
+      const solid = scene.scene.getObjectByName('wall-ride-wall') as THREE.Mesh<THREE.BoxGeometry>
+      const box = new THREE.Box3().setFromObject(solid)
+      expect(box.min.x).toBe(wall.faceXM)
+      expect(box.max.x).toBe(wall.faceXM + wall.thicknessM)
+      expect(box.min.y).toBe(5)
+      expect(box.max.y).toBe(5 + wall.heightM)
+      expect(box.min.z).toBe(wall.farZM)
+      expect(box.max.z).toBe(wall.nearZM)
+      expect(solid.userData.physicalColliderId).toBe(wall.colliders[0].id)
+      for (const [index, id] of WALL_RIDE_REFERENCE_IDS.entries()) {
+        const point = [wall.entryM, wall.rideStartM, wall.rideEndM, wall.exitM][index]
+        expect(scene.getReference(id)!.positionM).toEqual(point)
+        expect(scene.getReference(id)!.object.position.toArray()).toEqual([point.x, point.y, point.z])
+        expect(scene.getReference(id)!.object.userData.collision).toBe(false)
+      }
+      expect(scene.scene.getObjectByName('wall-ride-face-grid')).toBeDefined()
+      expect(scene.scene.getObjectByName('wall-ride-belly-direction')!.userData.teachingReference).toContain('並非推力方向')
+      for (const name of ['slalom-field', 'gravity-gate-field', 'reverse-orbit-field', 'wide-gate-field']) {
+        expect(scene.scene.getObjectByName(name)!.visible).toBe(false)
+      }
+      const before = { x: wall.faceXM - 1, y: wall.rideStartM.y, z: wall.rideStartM.z }
+      const after = { ...before, x: wall.faceXM + 1 }
+      expect(findSweptObstacleHit(before, after, 0.3, wall.colliders)?.colliderId).toBe('wall-ride-wall')
+      scene.setLessonTarget('slalom')
+      expect(field.visible).toBe(false)
+      scene.setLessonTarget(null)
+      expect(field.visible).toBe(false)
+    } finally { scene.dispose() }
+  })
+
+  it('keeps the illustrative takeoff, pass and away route outside the full-body collision envelope', () => {
+    const scene = createFlightScene()
+    try {
+      const wall = createWallRide(scene.getReference('training-launch')!.positionM, 0)
+      const route = scene.scene.getObjectByName('wall-ride-illustrative-route') as THREE.Line<THREE.BufferGeometry>
+      const points = route.geometry.getAttribute('position')
+      for (let i = 1; i < points.count; i += 1) {
+        const before = new THREE.Vector3().fromBufferAttribute(points, i - 1)
+        const after = new THREE.Vector3().fromBufferAttribute(points, i)
+        expect(findSweptObstacleHit(before, after, 0.3, wall.colliders)).toBeNull()
+        expect(after.x).toBeLessThan(wall.faceXM - 0.3)
+        expect(after.z).toBeLessThanOrEqual(before.z)
+      }
+      const last = new THREE.Vector3().fromBufferAttribute(points, points.count - 1)
+      expect(wall.faceXM - last.x).toBeGreaterThan(wall.faceXM - wall.rideEndM.x)
+      expect(last.y).toBeGreaterThan(0)
+    } finally { scene.dispose() }
+  })
+
+  it('changes stage guides without moving the physical wall or live aircraft and can hide only the active guides', () => {
+    const scene = createFlightScene()
+    try {
+      scene.setLessonTarget('wall-ride')
+      const wall = scene.scene.getObjectByName('wall-ride-wall')!
+      const wallPosition = wall.position.clone()
+      const aircraftPosition = scene.drone.position.clone()
+      const aircraftOrientation = scene.drone.quaternion.clone()
+      const accent = scene.scene.getObjectByName('wall-ride-stage-guidance')!
+      scene.setWallRideStage(4)
+      expect(accent.position.toArray()).toEqual([7, 14, -18])
+      expect(scene.scene.getObjectByName('wall-ride-belly-direction')!.visible).toBe(true)
+      scene.setWallRideStage(6)
+      expect(accent.position.toArray()).toEqual([2, 10, -38])
+      expect(scene.scene.getObjectByName('wall-ride-belly-direction')!.visible).toBe(false)
+      scene.setWallRideStage(8)
+      const ring = scene.scene.getObjectByName('wall-ride-stage-reference') as THREE.LineLoop<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      expect(ring.material.color.getHex()).toBe(0xb8f36b)
+      scene.setWallRideStage(null)
+      expect(accent.visible).toBe(false)
+      expect(scene.scene.getObjectByName('wall-ride-field')!.visible).toBe(true)
+      expect(wall.position.equals(wallPosition)).toBe(true)
+      expect(scene.drone.position.equals(aircraftPosition)).toBe(true)
+      expect(scene.drone.quaternion.equals(aircraftOrientation)).toBe(true)
+    } finally { scene.dispose() }
+  })
+
+  it('releases the wall, flat face paint and guide resources exactly once', () => {
+    const scene = createFlightScene()
+    const resources = new Set<THREE.BufferGeometry | THREE.Material>()
+    scene.scene.getObjectByName('wall-ride-field')!.traverse((object) => {
+      const visual = object as THREE.Mesh<THREE.BufferGeometry, THREE.Material | THREE.Material[]>
+      if (visual.geometry) resources.add(visual.geometry)
+      for (const resource of Array.isArray(visual.material) ? visual.material : visual.material ? [visual.material] : []) resources.add(resource)
+    })
+    const disposals = [...resources].map((resource) => vi.spyOn(resource, 'dispose'))
+    scene.dispose()
+    for (const dispose of disposals) expect(dispose).toHaveBeenCalledOnce()
+  })
+})
 
 describe('forward-only alternating slalom field', () => {
   it('renders six real banners, numbered left/right references and a forward exit on translated ground', () => {
@@ -328,6 +430,7 @@ describe('flight scene reference contract', () => {
         'wide-gate-3',
         ...SLALOM_FLAG_IDS,
         'slalom-exit',
+        ...WALL_RIDE_REFERENCE_IDS,
         'recovery-zone',
         'roll-zone',
         'flip-zone',

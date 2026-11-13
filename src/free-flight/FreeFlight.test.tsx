@@ -453,6 +453,97 @@ describe('flight viewport fullscreen', () => {
 })
 
 describe('Free Flight native navigation confirmation', () => {
+  it('shows wall clearance and measured belly orientation with current route evidence and a visible retry cause', () => {
+    const props = { poller: createBrowserGamepadPoller(), profile: null, settings: createDefaultTuningSettings() }
+    const base = createTrainingMachineState({ initialLessonId: 'wall-ride' })
+    const { rerender } = render(<FreeFlight {...props} trainingState={base} />)
+    expect(screen.getByRole('group', { name: '騎牆即時狀態' })).toHaveTextContent('即時騎牆數值')
+    expect(screen.getByTestId('wall-ride-phase')).toHaveTextContent('0 / 8 步')
+    expect(screen.getByTestId('wall-ride-gap')).toHaveTextContent('—')
+    expect(screen.getByTestId('wall-ride-belly-angle')).toHaveTextContent('—')
+    expect(screen.getByTestId('wall-ride-distance')).toHaveTextContent('0.0 / 6 m')
+    const observed: TrainingMachineState = { ...base, phase: 'ACTIVE', lastEvaluation: { status: 'continue', metrics: {
+      wallRidePhase: 5, wallRideGapM: 2.4, wallRideBellyAngleDegrees: 18,
+      wallRideDistanceM: 3.2, wallRideSeconds: 0.22, wallRideForwardSpeedMps: 8.4,
+    } } }
+    rerender(<FreeFlight {...props} trainingState={observed} />)
+    expect(screen.getByTestId('wall-ride-phase')).toHaveTextContent('5 / 8 步')
+    expect(screen.getByTestId('wall-ride-gap')).toHaveTextContent('2.4 m')
+    expect(screen.getByTestId('wall-ride-belly-angle')).toHaveTextContent('18°')
+    expect(screen.getByTestId('wall-ride-distance')).toHaveTextContent('3.2 / 6 m')
+    expect(screen.getByTestId('wall-ride-seconds')).toHaveTextContent('0.22 / 0.3 s')
+    expect(screen.getByTestId('wall-ride-speed')).toHaveTextContent('8.4 m/s')
+    rerender(<FreeFlight {...props} trainingState={{ ...observed, recoveryInProgress: true,
+      lastRecovery: { timestampSeconds: 8, message: '機腹沒有朝牆：當時對牆角 82°、間隙 2.4 m',
+        hint: '回到進場區，保留間隙再建立新的沿牆路線。', metrics: {} } }} />)
+    const hint = screen.getByLabelText('目前練習提示')
+    expect(hint).toHaveTextContent('當時對牆角 82°、間隙 2.4 m')
+    expect(hint).toHaveClass('is-below-viewport')
+    expect(screen.getByRole('group', { name: 'Three.js Free Flight simulation viewport' }).contains(hint)).toBe(false)
+    rerender(<FreeFlight {...props} trainingState={createTrainingMachineState({ initialLessonId: 'slalom' })} />)
+    expect(screen.queryByRole('group', { name: '騎牆即時狀態' })).not.toBeInTheDocument()
+  })
+
+  it('keeps an eight-step physical wall ride demonstration independent of live flight, colliders and stored results', () => {
+    window.localStorage.clear()
+    render(<App />)
+    const canvas = screen.getByLabelText('Free Flight 3D scene')
+    fireEvent.change(screen.getByLabelText('選擇課程'), { target: { value: 'wall-ride' } })
+    fireEvent.change(screen.getByLabelText('控制方式'), { target: { value: 'keyboard' } })
+    const hud = () => screen.getByRole('group', { name: '騎牆即時狀態' })
+    const physicalWall = frames.runtime!.simulation.getStaticObstacles()
+    expect(physicalWall).toHaveLength(1)
+    expect(physicalWall[0].id).toBe('wall-ride-wall')
+    const liveSteps = screen.getByRole('list', { name: '本課步驟' }).textContent
+    const stored = () => Object.fromEntries(Object.entries(window.localStorage).filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.')))
+    const before = stored()
+    const live = JSON.stringify(frames.runtime!.simulation.getState())
+    fireEvent.click(screen.getByRole('button', { name: 'L20 騎牆示範' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    expect(screen.getByRole('button', { name: '0.5×' })).toHaveAttribute('aria-pressed', 'true')
+    const progress = screen.getByRole('region', { name: '示範進度' })
+    expect(progress).toHaveTextContent('L20 騎牆')
+    const chapters = within(progress).getAllByRole('button')
+    expect(chapters).toHaveLength(8)
+    const playback = frames.runtime!.getReplayPlayback()!
+    fireEvent.change(screen.getByRole('slider'), { target: { value: playback.durationSeconds } })
+    expect(progress).toHaveTextContent('8 / 8 個示範步驟完成')
+    expect(screen.getByTestId('wall-ride-phase')).toHaveTextContent('8 / 8 步')
+    expect(Number.parseFloat(screen.getByTestId('wall-ride-distance').textContent!)).toBeGreaterThanOrEqual(6)
+    expect(Number.parseFloat(screen.getByTestId('wall-ride-seconds').textContent!)).toBeGreaterThanOrEqual(0.3)
+    expect(Number.parseFloat(screen.getByTestId('wall-ride-gap').textContent!)).toBeGreaterThanOrEqual(5.5)
+    const held = hud().textContent
+    const pausedTime = playback.getState().currentTimeSeconds
+    for (const name of ['Chase', 'Free / debug', 'FPV']) {
+      fireEvent.click(screen.getByRole('button', { name }))
+      expect(hud().textContent).toBe(held)
+      expect(playback.getState().currentTimeSeconds).toBe(pausedTime)
+    }
+    frame(400)
+    expect(hud().textContent).toBe(held)
+    expect(JSON.stringify(frames.runtime!.simulation.getState())).toBe(live)
+    expect(frames.runtime!.simulation.getStaticObstacles()).toEqual(physicalWall)
+    fireEvent.click(chapters[4])
+    expect(progress).toHaveTextContent('4 / 8 個示範步驟完成')
+    expect(Number.parseFloat(screen.getByTestId('wall-ride-distance').textContent!)).toBe(0)
+    fireEvent.change(screen.getByRole('slider'), { target: { value: 0 } })
+    expect(screen.getByTestId('flight-altitude')).toHaveTextContent('0.0 m')
+    expect(screen.getByTestId('wall-ride-distance')).toHaveTextContent('0.0 / 6 m')
+    fireEvent.click(screen.getByRole('button', { name: '結束示範' }))
+    expect(screen.getByRole('list', { name: '本課步驟' }).textContent).toBe(liveSteps)
+    expect(hud()).toHaveTextContent('即時騎牆數值')
+    expect(screen.getByTestId('wall-ride-gap')).toHaveTextContent('—')
+    expect(screen.getByLabelText('Free Flight 3D scene')).toBe(canvas)
+    expect(frames.runtime!.simulation.getStaticObstacles()).toEqual(physicalWall)
+    expect(stored()).toEqual(before)
+    fireEvent.click(screen.getByRole('button', { name: '自由飛行' }))
+    expect(frames.runtime!.simulation.getStaticObstacles()).toHaveLength(0)
+    expect(screen.queryByRole('group', { name: '騎牆即時狀態' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '開始學飛' }))
+    expect(frames.runtime!.simulation.getStaticObstacles()).toEqual(physicalWall)
+    expect(screen.getByLabelText('選擇課程')).toHaveValue('wall-ride')
+  })
+
   it('shows the next slalom side and current passage facts while preserving the first failure below the viewport', () => {
     const props = { poller: createBrowserGamepadPoller(), profile: null, settings: createDefaultTuningSettings() }
     const base = createTrainingMachineState({ initialLessonId: 'slalom' })
@@ -749,11 +840,12 @@ describe('Free Flight native navigation confirmation', () => {
     expect(frames.renderer!.scene.getObjectByName('reverse-orbit-crane')).toBeDefined()
     expect(frames.runtime!.simulation.getStaticObstacles()).toHaveLength(0)
     const demoButtons = within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')
-    expect(demoButtons).toHaveLength(22)
-    expect(demoButtons.at(-4)).toHaveTextContent('L16 倒刷鍋示範')
-    expect(demoButtons.at(-3)).toHaveTextContent('L17 後退飛行示範')
-    expect(demoButtons.at(-2)).toHaveTextContent('L18 刀旗 S 彎示範')
-    expect(demoButtons.at(-1)).toHaveTextContent('L19 重力門示範')
+    expect(demoButtons).toHaveLength(23)
+    expect(demoButtons.at(-5)).toHaveTextContent('L16 倒刷鍋示範')
+    expect(demoButtons.at(-4)).toHaveTextContent('L17 後退飛行示範')
+    expect(demoButtons.at(-3)).toHaveTextContent('L18 刀旗 S 彎示範')
+    expect(demoButtons.at(-2)).toHaveTextContent('L19 重力門示範')
+    expect(demoButtons.at(-1)).toHaveTextContent('L20 騎牆示範')
     const initialAltitude = screen.getByTestId('flight-altitude').textContent
     const liveSteps = screen.getByRole('list', { name: '本課步驟' }).textContent
     const stored = () => Object.fromEntries(Object.entries(window.localStorage).filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.')))
@@ -855,7 +947,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(hud()).toHaveTextContent('即時')
     expect(frames.renderer!.scene.getObjectByName('backward-field')?.visible).toBe(true)
     expect(frames.runtime!.simulation.getStaticObstacles()).toHaveLength(0)
-    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(22)
+    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(23)
     const initialAltitude = screen.getByTestId('flight-altitude').textContent
     const liveSteps = screen.getByRole('list', { name: '本課步驟' }).textContent
     const stored = () => Object.fromEntries(Object.entries(window.localStorage).filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.')))
@@ -922,7 +1014,7 @@ describe('Free Flight native navigation confirmation', () => {
     expect(screen.getByTestId('orbit-progress')).toHaveTextContent('0°')
     expect(screen.getByTestId('orbit-radius')).toHaveTextContent('—')
     expect(screen.getByTestId('orbit-heading')).toHaveTextContent('—')
-    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(22)
+    expect(within(screen.getByLabelText('四軸與課程示範')).getAllByRole('button')).toHaveLength(23)
     expect(frames.renderer!.scene.getObjectByName('orbit-field')?.visible).toBe(true)
     expect(frames.renderer!.scene.getObjectByName('orbit-reference-tower')).toBeDefined()
     expect(frames.renderer!.flightScene.getReference('orbit-poi')?.object.visible).toBe(false)
@@ -1370,6 +1462,7 @@ describe('Free Flight native navigation confirmation', () => {
   it.each([
     { lessonId: 'wide-gate', code: 'L08', fieldName: 'wide-gate-field', colliderCount: 12, demoLabel: 'L08 穿門示範' },
     { lessonId: 'gravity-gate', code: 'L19', fieldName: 'gravity-gate-field', colliderCount: 16, demoLabel: 'L19 重力門示範' },
+    { lessonId: 'wall-ride', code: 'L20', fieldName: 'wall-ride-field', colliderCount: 1, demoLabel: 'L20 騎牆示範' },
   ])('keeps visible $code frames aligned with live colliders through Reset, Arm, replay and course changes', ({ lessonId, fieldName, demoLabel, colliderCount }) => {
     const settings = createDefaultTuningSettings()
     const props = { poller: createBrowserGamepadPoller(), profile: null, settings }

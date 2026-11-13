@@ -27,7 +27,9 @@ type RuntimeHarness = {
 
 const runtimeHarness = vi.hoisted(() => ({ instances: [] as RuntimeHarness[] }))
 
-vi.mock('../rendering', () => {
+vi.mock('../rendering', async () => {
+  const { createWallRide } = await import('../world/wallRide')
+  const wall = createWallRide({ x: 0, y: 0.046, z: 0 }, 0)
   const sceneReferences = [
     { id: 'takeoff-pad', kind: 'pad', positionM: { x: 0, y: 0.5, z: 0 }, sizeM: { x: 2.4, y: 0.08, z: 2.4 } },
     { id: 'hover-zone', kind: 'zone', positionM: { x: 0, y: 3, z: 0 }, sizeM: { x: 2.4, y: 0.04, z: 2.4 } },
@@ -44,6 +46,7 @@ vi.mock('../rendering', () => {
     { id: 'gravity-gate-frame', kind: 'gate', positionM: { x: 0, y: 9, z: -28 }, sizeM: { x: 8, y: 10, z: 8 } },
     { id: 'gravity-gate-top-entry', kind: 'marker', positionM: { x: 0, y: 14, z: -28 } },
     { id: 'gravity-gate-side-exit', kind: 'marker', positionM: { x: 0, y: 6.43, z: -24 } },
+    ...([['wall-ride-entry', wall.entryM], ['wall-ride-start', wall.rideStartM], ['wall-ride-end', wall.rideEndM], ['wall-ride-exit', wall.exitM]] as const).map(([id, positionM]) => ({ id, kind: 'marker', positionM })),
   ]
 
   class MockFlightRenderer {
@@ -321,8 +324,10 @@ describe('integrated training/runtime UI boundaries', () => {
     { lessonId: 'backward-flight', code: 'L17', steps: 7, nextCode: 'L18' },
     { lessonId: 'slalom', code: 'L18', steps: 10, nextCode: 'L19' },
     { lessonId: 'slalom', code: 'L18 一般設定', steps: 10, nextCode: 'L19', presetId: 'standard' },
-    { lessonId: 'gravity-gate', code: 'L19', steps: 8, nextCode: null },
-    { lessonId: 'gravity-gate', code: 'L19 一般設定', steps: 8, nextCode: null, presetId: 'standard' },
+    { lessonId: 'gravity-gate', code: 'L19', steps: 8, nextCode: 'L20' },
+    { lessonId: 'gravity-gate', code: 'L19 一般設定', steps: 8, nextCode: 'L20', presetId: 'standard' },
+    { lessonId: 'wall-ride', code: 'L20', steps: 8, nextCode: null },
+    { lessonId: 'wall-ride', code: 'L20 一般設定', steps: 8, nextCode: null, presetId: 'standard' },
   ] as const)('records an ordered $code result once and restores its current-rule progress after reload', (definition) => {
     const { lessonId, steps, nextCode } = definition
     const presetId = 'presetId' in definition && definition.presetId ? definition.presetId : 'beginner'
@@ -365,6 +370,16 @@ describe('integrated training/runtime UI boundaries', () => {
         .filter((saved) => (saved.progress?.lessons?.slalom?.attempts ?? 0) > 0)
       expect(own.map((saved) => saved.context?.rulesVersion)).toEqual([6])
       expect(persistedAttempts('backward-flight')).toBe(0)
+      expect(persistedAttempts('gravity-gate')).toBe(0)
+    }
+    if (lessonId === 'wall-ride') {
+      const savedRules = Object.entries(window.localStorage)
+        .filter(([key]) => key.startsWith('fpv-drone-trainer.training-progress.context.v1.'))
+        .map(([, raw]) => JSON.parse(raw) as { context?: { rulesVersion?: number }; progress?: { lessons?: Record<string, { attempts?: number }> } })
+        .filter((saved) => (saved.progress?.lessons?.['wall-ride']?.attempts ?? 0) > 0)
+        .map((saved) => saved.context?.rulesVersion)
+      expect(savedRules).toEqual([6])
+      expect(persistedAttempts('slalom')).toBe(0)
       expect(persistedAttempts('gravity-gate')).toBe(0)
     }
     if (lessonId === 'gravity-gate') {

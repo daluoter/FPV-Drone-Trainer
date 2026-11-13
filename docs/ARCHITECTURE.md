@@ -188,3 +188,6 @@ separates revised route/landing acceptance from earlier results.
 
 
 L18's `slalomFlags` world geometry is shared by the renderer, disarmed setup, normal-RC demo author and pure forward-route evaluator. Only L18 installs the six solid flag colliders; scene guidance never moves or steers the live drone. Current-episode route evidence, frozen interruption observations, historic learner scores and independent demonstration progress remain separate domains. The course is documented in [L18_SLALOM.md](L18_SLALOM.md).
+
+
+L20's `wallRide` module owns the immutable solid wall and its four reference anchors. Scene rendering, disarmed setup, the normal-RC demo author and the evaluator consume that shared geometry; neither guidance nor lesson state moves the live aircraft or changes the wall. The evaluator keeps current continuous belly-facing/gap/travel proof separate from historical checkpoint ticks, records first-cause interruption measurements, and requires outward departure before upright recovery. The renderer caches its eight-stage presentation across rebuilds, while live and replay HUD data retain independent sources. L20 adds the `wall-ride` rule-6 result scope without changing existing lesson IDs, rules, storage formats or the runtime's ownership. See [L20_WALL_RIDE.md](L20_WALL_RIDE.md).

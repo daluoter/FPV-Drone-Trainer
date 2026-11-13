@@ -263,6 +263,207 @@ def exercise_viewport_fullscreen(page, artifact_dir: Path, checks: list[str], re
     report["fullscreen"] = "viewport-only native and fallback entry/exit, playback, cameras and real input passed"
 
 
+def exercise_wall_ride_course(page, artifact_dir: Path, checks: list[str], report: dict, screenshot: bool = True) -> None:
+    """Observe the physical L20 flight and its independent playback through public controls."""
+    flight = page.locator("#free-flight")
+    training = page.locator("#training")
+    lesson = page.locator("#school-lesson")
+    source = flight.locator("#flight-input-source")
+    source.select_option("keyboard")
+    lesson.select_option("wall-ride")
+    expect(training.get_by_role("heading", name="騎牆", exact=True)).to_be_visible()
+    expect(training.locator(".school-route-guide")).to_contain_text("牆")
+    viewport = flight.locator(".free-flight-viewport")
+    canvas = flight.locator("canvas")
+    position = flight.get_by_role("group", name="飛行位置", exact=True)
+    hud = flight.get_by_role("group", name="騎牆即時狀態", exact=True)
+    timeline = flight.locator("#flight-replay-timeline")
+    arm = flight.get_by_role("button", name="Arm", exact=True)
+    disarm = flight.get_by_role("button", name="Disarm", exact=True)
+    original_canvas = canvas.element_handle()
+    original_steps = training.get_by_role("list", name="本課步驟", exact=True).get_by_role("listitem").all_text_contents()
+    if len(original_steps) != 8:
+        raise AssertionError(f"L20 must expose eight live checkpoints, got {len(original_steps)}.")
+    saved = training_progress(page)
+
+    def measured() -> dict:
+        ids = {"phase": "wall-ride-phase", "gap_m": "wall-ride-gap", "belly_angle_degrees": "wall-ride-belly-angle",
+            "distance_m": "wall-ride-distance", "seconds": "wall-ride-seconds", "forward_speed_mps": "wall-ride-speed",
+            "height_m": "flight-altitude", "x_m": "flight-position-right", "z_m": "flight-position-z"}
+        values = {}
+        for key, test_id in ids.items():
+            field = flight.get_by_test_id(test_id)
+            expect(field).to_be_visible()
+            match = re.match(r"^[+-]?\d+(?:\.\d+)?", field.inner_text())
+            if not match:
+                raise AssertionError(f"L20 measurement is not finite numeric text: {key}: {field.inner_text()!r}")
+            values[key] = float(match.group())
+        return values
+
+    def chapter(index: int, completed: int) -> dict:
+        chapters.nth(index).click()
+        expect(progress).to_contain_text(f"{completed} / 8 個示範步驟完成")
+        expect(flight.get_by_test_id("wall-ride-phase")).to_have_text(f"{completed} / 8 步")
+        return measured()
+
+    flight.get_by_role("button", name="L20 騎牆示範", exact=True).click()
+    expect(flight.get_by_role("button", name="0.5×", exact=True)).to_have_attribute("aria-pressed", "true")
+    expect(lesson).to_be_disabled()
+    expect(arm).to_be_disabled()
+    flight.get_by_role("button", name="Pause", exact=True).click()
+    progress = page.get_by_role("region", name="示範進度", exact=True)
+    chapters = progress.get_by_role("list", name="示範步驟", exact=True).get_by_role("button")
+    expect(chapters).to_have_count(8)
+    expect(training.get_by_role("list", name="本課步驟", exact=True)).to_have_count(0)
+    timeline.press("Home")
+    expect(flight.get_by_test_id("flight-altitude")).to_have_text("0.0 m")
+    home = measured()
+    if home["phase"] > 1 or home["distance_m"] != 0 or home["x_m"] != 0 or home["z_m"] != 0:
+        raise AssertionError(f"L20 recording does not begin at the actual grounded launch: {home}")
+    if screenshot:
+        viewport.screenshot(path=str(artifact_dir / "l20-ground-fpv.png"))
+    checks.append("L20 supported-ground recording, explicit live arm lock, half-speed and eight independent teaching steps")
+
+    belly = chapter(5, 5)
+    if not (.8 <= belly["gap_m"] <= 5.05 and 0 <= belly["belly_angle_degrees"] <= 45.1 and 3 <= belly["height_m"] <= 24.1):
+        raise AssertionError(f"L20 belly-facing chapter lacks the actual non-contact wall posture: {belly}")
+    if screenshot:
+        viewport.screenshot(path=str(artifact_dir / "l20-belly-facing-fpv.png"))
+    ride = chapter(6, 6)
+    if not (.8 <= ride["gap_m"] <= 5.05 and ride["belly_angle_degrees"] <= 45.1 and ride["distance_m"] >= 5.95 and ride["seconds"] >= .295):
+        raise AssertionError(f"L20 wall-travel chapter lacks continuous non-contact posture and distance/time proof: {ride}")
+    if belly["z_m"] - ride["z_m"] < 5.5 or ride["forward_speed_mps"] <= 0:
+        raise AssertionError(f"L20 motion did not progress forward along the real wall: {belly}, {ride}")
+    if screenshot:
+        viewport.screenshot(path=str(artifact_dir / "l20-along-wall-fpv.png"))
+    leaving = chapter(7, 7)
+    if leaving["gap_m"] < 5.45 or leaving["gap_m"] <= ride["gap_m"] or leaving["distance_m"] < 5.95:
+        raise AssertionError(f"L20 departure did not really gain clearance from the wall: {leaving}")
+    timeline.press("End")
+    expect(progress).to_contain_text("8 / 8 個示範步驟完成")
+    expect(flight.get_by_test_id("wall-ride-phase")).to_have_text("8 / 8 步")
+    end = measured()
+    duration = float(timeline.input_value())
+    if end["gap_m"] < 5.45 or end["distance_m"] < 5.95 or end["seconds"] < .295 or end["height_m"] < 1 or not (5 < duration <= 100):
+        raise AssertionError(f"L20 completion lacks retained real wall-travel, departure and airborne recovery: {end}, duration {duration}")
+    held_position = position.inner_text()
+    page.wait_for_timeout(180)
+    if measured() != end or position.inner_text() != held_position or abs(float(timeline.input_value()) - duration) > .02:
+        raise AssertionError("L20 paused completion changed its aircraft, observations or playback time.")
+    if screenshot:
+        viewport.screenshot(path=str(artifact_dir / "l20-complete-fpv.png"))
+    checks.append("L20 actual belly-to-wall posture, six metres of forward non-contact travel, outward departure and eight-step airborne completion")
+
+    restored_belly = chapter(5, 5)
+    if restored_belly != belly or restored_belly["distance_m"] >= 5.95:
+        raise AssertionError("L20 backward seek retained later travel or departure proof.")
+    held_time = float(timeline.input_value())
+    held_position = position.inner_text()
+    for name, suffix in (("FPV", "fpv"), ("Chase", "chase"), ("Free / debug", "free")):
+        button = flight.get_by_role("button", name=name, exact=True)
+        button.click()
+        expect(button).to_have_attribute("aria-pressed", "true")
+        if name == "Free / debug":
+            flight.get_by_role("button", name="定位飛機", exact=True).click()
+            canvas.scroll_into_view_if_needed()
+            box = canvas.bounding_box()
+            page.mouse.move(box["x"] + box["width"] * .65, box["y"] + box["height"] * .6)
+            page.mouse.wheel(0, 1800)
+            page.wait_for_timeout(100)
+            page.mouse.down(button="left")
+            page.mouse.move(box["x"] + box["width"] * .65 + 120, box["y"] + box["height"] * .6 - 20, steps=8)
+            page.mouse.up(button="left")
+        if screenshot:
+            viewport.screenshot(path=str(artifact_dir / f"l20-reference-{suffix}.png"))
+        if position.inner_text() != held_position or abs(float(timeline.input_value()) - held_time) > .02 or measured() != belly:
+            raise AssertionError(f"L20 {name} camera inspection changed the paused aircraft or recorded observations.")
+    flight.get_by_role("button", name="FPV", exact=True).click()
+    checks.append("L20 backward chapter seek and all three cameras restore the same independent observations without future progress")
+
+    def layout(label: str) -> dict:
+        boxes = {"viewport": viewport.bounding_box(), "hud": hud.bounding_box(), "position": position.bounding_box(),
+            "banner": flight.locator(".flight-safe-overlay").bounding_box(), "fullscreen": viewport.locator(".school-fullscreen").bounding_box()}
+        vp = boxes["viewport"]
+        if not vp or any(value is None for value in boxes.values()):
+            raise AssertionError(f"L20 display instruments have no bounds: {label}: {boxes}")
+        for key in ("hud", "position", "banner", "fullscreen"):
+            b = boxes[key]
+            if b["x"] < vp["x"] - .5 or b["y"] < vp["y"] - .5 or b["x"] + b["width"] > vp["x"] + vp["width"] + .5 or b["y"] + b["height"] > vp["y"] + vp["height"] + .5:
+                raise AssertionError(f"L20 {key} escapes its viewport: {label}: {boxes}")
+        keys = ("hud", "position", "banner", "fullscreen")
+        for index, key in enumerate(keys):
+            for other in keys[index + 1:]:
+                a, b = boxes[key], boxes[other]
+                overlap_x = min(a["x"] + a["width"], b["x"] + b["width"]) - max(a["x"], b["x"])
+                overlap_y = min(a["y"] + a["height"], b["y"] + b["height"]) - max(a["y"], b["y"])
+                if overlap_x > .1 and overlap_y > .1:
+                    raise AssertionError(f"L20 {key} overlaps {other}: {label}: {boxes}")
+        return boxes
+
+    report["wall_ride_hud_layouts"] = {}
+    for width, height in ((1280, 720), (1280, 600), (375, 720)):
+        page.set_viewport_size({"width": width, "height": height})
+        position.scroll_into_view_if_needed()
+        report["wall_ride_hud_layouts"][f"{width}x{height}"] = layout(f"{width}x{height}")
+        if page.evaluate("document.documentElement.scrollWidth > innerWidth + 1"):
+            raise AssertionError(f"L20 controls overflow the page at {width}x{height}.")
+        if screenshot:
+            viewport.screenshot(path=str(artifact_dir / f"l20-hud-{width}x{height}.png"))
+    for width, height in ((375, 720), (720, 375)):
+        page.set_viewport_size({"width": width, "height": height})
+        fullscreen = viewport.locator(".school-fullscreen")
+        fullscreen.click()
+        expect(fullscreen).to_have_attribute("aria-pressed", "true")
+        report["wall_ride_hud_layouts"][f"fullscreen-{width}x{height}"] = layout(f"fullscreen {width}x{height}")
+        if screenshot:
+            page.screenshot(path=str(artifact_dir / f"l20-fullscreen-{width}x{height}.png"))
+        page.keyboard.press("Escape")
+        expect(fullscreen).to_have_attribute("aria-pressed", "false")
+        if position.inner_text() != held_position or abs(float(timeline.input_value()) - held_time) > .02:
+            raise AssertionError("L20 fullscreen changed paused teaching state.")
+    page.set_viewport_size({"width": 1280, "height": 720})
+    checks.append("L20 wall/altitude instruments, playback status and exit control fit desktop, short desktop, mobile and flight-only fullscreen")
+
+    flight.get_by_role("button", name="結束示範", exact=True).click()
+    expect(arm).to_be_enabled()
+    expect(disarm).to_be_disabled()
+    expect(progress).to_have_count(0)
+    expect(training.get_by_role("list", name="本課步驟", exact=True).get_by_role("listitem")).to_have_text(original_steps)
+    if not original_canvas or not original_canvas.evaluate("element => element === document.querySelector('#free-flight canvas')"):
+        raise AssertionError("L20 teaching playback replaced the shared live canvas.")
+    if training_progress(page) != saved:
+        raise AssertionError("L20 teaching playback wrote a live result or attempt.")
+    page.reload(wait_until="networkidle")
+    expect(lesson).to_have_value("wall-ride")
+    source.select_option("keyboard")
+    expect(training.locator(".school-progress")).to_contain_text("已練 0 次")
+    if training_progress(page) != saved:
+        raise AssertionError("L20 reload changed stored learning results.")
+    checks.append("L20 same live canvas, unchanged checkpoints and learner results survive playback exit and saved selection reload")
+
+    developer = flight.get_by_role("checkbox", name="Developer HUD", exact=True)
+    developer.check()
+    dev_position = flight.locator(".flight-data-row").filter(has=page.get_by_text("Position m", exact=True)).locator("code")
+    training.get_by_role("button", name="開始課程", exact=True).click()
+    expect(training.locator(".school-phase")).to_have_text("等待解鎖", timeout=10_000)
+    coords = [float(value.strip()) for value in dev_position.inner_text().split(",")]
+    if len(coords) != 3 or abs(coords[0]) > .01 or abs(coords[2]) > .01 or not (0 < coords[1] < .15):
+        raise AssertionError(f"L20 live course did not start on supported ground: {coords}")
+    arm.click()
+    expect(training.locator(".school-phase")).to_have_text("練習進行中")
+    page.wait_for_timeout(250)
+    expect(flight.locator(".flight-state-badge")).not_to_contain_text("CRASHED")
+    expect(flight.get_by_test_id("wall-ride-distance")).to_have_text("0.0 / 6 m")
+    if screenshot:
+        viewport.screenshot(path=str(artifact_dir / "l20-live-ground.png"))
+    training.get_by_role("button", name="停止練習", exact=True).click()
+    expect(training.locator(".school-phase")).to_have_text("準備選課")
+    developer.uncheck()
+    report["wall_ride_course"] = {"home": home, "belly": belly, "ride": ride, "leaving": leaving, "end": end,
+        "duration_seconds": duration, "live_ground_position": coords}
+    checks.append("L20 live practice uses actual supported ground, explicit Arm and safe zero-throttle preparation")
+
+
 def exercise_slalom_course(page, artifact_dir: Path, checks: list[str], report: dict, screenshot: bool = True) -> None:
     """Verify L18 using public controls and recorded observations only."""
     flight = page.locator("#free-flight")
@@ -505,7 +706,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             if response is None or response.status != 200:
                 raise AssertionError("The production entry page did not return HTTP 200.")
             expect(page).to_have_title("FPV Drone Trainer")
-            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.11.11.1")
+            expect(page.get_by_test_id("app-release")).to_have_text("版本 2026.11.13.1")
             report["release"] = page.get_by_test_id("app-release").inner_text()
 
             asset_urls = page.locator("script[src], link[rel='stylesheet'][href]").evaluate_all(
@@ -671,13 +872,13 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(mode).to_have_value("practice")
             expect(lesson).to_have_value("takeoff")
             expect(lesson.locator("option:checked")).to_contain_text("L01")
-            expect(lesson.locator("option")).to_have_count(19)
+            expect(lesson.locator("option")).to_have_count(20)
             expect(lesson.locator("option[value='hover']")).to_have_count(0)
             expect(lesson.locator("option[value='full-flip']")).to_have_count(0)
             active_codes = lesson.locator("option").evaluate_all(
                 "options => options.map(option => option.textContent.trim().match(/^L\\d{2}/)?.[0])"
             )
-            if active_codes != ["L01", "L02", "L03", "L04", "L05", "L06", "L07", "L08", "L09", "L10", "L11", "L12", "L13", "L14", "L15", "L16", "L17", "L18", "L19"]:
+            if active_codes != ["L01", "L02", "L03", "L04", "L05", "L06", "L07", "L08", "L09", "L10", "L11", "L12", "L13", "L14", "L15", "L16", "L17", "L18", "L19", "L20"]:
                 raise AssertionError(f"Active course numbers do not match the merged curriculum: {active_codes}")
             report["active_course_codes"] = active_codes
             expect(training.get_by_role("heading", name="起飛與定點懸停", exact=True)).to_be_visible()
@@ -695,17 +896,19 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(lesson.locator("option[value='reverse-orbit']")).to_contain_text("L16")
             expect(lesson.locator("option[value='slalom']")).to_contain_text("L18")
             expect(lesson.locator("option[value='gravity-gate']")).to_contain_text("L19")
+            expect(lesson.locator("option[value='wall-ride']")).to_contain_text("L20")
             for option in lesson.locator("option").all_text_contents():
                 title = re.sub(r"^L\d{2}\s*[·：:]?\s*", "", option.strip())
                 if title not in {"破S", "刀旗 S 彎"} and re.search(r"[A-Za-z]", title):
                     raise AssertionError(f"A visible course title still contains English: {option}")
-            expect(flight.locator(".school-demo-toolbar").get_by_role("button")).to_have_count(22)
+            expect(flight.locator(".school-demo-toolbar").get_by_role("button")).to_have_count(23)
             expect(flight.get_by_role("button", name="L15 正刷鍋示範", exact=True)).to_be_visible()
             expect(flight.get_by_role("button", name="L16 倒刷鍋示範", exact=True)).to_be_visible()
             expect(flight.get_by_role("button", name="L17 後退飛行示範", exact=True)).to_be_visible()
             expect(flight.get_by_role("button", name="L18 刀旗 S 彎示範", exact=True)).to_be_visible()
             expect(flight.get_by_role("button", name="L19 重力門示範", exact=True)).to_be_visible()
-            checks.append("Chinese course titles including 破S and 刀旗 S 彎, nineteen active lessons and twenty-two distinct demonstrations in course order")
+            expect(flight.get_by_role("button", name="L20 騎牆示範", exact=True)).to_be_visible()
+            checks.append("Chinese course titles including 破S and 刀旗 S 彎, twenty active lessons and twenty-three distinct demonstrations in course order")
             progress_before_waiting = training_progress(page)
             training.get_by_role("button", name="開始課程", exact=True).click()
             expect(phase).to_have_text("倒數準備")
@@ -862,7 +1065,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             expect(training.locator(".school-progress")).to_contain_text("已練 1 次")
             if training_progress(page) != stored_attempts:
                 raise AssertionError("Changing learning mode modified stored flight results.")
-            checks.append("default practice mode, nineteen active lessons and persisted practice/challenge isolation")
+            checks.append("default practice mode, twenty active lessons and persisted practice/challenge isolation")
 
             # Answer the actual radios/form. Wrong answers must not unlock the
             # next step; knowledge completion is separate from flight progress.
@@ -1676,6 +1879,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 raise AssertionError(f"L13 does not begin with supported ground and zero loop dimensions: {home_loop}")
             loop_chapters = demo_progress.get_by_role("list", name="示範步驟", exact=True).get_by_role("button")
             loop_chapters.nth(3).click()
+            page.wait_for_function("parseFloat(document.querySelector('[data-testid=flight-altitude]')?.textContent || '0') >= 24")
             loop_entry_height = float(altitude.inner_text().split()[0])
             if loop_entry_height < 24:
                 raise AssertionError(f"L13 demonstration starts pulling the loop below the new 25 m recommendation: {loop_entry_height} m.")
@@ -2630,6 +2834,8 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
             checks.append("L19 measured entry and exit HUD preserves altitude/XYZ and playback banner on desktop, short desktop and mobile with all three camera modes")
             checks.append("L19 scene selection and unchanged live checkpoints persist across reload and separate L00 playback")
 
+            exercise_wall_ride_course(page, artifact_dir, checks, report, screenshot)
+
             # Ground-based lessons wait on actual supported ground and remain
             # safe after arm at zero throttle while the learner prepares to lift off.
             hud = flight.get_by_role("checkbox", name="Developer HUD", exact=True)
@@ -2638,7 +2844,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 has=page.get_by_text("Position m", exact=True)
             ).locator("code")
             report["ground_start_positions"] = {}
-            for lesson_id in ("landing", "straight-line", "direction-control", "coordinated-turn", "square-route", "figure-eight", "wide-gate", "basic-recovery", "full-roll", "front-flip", "back-flip", "power-loop", "split-s", "orbit", "reverse-orbit", "backward-flight", "slalom", "gravity-gate"):
+            for lesson_id in ("landing", "straight-line", "direction-control", "coordinated-turn", "square-route", "figure-eight", "wide-gate", "basic-recovery", "full-roll", "front-flip", "back-flip", "power-loop", "split-s", "orbit", "reverse-orbit", "backward-flight", "slalom", "gravity-gate", "wall-ride"):
                 lesson.select_option(lesson_id)
                 training.get_by_role("button", name="開始課程", exact=True).click()
                 coords = [float(value.strip()) for value in position.inner_text().split(",")]
@@ -2666,7 +2872,7 @@ def run_browser(url: str, artifact_dir: Path, executable: str | None, screenshot
                 expect(source).to_be_enabled()
             hud.uncheck()
             lesson.select_option("basic-recovery")
-            checks.append("L02/L03/L04/L05/L06/L07/L08/L09/L10/L11/L12/L13/L14/L15/L16/L17/L18/L19 actual ground start, safe low-throttle arm and visible stage guidance")
+            checks.append("L02/L03/L04/L05/L06/L07/L08/L09/L10/L11/L12/L13/L14/L15/L16/L17/L18/L19/L20 actual ground start, safe low-throttle arm and visible stage guidance")
 
             exercise_viewport_fullscreen(page, artifact_dir, checks, report, screenshot)
 

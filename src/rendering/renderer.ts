@@ -75,6 +75,7 @@ export class FlightRenderer {
   private backwardFlightStage: number | null = 0
   private reverseOrbitStage: number | null = 0
   private slalomStage: number | null = 0
+  private wallRideStage: number | null = 0
   private gravityGateStage: number | null = 0
   private gravityGateSide: GravityGateSide | null = null
   public get flightScene(): FlightScene { return this.currentFlightScene }
@@ -289,6 +290,13 @@ export class FlightRenderer {
     this.flightScene.setSlalomStage(stage)
   }
 
+  /** Highlight a non-contact wall pass without changing actual flight state. */
+  public setWallRideStage(stage: number | null): void {
+    if (this.disposed) return
+    this.wallRideStage = stage
+    this.flightScene.setWallRideStage(stage)
+  }
+
   /** Rebuild anchors only after the owner has explicitly reset and disarmed. */
   public reconfigureScene(config: DroneConfig): void {
     if (this.disposed) return
@@ -311,6 +319,7 @@ export class FlightRenderer {
     this.currentFlightScene.setGravityGateSide(this.gravityGateSide)
     this.currentFlightScene.setGravityGateStage(this.gravityGateStage)
     this.currentFlightScene.setSlalomStage(this.slalomStage)
+    this.currentFlightScene.setWallRideStage(this.wallRideStage)
     previous.dispose()
   }
 

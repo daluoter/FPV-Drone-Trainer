@@ -27,3 +27,6 @@ export * from './reverseOrbit'
 export * from './gravityGate'
 
 export * from './slalom'
+
+export * from './wallRide'
+export * from './wallRideFeedback'

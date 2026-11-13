@@ -22,10 +22,11 @@ import { recordReverseOrbitDemonstration } from './reverseOrbitDemonstration'
 import { recordBackwardFlightDemonstration } from './backwardFlightDemonstration'
 import { recordGravityGateDemonstration } from './gravityGateDemonstration'
 import { recordSlalomDemonstration } from './slalomDemonstration'
+import { recordWallRideDemonstration } from './wallRideDemonstration'
 import { BACK_FLIP_LESSON, FRONT_FLIP_LESSON, FULL_FLIP_LESSON } from './fullFlip'
 import { lessonLearningContent } from './catalog'
 
-export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'front-flip' | 'back-flip' | 'power-loop' | 'split-s' | 'orbit' | 'reverse-orbit' | 'backward-flight' | 'slalom' | 'gravity-gate' | 'roll' | 'pitch' | 'yaw'
+export type TeachingDemonstrationKind = 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'front-flip' | 'back-flip' | 'power-loop' | 'split-s' | 'orbit' | 'reverse-orbit' | 'backward-flight' | 'slalom' | 'gravity-gate' | 'wall-ride' | 'roll' | 'pitch' | 'yaw'
 
 export interface TeachingCue {
   readonly timeSeconds: number
@@ -41,12 +42,13 @@ export interface TeachingCue {
   readonly backwardPhase?: number
   readonly gravityGatePhase?: number
   readonly slalomPhase?: number
+  readonly wallRidePhase?: number
 }
 
 export interface TeachingDemonstration {
   readonly schemaVersion: 1
   readonly kind: TeachingDemonstrationKind
-  readonly lessonId: 'intro' | 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'front-flip' | 'back-flip' | 'power-loop' | 'split-s' | 'orbit' | 'reverse-orbit' | 'backward-flight' | 'slalom' | 'gravity-gate'
+  readonly lessonId: 'intro' | 'takeoff' | 'landing' | 'straight-line' | 'direction-control' | 'coordinated-turn' | 'square-route' | 'figure-eight' | 'wide-gate' | 'basic-recovery' | 'full-roll' | 'full-flip' | 'front-flip' | 'back-flip' | 'power-loop' | 'split-s' | 'orbit' | 'reverse-orbit' | 'backward-flight' | 'slalom' | 'gravity-gate' | 'wall-ride'
   readonly rulesVersion: TrainingAttemptContext['rulesVersion']
   readonly physicsVersion: 1
   readonly presetId: TuningPresetSelection
@@ -197,13 +199,24 @@ export function createTeachingDemonstration(
   kind: TeachingDemonstrationKind,
 ): TeachingDemonstration {
   if (!validateTuningSettings(settings).valid) throw new RangeError('示範設定未通過驗證，請先還原有效設定。')
-  if (!['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'reverse-orbit', 'backward-flight', 'slalom', 'gravity-gate', 'roll', 'pitch', 'yaw'].includes(kind)) {
+  if (!['takeoff', 'landing', 'straight-line', 'direction-control', 'coordinated-turn', 'square-route', 'figure-eight', 'wide-gate', 'basic-recovery', 'full-roll', 'full-flip', 'front-flip', 'back-flip', 'power-loop', 'split-s', 'orbit', 'reverse-orbit', 'backward-flight', 'slalom', 'gravity-gate', 'wall-ride', 'roll', 'pitch', 'yaw'].includes(kind)) {
     throw new RangeError('不支援此示範種類。')
   }
   const simulation = new FlightSimulation(flightSimulationConfigFromTuning(settings))
   const maximumThrust = settings.drone.motors.reduce((sum, motor) => sum + motor.maxThrustN, 0)
   if (settings.drone.massKg * settings.drone.gravityMps2 / maximumThrust >= 0.8) {
     throw new RangeError('目前推力不足以完成穩定示範，請檢查機體設定。')
+  }
+  if (kind === 'wall-ride') {
+    const { recording, cues } = recordWallRideDemonstration(simulation, settings, stickForRate)
+    return Object.freeze({
+      schemaVersion: 1, kind, lessonId: kind,
+      rulesVersion: trainingRulesVersionForLesson(kind), physicsVersion: 1,
+      presetId: identifyTuningPreset(settings), settingsFingerprint: fingerprintTrainingSettings(settings),
+      title: courseDemonstrationTitle(kind, '地面起飛、保留間隙貼牆飛行與回正離牆'),
+      description: '模擬示範，以實際搖桿、同一套物理與實體牆面，帶速進場、機腹朝牆、保留間隙沿牆飛過，再回正離牆；自然下沉，不吸附或自動定高。真人練習全程自行操控，觀看不計通關。',
+      source: 'simulated', recording, cues,
+    })
   }
   if (kind === 'slalom') {
     const { recording, cues } = recordSlalomDemonstration(simulation, settings, stickForRate, collectiveThrottle)
@@ -570,6 +583,18 @@ export function teachingSlalomPhaseAt(demonstration: TeachingDemonstration, time
     if (cue.timeSeconds > time + TEACHING_CLOCK_TOLERANCE_SECONDS) break
     const candidate = cue.slalomPhase
     if (typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 0 && candidate <= 10) phase = candidate
+  }
+  return phase
+}
+
+/** Wall-ride guidance follows the eight observed checkpoints on its own clock. */
+export function teachingWallRidePhaseAt(demonstration: TeachingDemonstration, timeSeconds: number): number | null {
+  if (demonstration.kind !== 'wall-ride') return null
+  let phase = 0
+  for (const cue of demonstration.cues) {
+    if (cue.timeSeconds > timeSeconds) break
+    const candidate = cue.wallRidePhase
+    if (candidate !== undefined && Number.isInteger(candidate) && candidate >= 0 && candidate <= 8) phase = candidate
   }
   return phase
 }

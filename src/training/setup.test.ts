@@ -3,6 +3,7 @@ import { DEFAULT_LESSONS } from './lessons'
 import { prepareTrainingSetup } from './setup'
 import type { TrainingSetupRequest } from './types'
 import { createSlalomFlags } from '../world/slalomFlags'
+import { createWallRide } from '../world/wallRide'
 import { createGravityGate } from '../world/gravityGate'
 
 function requestFor(lessonId: string): TrainingSetupRequest {
@@ -67,6 +68,25 @@ describe('reference-relative training setup', () => {
     expect(prepareTrainingSetup(request, references.slice(0, 1))).toBe(request)
     expect(prepareTrainingSetup(request, references.slice(1))).toBe(request)
   })
+  it('installs the same solid L20 wall from shifted launch and raised ground without changing the request', () => {
+    const request = requestFor('wall-ride')
+    const before = JSON.stringify(request)
+    const references = [
+      { id: 'training-launch', kind: 'pad', positionM: { x: 6, y: 5.05, z: -3 } },
+      { id: 'landing-surface', kind: 'zone', positionM: { x: 0, y: 5, z: 0 } },
+    ]
+    const prepared = prepareTrainingSetup(request, references)!
+    expect(prepared.setup.spawnPositionM).toEqual(references[0].positionM)
+    expect(prepared.setup.spawnOrientation).toEqual({ x: 0, y: 0, z: 0, w: 1 })
+    expect(prepared.setup.staticObstacles).toEqual(createWallRide(references[0].positionM, 5).colliders)
+    expect(prepared.setup.staticObstacles).toHaveLength(1)
+    expect(prepared.setup.staticObstacles?.[0]).toMatchObject({ id: 'wall-ride-wall', centerM: { x: 16.5, y: 19, z: -35 } })
+    expect(JSON.stringify(request)).toBe(before)
+    expect(prepareTrainingSetup(request, references.slice(0, 1))).toBe(request)
+    expect(prepareTrainingSetup(request, references.slice(1))).toBe(request)
+    expect(prepareTrainingSetup(requestFor('takeoff'), references)?.setup.staticObstacles).toBeUndefined()
+  })
+
   it('installs all six L18 physical flags from the same shifted launch and raised ground', () => {
     const request = requestFor('slalom')
     const before = JSON.stringify(request)
